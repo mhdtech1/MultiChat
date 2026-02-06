@@ -21,6 +21,12 @@ type AppSettings = {
   youtubeUsername?: string;
   youtubeApiKey?: string;
   youtubeLiveChatId?: string;
+  youtubeAlphaEnabled?: boolean;
+  tiktokAlphaEnabled?: boolean;
+  tiktokSessionId?: string;
+  tiktokTtTargetIdc?: string;
+  tiktokUsername?: string;
+  tiktokSignApiKey?: string;
   overlayTransparent?: boolean;
   verboseLogs?: boolean;
   columns?: number;
@@ -29,7 +35,7 @@ type AppSettings = {
   highlightKeywords?: string[];
   sessionSources?: Array<{
     id: string;
-    platform: "twitch" | "kick" | "youtube";
+    platform: "twitch" | "kick" | "youtube" | "tiktok";
     channel: string;
     key: string;
     liveChatId?: string;
@@ -48,13 +54,12 @@ type UpdateStatus = {
   message: string;
 };
 
-type ChatLogEntry = {
-  platform: "twitch" | "kick" | "youtube";
-  channel: string;
-  username: string;
-  displayName: string;
-  message: string;
-  timestamp: string;
+type TikTokRendererEvent = {
+  connectionId: string;
+  type: "connected" | "disconnected" | "chat" | "error";
+  roomId?: string;
+  message?: unknown;
+  error?: string;
 };
 
 type ElectronAPI = {
@@ -62,8 +67,6 @@ type ElectronAPI = {
   setSettings: (updates: AppSettings) => Promise<AppSettings>;
   writeLog: (message: string) => Promise<void>;
   toggleVerbose: (enabled: boolean) => Promise<void>;
-  appendChatLog: (entry: ChatLogEntry) => Promise<void>;
-  openChatLogsDir: () => Promise<string>;
   openOverlay: () => Promise<void>;
   closeOverlay: () => Promise<void>;
   openViewer: () => Promise<void>;
@@ -74,6 +77,8 @@ type ElectronAPI = {
   signOutKick: () => Promise<AppSettings>;
   signInYouTube: () => Promise<AppSettings>;
   signOutYouTube: () => Promise<AppSettings>;
+  signInTikTok: () => Promise<AppSettings>;
+  signOutTikTok: () => Promise<AppSettings>;
   resolveKickChatroom: (channel: string) => Promise<{ chatroomId: number }>;
   resolveYouTubeLiveChat: (channel: string) => Promise<{
     liveChatId: string;
@@ -87,6 +92,10 @@ type ElectronAPI = {
     items?: unknown[];
   }>;
   youtubeSendMessage: (payload: { liveChatId: string; message: string }) => Promise<void>;
+  tiktokConnect: (channel: string) => Promise<{ connectionId: string; roomId?: string }>;
+  tiktokDisconnect: (connectionId: string) => Promise<void>;
+  tiktokSendMessage: (payload: { connectionId: string; message: string }) => Promise<void>;
+  onTikTokEvent: (callback: (event: TikTokRendererEvent) => void) => () => void;
   checkForUpdates: () => Promise<UpdateStatus>;
   downloadUpdate: () => Promise<void>;
   installUpdate: () => Promise<void>;

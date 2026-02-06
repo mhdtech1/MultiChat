@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { ChatAdapter, ChatAdapterStatus, ChatMessage } from "@multichat/chat-core";
-import { KickAdapter, TwitchAdapter, YouTubeAdapter } from "@multichat/chat-core";
+import { KickAdapter, TikTokAdapter, TwitchAdapter, YouTubeAdapter } from "@multichat/chat-core";
 
 const mode = window.location.hash.replace("#", "");
 const broadcast = new BroadcastChannel("multichat-chat");
@@ -9,7 +9,7 @@ const hotkeys = {
   focusSearch: "Control+Shift+F"
 };
 
-type Platform = "twitch" | "kick" | "youtube";
+type Platform = "twitch" | "kick" | "youtube" | "tiktok";
 const SEND_TARGET_TAB_ALL = "__all_in_tab__";
 
 type Settings = {
@@ -34,6 +34,12 @@ type Settings = {
   youtubeTokenExpiry?: number;
   youtubeUsername?: string;
   youtubeLiveChatId?: string;
+  youtubeAlphaEnabled?: boolean;
+  tiktokAlphaEnabled?: boolean;
+  tiktokSessionId?: string;
+  tiktokTtTargetIdc?: string;
+  tiktokUsername?: string;
+  tiktokSignApiKey?: string;
   overlayTransparent?: boolean;
   verboseLogs?: boolean;
   hideCommands?: boolean;
@@ -82,6 +88,12 @@ type MessageMenuState = {
   message: ChatMessage;
 };
 
+type UserLogTarget = {
+  platform: "twitch" | "kick";
+  username: string;
+  displayName: string;
+};
+
 type ModeratorAction = "timeout_60" | "timeout_600" | "ban" | "unban" | "delete";
 
 const defaultSettings: Settings = {
@@ -105,6 +117,12 @@ const defaultSettings: Settings = {
   youtubeTokenExpiry: 0,
   youtubeUsername: "",
   youtubeLiveChatId: "",
+  youtubeAlphaEnabled: false,
+  tiktokAlphaEnabled: false,
+  tiktokSessionId: "",
+  tiktokTtTargetIdc: "",
+  tiktokUsername: "",
+  tiktokSignApiKey: "",
   overlayTransparent: true,
   verboseLogs: false,
   hideCommands: false,
@@ -112,12 +130,19 @@ const defaultSettings: Settings = {
   highlightKeywords: []
 };
 
+const hasTikTokSession = (settings: Settings) =>
+  Boolean((settings.tiktokSessionId ?? "").trim() && (settings.tiktokTtTargetIdc ?? "").trim());
+const normalizeUserKey = (value: string) => value.trim().toLowerCase();
+
 const createId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
 const normalizeChannel = (input: string, platform: Platform = "twitch") => {
   const trimmed = input.trim().replace(/^#/, "");
   if (platform === "youtube") {
     return trimmed.replace(/^@/, "");
+  }
+  if (platform === "tiktok") {
+    return trimmed.replace(/^@/, "").toLowerCase();
   }
   return trimmed.toLowerCase();
 };
@@ -127,7 +152,9 @@ const hasAuthForPlatform = (platform: Platform, settings: Settings) =>
     ? Boolean(settings.twitchToken || settings.twitchGuest)
     : platform === "kick"
       ? Boolean(settings.kickAccessToken || settings.kickGuest)
-      : Boolean(settings.youtubeAccessToken);
+      : platform === "youtube"
+        ? Boolean(settings.youtubeAlphaEnabled && settings.youtubeAccessToken)
+        : Boolean(settings.tiktokAlphaEnabled && hasTikTokSession(settings));
 
 const tabLabel = (tab: ChatTab, sourceById: Map<string, ChatSource>) => {
   const sources = tab.sourceIds.map((id) => sourceById.get(id)).filter(Boolean) as ChatSource[];
@@ -145,6 +172,7 @@ const platformIconGlyph = (platform: string) => {
   if (value === "twitch") return "T";
   if (value === "kick") return "K";
   if (value === "youtube") return "Y";
+  if (value === "tiktok") return "Ti";
   return "?";
 };
 
@@ -164,7 +192,9 @@ const sanitizeSessionSources = (value: Settings["sessionSources"]): ChatSource[]
     if (!entry || typeof entry !== "object") continue;
     const id = typeof entry.id === "string" ? entry.id.trim() : "";
     const platform: Platform | null =
-      entry.platform === "twitch" || entry.platform === "kick" || entry.platform === "youtube" ? entry.platform : null;
+      entry.platform === "twitch" || entry.platform === "kick" || entry.platform === "youtube" || entry.platform === "tiktok"
+        ? entry.platform
+        : null;
     const channel = typeof entry.channel === "string" ? normalizeChannel(entry.channel, platform ?? undefined) : "";
     if (!id || !platform || !channel) continue;
 
@@ -665,6 +695,8 @@ const MainApp: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [authBusy, setAuthBusy] = useState<Platform | null>(null);
   const [authMessage, setAuthMessage] = useState("");
+  const [tiktokApiKeyInput, setTikTokApiKeyInput] = useState("");
+  const [showTikTokKeyEditor, setShowTikTokKeyEditor] = useState(false);
 
   const [platformInput, setPlatformInput] = useState<Platform>("twitch");
   const [channelInput, setChannelInput] = useState("");
@@ -682,6 +714,7 @@ const MainApp: React.FC = () => {
   const [channelEmoteMapBySourceId, setChannelEmoteMapBySourceId] = useState<Record<string, EmoteMap>>({});
   const [tabMenu, setTabMenu] = useState<TabMenuState | null>(null);
   const [messageMenu, setMessageMenu] = useState<MessageMenuState | null>(null);
+  const [userLogTarget, setUserLogTarget] = useState<UserLogTarget | null>(null);
   const [sessionHydrated, setSessionHydrated] = useState(false);
   const [newestLocked, setNewestLocked] = useState(true);
   const [lockCutoffTimestamp, setLockCutoffTimestamp] = useState<number | null>(null);
@@ -714,7 +747,11 @@ const MainApp: React.FC = () => {
         const nextSettings = { ...defaultSettings, ...saved };
         setSettings(nextSettings);
 
-        const restoredSources = sanitizeSessionSources(saved.sessionSources);
+        const restoredSources = sanitizeSessionSources(saved.sessionSources).filter((source) => {
+          if (source.platform === "youtube" && !nextSettings.youtubeAlphaEnabled) return false;
+          if (source.platform === "tiktok" && !nextSettings.tiktokAlphaEnabled) return false;
+          return true;
+        });
         const restoredSourceIds = new Set(restoredSources.map((source) => source.id));
         const restoredTabs = sanitizeSessionTabs(saved.sessionTabs, restoredSourceIds);
         const restoredActiveTabId =
@@ -854,10 +891,23 @@ const MainApp: React.FC = () => {
     () => (activeTab ? activeTab.sourceIds.map((sourceId) => sourceById.get(sourceId)).filter(Boolean) as ChatSource[] : []),
     [activeTab, sourceById]
   );
+  const youtubeAlphaEnabled = Boolean(settings.youtubeAlphaEnabled);
+  const tiktokAlphaEnabled = Boolean(settings.tiktokAlphaEnabled);
+  const tiktokSignedIn = hasTikTokSession(settings);
   const authed = Boolean(
-    settings.twitchToken || settings.kickAccessToken || settings.youtubeAccessToken || settings.twitchGuest || settings.kickGuest
+    settings.twitchToken ||
+      settings.kickAccessToken ||
+      (youtubeAlphaEnabled && settings.youtubeAccessToken) ||
+      (tiktokAlphaEnabled && tiktokSignedIn) ||
+      settings.twitchGuest ||
+      settings.kickGuest
   );
-  const youtubeOAuthConfigured = Boolean(settings.youtubeClientId?.trim());
+  const youtubeOAuthConfigured = youtubeAlphaEnabled && Boolean(settings.youtubeClientId?.trim());
+  const tiktokSignApiKeyConfigured = Boolean((settings.tiktokSignApiKey ?? "").trim());
+
+  useEffect(() => {
+    setTikTokApiKeyInput(settings.tiktokSignApiKey ?? "");
+  }, [settings.tiktokSignApiKey]);
 
   const activeMessages = useMemo(() => {
     if (!activeTab) return [];
@@ -878,6 +928,17 @@ const MainApp: React.FC = () => {
     if (newestLocked) return 0;
     return Math.max(0, activeMessages.length - visibleMessages.length);
   }, [activeMessages.length, newestLocked, visibleMessages.length]);
+
+  const userLogMessages = useMemo(() => {
+    if (!userLogTarget) return [];
+    const username = normalizeUserKey(userLogTarget.username);
+    if (!username) return [];
+
+    const relevantSourceIds = sources.filter((source) => source.platform === userLogTarget.platform).map((source) => source.id);
+    const merged = relevantSourceIds.flatMap((sourceId) => messagesBySource[sourceId] ?? []);
+    const filtered = merged.filter((message) => normalizeUserKey(message.username) === username);
+    return filtered.sort((a, b) => messageTimestamp(b) - messageTimestamp(a)).slice(0, 500);
+  }, [messagesBySource, sources, userLogTarget]);
 
   useEffect(() => {
     const list = messageListRef.current;
@@ -922,7 +983,7 @@ const MainApp: React.FC = () => {
         },
         logger
       });
-    } else {
+    } else if (source.platform === "youtube") {
       adapter = new YouTubeAdapter({
         channel: source.channel,
         auth: {
@@ -938,6 +999,24 @@ const MainApp: React.FC = () => {
             window.electronAPI.youtubeSendMessage({
               liveChatId,
               message
+            })
+        },
+        logger
+      });
+    } else {
+      adapter = new TikTokAdapter({
+        channel: source.channel,
+        transport: {
+          connect: async ({ channel }) => window.electronAPI.tiktokConnect(channel),
+          disconnect: async ({ connectionId }) => window.electronAPI.tiktokDisconnect(connectionId),
+          sendMessage: async ({ connectionId, message }) =>
+            window.electronAPI.tiktokSendMessage({
+              connectionId,
+              message
+            }),
+          onEvent: (handler) =>
+            window.electronAPI.onTikTokEvent((event) => {
+              handler(event as any);
             })
         },
         logger
@@ -991,19 +1070,6 @@ const MainApp: React.FC = () => {
       }
 
       broadcast.postMessage(message);
-      void window.electronAPI
-        .appendChatLog({
-          platform: message.platform,
-          channel: message.channel,
-          username: message.username,
-          displayName: message.displayName,
-          message: message.message,
-          timestamp: message.timestamp
-        })
-        .catch((error) => {
-          const text = error instanceof Error ? error.message : String(error);
-          void window.electronAPI.writeLog(`[chatlog] append failed: ${text}`);
-        });
     });
 
     adaptersRef.current.set(source.id, adapter);
@@ -1156,15 +1222,6 @@ const MainApp: React.FC = () => {
     setTabMenu(null);
   };
 
-  const openChatLogsDir = async () => {
-    try {
-      const dir = await window.electronAPI.openChatLogsDir();
-      setAuthMessage(`Opened chat logs: ${dir}`);
-    } catch (error) {
-      setAuthMessage(error instanceof Error ? error.message : String(error));
-    }
-  };
-
   const checkForUpdatesNow = async () => {
     try {
       const status = await window.electronAPI.checkForUpdates();
@@ -1176,6 +1233,24 @@ const MainApp: React.FC = () => {
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : String(error));
     }
+  };
+
+  const openUserLogsForMessage = (message: ChatMessage) => {
+    if (message.platform !== "twitch" && message.platform !== "kick") {
+      setAuthMessage("User logs are only available for Twitch and Kick.");
+      return;
+    }
+    const username = message.username.trim();
+    if (!username || normalizeUserKey(username) === "system") {
+      setAuthMessage("No user log history is available for this message.");
+      return;
+    }
+    setUserLogTarget({
+      platform: message.platform,
+      username,
+      displayName: message.displayName || username
+    });
+    setMessageMenu(null);
   };
 
   const runModeratorAction = async (action: ModeratorAction, message: ChatMessage) => {
@@ -1196,8 +1271,9 @@ const MainApp: React.FC = () => {
       setAuthMessage("Chat connection is not ready for moderator commands.");
       return;
     }
-    if (source.platform === "youtube") {
-      setAuthMessage("YouTube moderation actions are not supported in this build.");
+    if (source.platform === "youtube" || source.platform === "tiktok") {
+      const platformLabel = source.platform === "youtube" ? "YouTube" : "TikTok";
+      setAuthMessage(`${platformLabel} moderation actions are not supported in this build.`);
       return;
     }
 
@@ -1235,19 +1311,6 @@ const MainApp: React.FC = () => {
         return { ...prev, [source.id]: updated };
       });
       broadcast.postMessage(systemMessage);
-      void window.electronAPI
-        .appendChatLog({
-          platform: systemMessage.platform,
-          channel: systemMessage.channel,
-          username: systemMessage.username,
-          displayName: systemMessage.displayName,
-          message: systemMessage.message,
-          timestamp: systemMessage.timestamp
-        })
-        .catch((error) => {
-          const text = error instanceof Error ? error.message : String(error);
-          void window.electronAPI.writeLog(`[chatlog] append failed: ${text}`);
-        });
     };
 
     try {
@@ -1345,6 +1408,12 @@ const MainApp: React.FC = () => {
         .map((entry) => `${entry.label}: ${entry.error}`)
         .join(" | ");
       const extraFailures = failed.length > 3 ? ` (+${failed.length - 3} more)` : "";
+      const needsTikTokKeySetup = failed.some((entry) =>
+        /tiktok|sign api key|api key/i.test(entry.label) || /sign api key|api key/i.test(entry.error)
+      );
+      if (needsTikTokKeySetup) {
+        setShowTikTokKeyEditor(true);
+      }
 
       if (sentCount > 0) {
         setAuthMessage(`Sent to ${sentCount}/${targetSourceIds.length}. Failed: ${failureSummary}${extraFailures}`);
@@ -1399,6 +1468,10 @@ const MainApp: React.FC = () => {
   };
 
   const signInYouTube = async () => {
+    if (!youtubeAlphaEnabled) {
+      setAuthMessage("YouTube is alpha-only in this build.");
+      return;
+    }
     if (!youtubeOAuthConfigured) {
       setAuthMessage("YouTube OAuth Client ID is missing in this build. Contact the app maintainer to enable YouTube sign-in.");
       return;
@@ -1411,6 +1484,27 @@ const MainApp: React.FC = () => {
       setAuthMessage(`Signed in to YouTube as ${next.youtubeUsername ?? "unknown user"} (oauth).`);
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setAuthBusy(null);
+    }
+  };
+
+  const signInTikTok = async () => {
+    if (!tiktokAlphaEnabled) {
+      setAuthMessage("TikTok is alpha-only in this build.");
+      return;
+    }
+    setAuthBusy("tiktok");
+    setAuthMessage("");
+    try {
+      const next = await window.electronAPI.signInTikTok();
+      setSettings({ ...defaultSettings, ...next });
+      const username = next.tiktokUsername?.trim() ? next.tiktokUsername : "signed-in user";
+      setAuthMessage(`Signed in to TikTok as ${username}.`);
+      setShowTikTokKeyEditor(false);
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : String(error));
+      setShowTikTokKeyEditor(true);
     } finally {
       setAuthBusy(null);
     }
@@ -1431,6 +1525,30 @@ const MainApp: React.FC = () => {
     setSettings({ ...defaultSettings, ...next });
   };
 
+  const signOutTikTok = async () => {
+    const next = await window.electronAPI.signOutTikTok();
+    setSettings({ ...defaultSettings, ...next });
+  };
+
+  const saveTikTokApiKey = async () => {
+    try {
+      const next = await window.electronAPI.setSettings({
+        tiktokSignApiKey: tiktokApiKeyInput.trim()
+      });
+      setSettings({ ...defaultSettings, ...next });
+      setAuthMessage(
+        (next.tiktokSignApiKey ?? "").trim()
+          ? "TikTok API key saved. You can now send messages in TikTok chats."
+          : "TikTok API key cleared."
+      );
+      if ((next.tiktokSignApiKey ?? "").trim()) {
+        setShowTikTokKeyEditor(false);
+      }
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : String(error));
+    }
+  };
+
   useEffect(() => {
     if (!authed) return;
     if (!hasAuthForPlatform(platformInput, settings)) {
@@ -1439,10 +1557,14 @@ const MainApp: React.FC = () => {
           ? "twitch"
           : settings.kickAccessToken || settings.kickGuest
             ? "kick"
-            : "youtube";
+            : youtubeAlphaEnabled && settings.youtubeAccessToken
+              ? "youtube"
+              : tiktokAlphaEnabled && tiktokSignedIn
+                ? "tiktok"
+                : "twitch";
       setPlatformInput(fallbackPlatform);
     }
-  }, [authed, platformInput, settings]);
+  }, [authed, platformInput, settings, tiktokAlphaEnabled, tiktokSignedIn, youtubeAlphaEnabled]);
 
   useEffect(() => {
     if (!sessionHydrated || sources.length === 0) return;
@@ -1497,7 +1619,7 @@ const MainApp: React.FC = () => {
       <div className="login-gate">
         <div className="login-card">
           <h1>MultiChat</h1>
-          <p>Sign in with Twitch or Kick first. YouTube sign-in works when this build includes YouTube OAuth credentials.</p>
+          <p>Sign in with Twitch, Kick, or TikTok first.</p>
           <div className="login-buttons">
             <button type="button" onClick={signInTwitch} disabled={authBusy !== null}>
               {authBusy === "twitch" ? "Signing in..." : "Sign in with Twitch"}
@@ -1505,15 +1627,26 @@ const MainApp: React.FC = () => {
             <button type="button" onClick={signInKick} disabled={authBusy !== null}>
               {authBusy === "kick" ? "Signing in..." : "Sign in with Kick"}
             </button>
-            <button type="button" onClick={signInYouTube} disabled={authBusy !== null || !youtubeOAuthConfigured}>
-              {authBusy === "youtube" ? "Signing in..." : youtubeOAuthConfigured ? "Sign in with YouTube" : "YouTube OAuth Missing"}
-            </button>
+            {tiktokAlphaEnabled ? (
+              <button type="button" onClick={signInTikTok} disabled={authBusy !== null}>
+                {authBusy === "tiktok" ? "Signing in..." : "Sign in with TikTok"}
+              </button>
+            ) : null}
+            {youtubeAlphaEnabled ? (
+              <button type="button" onClick={signInYouTube} disabled={authBusy !== null || !youtubeOAuthConfigured}>
+                {authBusy === "youtube" ? "Signing in..." : youtubeOAuthConfigured ? "Sign in with YouTube" : "YouTube OAuth Missing"}
+              </button>
+            ) : null}
           </div>
           {!settings.twitchClientId || !settings.kickClientId ? (
             <p className="login-warning">Managed OAuth credentials are missing for one or more platforms in this build.</p>
           ) : null}
-          {!youtubeOAuthConfigured ? (
+          {youtubeAlphaEnabled && !youtubeOAuthConfigured ? (
             <p className="login-warning">YouTube OAuth Client ID is missing in this build.</p>
+          ) : null}
+          {tiktokAlphaEnabled ? <p className="login-warning">TikTok LIVE is enabled as an alpha feature in this build.</p> : null}
+          {tiktokAlphaEnabled && !tiktokSignApiKeyConfigured && showTikTokKeyEditor ? (
+            <p className="login-warning">Add a TikTok Sign API key after login to enable sending messages.</p>
           ) : null}
           {authMessage ? <p className="login-message">{authMessage}</p> : null}
         </div>
@@ -1548,7 +1681,8 @@ const MainApp: React.FC = () => {
           >
             {settings.twitchToken || settings.twitchGuest ? <option value="twitch">[T] Twitch</option> : null}
             {settings.kickAccessToken || settings.kickGuest ? <option value="kick">[K] Kick</option> : null}
-            {settings.youtubeAccessToken ? <option value="youtube">[Y] YouTube</option> : null}
+            {youtubeAlphaEnabled && settings.youtubeAccessToken ? <option value="youtube">[Y] YouTube</option> : null}
+            {tiktokAlphaEnabled && tiktokSignedIn ? <option value="tiktok">[Ti] TikTok</option> : null}
           </select>
           <input
             value={channelInput}
@@ -1562,9 +1696,6 @@ const MainApp: React.FC = () => {
         <div className="top-actions">
           <button type="button" onClick={() => void checkForUpdatesNow()}>
             Check Updates
-          </button>
-          <button type="button" onClick={() => void openChatLogsDir()}>
-            Logs
           </button>
           <button type="button" onClick={() => window.electronAPI.openOverlay()}>
             Overlay
@@ -1584,10 +1715,33 @@ const MainApp: React.FC = () => {
           <PlatformIcon platform="kick" />
           Kick: {settings.kickUsername || "off"}
         </span>
-        <span className={settings.youtubeAccessToken ? "account-pill on" : "account-pill"}>
-          <PlatformIcon platform="youtube" />
-          YouTube: {settings.youtubeUsername || "off"}
-        </span>
+        {youtubeAlphaEnabled ? (
+          <span className={settings.youtubeAccessToken ? "account-pill on" : "account-pill"}>
+            <PlatformIcon platform="youtube" />
+            YouTube: {settings.youtubeUsername || "off"}
+          </span>
+        ) : null}
+        {tiktokAlphaEnabled ? (
+          <span className={tiktokSignedIn ? "account-pill on" : "account-pill"}>
+            <PlatformIcon platform="tiktok" />
+            TikTok: {tiktokSignedIn ? settings.tiktokUsername || "signed-in" : "off"}
+          </span>
+        ) : null}
+        {tiktokAlphaEnabled && showTikTokKeyEditor ? (
+          <div className="tiktok-api-key">
+            <input
+              type="password"
+              value={tiktokApiKeyInput}
+              onChange={(event) => setTikTokApiKeyInput(event.target.value)}
+              placeholder="TikTok Sign API Key"
+              autoCapitalize="off"
+              autoCorrect="off"
+            />
+            <button type="button" className="ghost" onClick={() => void saveTikTokApiKey()}>
+              Save TikTok Key
+            </button>
+          </div>
+        ) : null}
         {settings.twitchToken || settings.twitchGuest ? (
           <button type="button" className="ghost" onClick={() => void signOutTwitch()}>
             Sign out Twitch
@@ -1606,15 +1760,32 @@ const MainApp: React.FC = () => {
             {authBusy === "kick" ? "Signing in..." : "Sign in Kick"}
           </button>
         )}
-        {settings.youtubeAccessToken ? (
-          <button type="button" className="ghost" onClick={() => void signOutYouTube()}>
-            Sign out YouTube
-          </button>
-        ) : (
-          <button type="button" className="ghost" onClick={() => void signInYouTube()} disabled={authBusy !== null}>
-            {authBusy === "youtube" ? "Signing in..." : "Sign in YouTube"}
-          </button>
-        )}
+        {youtubeAlphaEnabled
+          ? settings.youtubeAccessToken
+            ? (
+                <button type="button" className="ghost" onClick={() => void signOutYouTube()}>
+                  Sign out YouTube
+                </button>
+              )
+            : (
+                <button type="button" className="ghost" onClick={() => void signInYouTube()} disabled={authBusy !== null}>
+                  {authBusy === "youtube" ? "Signing in..." : "Sign in YouTube"}
+                </button>
+              )
+          : null}
+        {tiktokAlphaEnabled
+          ? tiktokSignedIn
+            ? (
+                <button type="button" className="ghost" onClick={() => void signOutTikTok()}>
+                  Sign out TikTok
+                </button>
+              )
+            : (
+                <button type="button" className="ghost" onClick={() => void signInTikTok()} disabled={authBusy !== null}>
+                  {authBusy === "tiktok" ? "Signing in..." : "Sign in TikTok"}
+                </button>
+              )
+          : null}
       </div>
 
       <nav className="tabbar">
@@ -1672,7 +1843,7 @@ const MainApp: React.FC = () => {
         {!activeTab ? (
           <div className="empty-state">
             <h2>No tabs open</h2>
-            <p>Enter a Twitch, Kick, or YouTube channel username above to create a new tab.</p>
+            <p>Enter a channel username above to create a new tab.</p>
           </div>
         ) : (
           <>
@@ -1835,6 +2006,12 @@ const MainApp: React.FC = () => {
               Delete message
             </button>
           ) : null}
+          {(messageMenu.message.platform === "twitch" || messageMenu.message.platform === "kick") &&
+          normalizeUserKey(messageMenu.message.username) !== "system" ? (
+            <button type="button" onClick={() => openUserLogsForMessage(messageMenu.message)}>
+              View User Logs
+            </button>
+          ) : null}
           <strong>Copy</strong>
           <button type="button" onClick={() => navigator.clipboard.writeText(messageMenu.message.displayName)}>
             Copy name
@@ -1845,6 +2022,39 @@ const MainApp: React.FC = () => {
           <button type="button" onClick={() => setMessageMenu(null)}>
             Close
           </button>
+        </div>
+      ) : null}
+
+      {userLogTarget ? (
+        <div className="user-logs-overlay" onClick={() => setUserLogTarget(null)}>
+          <div className="user-logs-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="user-logs-header">
+              <div>
+                <strong>
+                  {userLogTarget.platform.toUpperCase()} logs for {userLogTarget.displayName}
+                </strong>
+                <span>@{userLogTarget.username}</span>
+              </div>
+              <button type="button" className="ghost" onClick={() => setUserLogTarget(null)}>
+                Close
+              </button>
+            </div>
+            <p className="user-logs-note">Session-only history. Nothing is saved to local log files.</p>
+            <div className="user-logs-list">
+              {userLogMessages.length === 0 ? (
+                <p className="user-logs-empty">No messages from this user in the current session yet.</p>
+              ) : (
+                userLogMessages.map((message) => (
+                  <div key={`${message.id}-${message.timestamp}-${message.channel}`} className="user-log-line">
+                    <span className="user-log-meta">
+                      {new Date(message.timestamp).toLocaleString()} · {message.platform}/{message.channel}
+                    </span>
+                    <span className="user-log-text">{message.message}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         </div>
       ) : null}
 

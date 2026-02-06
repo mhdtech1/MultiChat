@@ -23,6 +23,12 @@ type AppSettings = {
   youtubeUsername?: string;
   youtubeApiKey?: string;
   youtubeLiveChatId?: string;
+  youtubeAlphaEnabled?: boolean;
+  tiktokAlphaEnabled?: boolean;
+  tiktokSessionId?: string;
+  tiktokTtTargetIdc?: string;
+  tiktokUsername?: string;
+  tiktokSignApiKey?: string;
   overlayTransparent?: boolean;
   verboseLogs?: boolean;
   columns?: number;
@@ -31,7 +37,7 @@ type AppSettings = {
   highlightKeywords?: string[];
   sessionSources?: Array<{
     id: string;
-    platform: "twitch" | "kick" | "youtube";
+    platform: "twitch" | "kick" | "youtube" | "tiktok";
     channel: string;
     key: string;
     liveChatId?: string;
@@ -50,13 +56,12 @@ type UpdateStatus = {
   message: string;
 };
 
-type ChatLogEntry = {
-  platform: "twitch" | "kick" | "youtube";
-  channel: string;
-  username: string;
-  displayName: string;
-  message: string;
-  timestamp: string;
+type TikTokRendererEvent = {
+  connectionId: string;
+  type: "connected" | "disconnected" | "chat" | "error";
+  roomId?: string;
+  message?: unknown;
+  error?: string;
 };
 
 const api = {
@@ -64,8 +69,6 @@ const api = {
   setSettings: (updates: AppSettings): Promise<AppSettings> => ipcRenderer.invoke("settings:set", updates),
   writeLog: (message: string): Promise<void> => ipcRenderer.invoke("log:write", message),
   toggleVerbose: (enabled: boolean): Promise<void> => ipcRenderer.invoke("log:toggle", enabled),
-  appendChatLog: (entry: ChatLogEntry): Promise<void> => ipcRenderer.invoke("chatlog:append", entry),
-  openChatLogsDir: (): Promise<string> => ipcRenderer.invoke("chatlog:openDir"),
   openOverlay: (): Promise<void> => ipcRenderer.invoke("overlay:open"),
   closeOverlay: (): Promise<void> => ipcRenderer.invoke("overlay:close"),
   openViewer: (): Promise<void> => ipcRenderer.invoke("viewer:open"),
@@ -76,6 +79,8 @@ const api = {
   signOutKick: (): Promise<AppSettings> => ipcRenderer.invoke("auth:kick:signOut"),
   signInYouTube: (): Promise<AppSettings> => ipcRenderer.invoke("auth:youtube:signIn"),
   signOutYouTube: (): Promise<AppSettings> => ipcRenderer.invoke("auth:youtube:signOut"),
+  signInTikTok: (): Promise<AppSettings> => ipcRenderer.invoke("auth:tiktok:signIn"),
+  signOutTikTok: (): Promise<AppSettings> => ipcRenderer.invoke("auth:tiktok:signOut"),
   resolveKickChatroom: (channel: string): Promise<{ chatroomId: number }> =>
     ipcRenderer.invoke("kick:resolveChatroom", channel),
   resolveYouTubeLiveChat: (channel: string): Promise<{ liveChatId: string; channelId: string; channelTitle: string; videoId: string }> =>
@@ -87,6 +92,18 @@ const api = {
   }> => ipcRenderer.invoke("youtube:fetchMessages", payload),
   youtubeSendMessage: (payload: { liveChatId: string; message: string }): Promise<void> =>
     ipcRenderer.invoke("youtube:sendMessage", payload),
+  tiktokConnect: (channel: string): Promise<{ connectionId: string; roomId?: string }> =>
+    ipcRenderer.invoke("tiktok:connect", channel),
+  tiktokDisconnect: (connectionId: string): Promise<void> => ipcRenderer.invoke("tiktok:disconnect", connectionId),
+  tiktokSendMessage: (payload: { connectionId: string; message: string }): Promise<void> =>
+    ipcRenderer.invoke("tiktok:sendMessage", payload),
+  onTikTokEvent: (callback: (event: TikTokRendererEvent) => void): (() => void) => {
+    const listener = (_event: unknown, payload: TikTokRendererEvent) => {
+      callback(payload);
+    };
+    ipcRenderer.on("tiktok:event", listener);
+    return () => ipcRenderer.removeListener("tiktok:event", listener);
+  },
   checkForUpdates: (): Promise<UpdateStatus> => ipcRenderer.invoke("updates:check"),
   downloadUpdate: (): Promise<void> => ipcRenderer.invoke("updates:download"),
   installUpdate: (): Promise<void> => ipcRenderer.invoke("updates:install"),

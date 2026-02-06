@@ -5,40 +5,61 @@ files:
   - dist/preload/**
   - dist/renderer/**
   - node_modules/@multichat/**
-  - node_modules/builder-util-runtime/**
   - package.json
-  - from: ../../node_modules/electron-updater
-    to: node_modules/electron-updater
-  - from: ../../node_modules/builder-util-runtime
-    to: node_modules/builder-util-runtime
-  - from: ../../node_modules/fs-extra
-    to: node_modules/fs-extra
-  - from: ../../node_modules/graceful-fs
-    to: node_modules/graceful-fs
-  - from: ../../node_modules/jsonfile
-    to: node_modules/jsonfile
-  - from: ../../node_modules/universalify
-    to: node_modules/universalify
-  - from: ../../node_modules/js-yaml
-    to: node_modules/js-yaml
-  - from: ../../node_modules/argparse
-    to: node_modules/argparse
-  - from: ../../node_modules/lazy-val
-    to: node_modules/lazy-val
-  - from: ../../node_modules/lodash.escaperegexp
-    to: node_modules/lodash.escaperegexp
-  - from: ../../node_modules/lodash.isequal
-    to: node_modules/lodash.isequal
-  - from: ../../node_modules/semver
-    to: node_modules/semver
-  - from: ../../node_modules/tiny-typed-emitter
-    to: node_modules/tiny-typed-emitter
-  - from: ../../node_modules/debug
-    to: node_modules/debug
-  - from: ../../node_modules/ms
-    to: node_modules/ms
-  - from: ../../node_modules/sax
-    to: node_modules/sax
+  - from: ../../node_modules
+    to: node_modules
+    filter:
+      - electron-updater/**
+      - builder-util-runtime/**
+      - fs-extra/**
+      - graceful-fs/**
+      - jsonfile/**
+      - universalify/**
+      - js-yaml/**
+      - argparse/**
+      - lazy-val/**
+      - lodash.escaperegexp/**
+      - lodash.isequal/**
+      - semver/**
+      - tiny-typed-emitter/**
+      - debug/**
+      - ms/**
+      - sax/**
+      - tiktok-live-connector/**
+      - axios/**
+      - callable-instance/**
+      - protobufjs/**
+      - typed-emitter/**
+      - eventemitter3/**
+      - ws/**
+      - follow-redirects/**
+      - form-data/**
+      - proxy-from-env/**
+      - asynckit/**
+      - combined-stream/**
+      - delayed-stream/**
+      - mime-types/**
+      - mime-db/**
+      - long/**
+      - rxjs/**
+      - tslib/**
+      - es-set-tostringtag/**
+      - hasown/**
+      - call-bind-apply-helpers/**
+      - es-define-property/**
+      - es-errors/**
+      - es-object-atoms/**
+      - function-bind/**
+      - get-intrinsic/**
+      - get-proto/**
+      - gopd/**
+      - has-symbols/**
+      - has-tostringtag/**
+      - math-intrinsics/**
+      - dunder-proto/**
+      - "@bufbuild/**"
+      - "@eulerstream/**"
+      - "@protobufjs/**"
 extraResources:
   - from: ../../.env.example
     to: .env.example
