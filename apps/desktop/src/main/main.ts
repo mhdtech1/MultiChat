@@ -145,9 +145,20 @@ const randomToken = (bytes = 32) => crypto.randomBytes(bytes).toString("base64ur
 
 const fetchJsonOrThrow = async <T>(response: Response, source: string): Promise<T> => {
   const text = await response.text();
-  const parsed = text ? JSON.parse(text) : {};
+  let parsed: any = {};
+  if (text) {
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = {};
+    }
+  }
   if (!response.ok) {
-    const message = typeof parsed?.message === "string" ? parsed.message : `${source} request failed (${response.status}).`;
+    const message =
+      (typeof parsed?.message === "string" && parsed.message) ||
+      (typeof parsed?.error?.message === "string" && parsed.error.message) ||
+      (typeof parsed?.error_description === "string" && parsed.error_description) ||
+      `${source} request failed (${response.status}).`;
     throw new Error(message);
   }
   return parsed as T;
@@ -168,6 +179,21 @@ const sendAuthHtml = (response: ServerResponse<IncomingMessage>, statusCode: num
   response.end(html);
 };
 
+function bringAppToFrontAfterOAuth() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+    if (!mainWindow.isVisible()) {
+      mainWindow.show();
+    }
+    mainWindow.focus();
+  }
+  if (app.isReady()) {
+    app.focus({ steal: true });
+  }
+}
+
 const authCompletePage = `
 <!doctype html>
 <html lang="en">
@@ -184,9 +210,17 @@ const authCompletePage = `
   </head>
   <body>
     <main class="card">
-      <h1>Sign-in complete</h1>
-      <p>You can close this browser tab and return to MultiChat.</p>
+      <h1>Returning to MultiChat</h1>
+      <p>This tab will close automatically. If it stays open, you can close it manually.</p>
     </main>
+    <script>
+      (() => {
+        setTimeout(() => {
+          window.open("", "_self");
+          window.close();
+        }, 250);
+      })();
+    </script>
   </body>
 </html>
 `;
@@ -243,31 +277,32 @@ const openAuthInBrowser = async (authUrl: string, redirectUri: string): Promise<
     const server = createServer((request, response) => {
       const incoming = new URL(request.url ?? "/", redirect.origin);
       const incomingPath = normalizePathname(incoming.pathname);
-
-      if (incomingPath !== callbackPath) {
-        sendAuthHtml(response, 404, "<h1>Not found</h1>");
-        return;
-      }
-
       const oauthFragment = incoming.searchParams.get("oauth_fragment");
       const hasDirectCallbackParams =
         incoming.searchParams.has("code") ||
         incoming.searchParams.has("error") ||
         incoming.searchParams.has("state");
+      const isExpectedPath = incomingPath === callbackPath;
+      const hasOAuthPayload = Boolean(oauthFragment && oauthFragment.length > 0) || hasDirectCallbackParams;
+
+      if (!isExpectedPath && !hasOAuthPayload) {
+        sendAuthHtml(response, 404, "<h1>Not found</h1>");
+        return;
+      }
 
       if (oauthFragment && oauthFragment.length > 0) {
         sendAuthHtml(response, 200, authCompletePage);
-        finish(`${redirect.origin}${redirect.pathname}#${oauthFragment}`);
+        finish(`${redirect.origin}${incoming.pathname}#${oauthFragment}`);
         return;
       }
 
       if (hasDirectCallbackParams) {
         sendAuthHtml(response, 200, authCompletePage);
-        finish(`${redirect.origin}${redirect.pathname}${incoming.search}`);
+        finish(`${redirect.origin}${incoming.pathname}${incoming.search}`);
         return;
       }
 
-      sendAuthHtml(response, 200, authHashBridgePage(redirect.pathname));
+      sendAuthHtml(response, 200, authHashBridgePage(incoming.pathname));
     });
 
     const timeout = setTimeout(() => {
@@ -284,6 +319,7 @@ const openAuthInBrowser = async (authUrl: string, redirectUri: string): Promise<
       if (settled) return;
       settled = true;
       closeServer();
+      bringAppToFrontAfterOAuth();
       if (error) {
         reject(error);
         return;
@@ -1414,12 +1450,18 @@ app.whenReady().then(() => {
       expiresIn: tokens.expires_in
     });
 
-    const channelResponse = await youtubeFetchWithAuth(
-      "https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true&maxResults=1"
-    );
-    const channelPayload = await fetchJsonOrThrow<YouTubeChannelsResponse>(channelResponse, "YouTube profile");
-    const first = Array.isArray(channelPayload.items) ? channelPayload.items[0] : undefined;
-    const username = first?.snippet?.title?.trim() ?? "";
+    let username = store.get("youtubeUsername")?.trim() ?? "";
+    try {
+      const channelResponse = await youtubeFetchWithAuth(
+        "https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true&maxResults=1"
+      );
+      const channelPayload = await fetchJsonOrThrow<YouTubeChannelsResponse>(channelResponse, "YouTube profile");
+      const first = Array.isArray(channelPayload.items) ? channelPayload.items[0] : undefined;
+      username = first?.snippet?.title?.trim() ?? username;
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      console.warn(`[youtube] profile lookup skipped after sign-in: ${detail}`);
+    }
 
     store.set({
       youtubeUsername: username,
