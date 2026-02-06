@@ -13,7 +13,9 @@ directories:
   buildResources: public
 asar: true
 mac:
-  target: dmg
+  target:
+    - dmg
+    - zip
   artifactName: ${productName}-mac-${version}.${ext}
   category: public.app-category.social-networking
 win:
