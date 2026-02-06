@@ -1,6 +1,6 @@
 {
   "name": "@multichat/desktop",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "type": "module",
   "main": "dist/main/main.js",
@@ -9,8 +9,8 @@
     "build": "pnpm run build:renderer && pnpm run build:main && pnpm run package",
     "build:renderer": "vite build",
     "build:main": "tsc -p tsconfig.main.json",
-    "package": "electron-builder --config electron-builder.yml",
-    "package:mac": "electron-builder --config electron-builder.yml --mac dmg",
+    "package": "electron-builder --config electron-builder.yml && node ../../scripts/prepare-mac-update-artifacts.mjs",
+    "package:mac": "electron-builder --config electron-builder.yml --mac dmg && node ../../scripts/prepare-mac-update-artifacts.mjs",
     "package:win": "electron-builder --config electron-builder.yml --win nsis --x64",
     "test": "node ../../scripts/smoke-test.mjs",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
