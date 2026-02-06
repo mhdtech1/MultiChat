@@ -2,6 +2,11 @@
 
 Creator-facing and viewer-facing multi-chat desktop app built with Electron + Vite + React + TypeScript.
 
+## Download Installers
+
+- macOS (DMG): [Download MultiChat for macOS](https://github.com/mhdtech1/MultiChat/releases/latest/download/MultiChat-mac.dmg)
+- Windows (EXE): [Download MultiChat for Windows](https://github.com/mhdtech1/MultiChat/releases/latest/download/MultiChat-win.exe)
+
 ## Features
 
 - Multi-column chat (1–4 columns) with channel tabs, search, and filters.

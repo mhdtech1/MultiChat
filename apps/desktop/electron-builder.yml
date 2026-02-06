@@ -16,10 +16,11 @@ mac:
   target:
     - dmg
     - zip
-  artifactName: ${productName}-mac-${version}.${ext}
+  artifactName: ${productName}-mac.${ext}
   category: public.app-category.social-networking
 win:
   target: nsis
+  artifactName: ${productName}-win.${ext}
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
