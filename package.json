@@ -1,0 +1,23 @@
+{
+  "name": "multichat",
+  "private": true,
+  "packageManager": "pnpm@9.12.3",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "pnpm --filter @multichat/desktop dev",
+    "clean": "rm -rf node_modules .pnpm-store apps/desktop/dist packages/chat-core/dist",
+    "build": "pnpm --filter @multichat/chat-core build && pnpm --filter @multichat/desktop build",
+    "build:mac": "pnpm --filter @multichat/chat-core build && pnpm --filter @multichat/desktop build:renderer && pnpm --filter @multichat/desktop build:main && pnpm --filter @multichat/desktop package:mac",
+    "build:win": "pnpm --filter @multichat/chat-core build && pnpm --filter @multichat/desktop build:renderer && pnpm --filter @multichat/desktop build:main && pnpm --filter @multichat/desktop package:win",
+    "recreate:mac": "pnpm run clean && pnpm install && pnpm build:mac",
+    "test": "pnpm --filter @multichat/chat-core test && pnpm --filter @multichat/desktop test",
+    "lint": "pnpm -r lint",
+    "format": "pnpm -r format"
+  }
+}

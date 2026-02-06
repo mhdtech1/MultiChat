@@ -1,0 +1,27 @@
+appId: com.multichat.desktop
+productName: MultiChat
+files:
+  - dist/main/**
+  - dist/preload/**
+  - dist/renderer/**
+  - node_modules/**
+  - package.json
+extraResources:
+  - from: ../../.env.example
+    to: .env.example
+directories:
+  buildResources: public
+asar: true
+mac:
+  target: dmg
+  artifactName: ${productName}-mac-${version}.${ext}
+  category: public.app-category.social-networking
+win:
+  target: nsis
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+publish:
+  provider: github
+  owner: mhdtech1
+  repo: MultiChat
