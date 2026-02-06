@@ -11,7 +11,7 @@
     "build:main": "tsc -p tsconfig.main.json",
     "package": "electron-builder --config electron-builder.yml",
     "package:mac": "electron-builder --config electron-builder.yml --mac dmg",
-    "package:win": "electron-builder --config electron-builder.yml --win nsis",
+    "package:win": "electron-builder --config electron-builder.yml --win nsis --x64",
     "test": "node ../../scripts/smoke-test.mjs",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "format": "prettier --check \"src/**/*.{ts,tsx,css,html}\""

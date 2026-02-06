@@ -52,7 +52,10 @@ mac:
   artifactName: ${productName}-mac.${ext}
   category: public.app-category.social-networking
 win:
-  target: nsis
+  target:
+    - target: nsis
+      arch:
+        - x64
   artifactName: ${productName}-win.${ext}
 nsis:
   oneClick: false
