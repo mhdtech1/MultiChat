@@ -71,6 +71,8 @@ type ChatLogEntry = {
 
 const DEV_UPDATE_MESSAGE = "Auto updates are available in packaged builds only.";
 const DEFAULT_UPDATE_MESSAGE = "Checking for updates shortly...";
+const LEGACY_SIGNATURE_UPDATE_MESSAGE =
+  "Updater could not apply this update due to a legacy app signature. Download and install the latest MultiChat release once from GitHub; future restart updates will then work.";
 const TWITCH_DEFAULT_REDIRECT_URI = "http://localhost:51730/twitch/callback";
 const KICK_DEFAULT_REDIRECT_URI = "http://localhost:51730/kick/callback";
 const YOUTUBE_DEFAULT_REDIRECT_URI = "http://localhost:51730/youtube/callback";
@@ -314,6 +316,19 @@ const parseKickUserName = (response: unknown): string | undefined => {
   if (typeof record.slug === "string" && record.slug.length > 0) return record.slug;
 
   return undefined;
+};
+
+const formatUpdaterErrorMessage = (errorText: string) => {
+  const lower = errorText.toLowerCase();
+  if (
+    lower.includes("code signature") ||
+    lower.includes("code requirement") ||
+    lower.includes("shipit") ||
+    lower.includes("did not pass validation")
+  ) {
+    return LEGACY_SIGNATURE_UPDATE_MESSAGE;
+  }
+  return `Updater error: ${errorText}`;
 };
 
 const parseKickChatroomId = (payload: unknown): number | null => {
@@ -807,7 +822,7 @@ const requestUpdateCheck = async () => {
     await autoUpdater.checkForUpdates();
   } catch (error) {
     const text = error instanceof Error ? error.message : String(error);
-    setUpdateStatus("error", `Update check failed: ${text}`);
+    setUpdateStatus("error", formatUpdaterErrorMessage(text));
   }
   return updateStatus;
 };
@@ -974,7 +989,7 @@ const setupAutoUpdater = () => {
   });
   autoUpdater.on("error", (error) => {
     const text = error instanceof Error ? error.message : String(error);
-    setUpdateStatus("error", `Updater error: ${text}`);
+    setUpdateStatus("error", formatUpdaterErrorMessage(text));
   });
 
   setUpdateStatus("idle", DEFAULT_UPDATE_MESSAGE);
