@@ -73,6 +73,8 @@ const DEV_UPDATE_MESSAGE = "Auto updates are available in packaged builds only."
 const DEFAULT_UPDATE_MESSAGE = "Checking for updates shortly...";
 const LEGACY_SIGNATURE_UPDATE_MESSAGE =
   "Updater could not apply this update due to a legacy app signature. Download and install the latest MultiChat release once from GitHub; future restart updates will then work.";
+const YOUTUBE_MISSING_OAUTH_MESSAGE =
+  "YouTube sign-in is not configured in this build. Configure a YouTube OAuth Client ID (secret optional) and try again.";
 const TWITCH_DEFAULT_REDIRECT_URI = "http://localhost:51730/twitch/callback";
 const KICK_DEFAULT_REDIRECT_URI = "http://localhost:51730/kick/callback";
 const YOUTUBE_DEFAULT_REDIRECT_URI = "http://localhost:51730/youtube/callback";
@@ -441,8 +443,17 @@ const saveYouTubeTokens = (tokens: { accessToken: string; refreshToken?: string;
 const refreshYouTubeAccessToken = async (): Promise<string> => {
   const { clientId, clientSecret } = youtubeConfig();
   const refreshToken = store.get("youtubeRefreshToken")?.trim() ?? "";
-  if (!clientId || !clientSecret || !refreshToken) {
+  if (!clientId || !refreshToken) {
     throw new Error("YouTube sign-in required.");
+  }
+
+  const tokenParams = new URLSearchParams({
+    client_id: clientId,
+    grant_type: "refresh_token",
+    refresh_token: refreshToken
+  });
+  if (clientSecret) {
+    tokenParams.set("client_secret", clientSecret);
   }
 
   const response = await fetch("https://oauth2.googleapis.com/token", {
@@ -451,12 +462,7 @@ const refreshYouTubeAccessToken = async (): Promise<string> => {
       "Content-Type": "application/x-www-form-urlencoded",
       Accept: "application/json"
     },
-    body: new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      grant_type: "refresh_token",
-      refresh_token: refreshToken
-    })
+    body: tokenParams
   });
   const tokens = await fetchJsonOrThrow<YouTubeTokenResponse>(response, "YouTube token refresh");
   if (!tokens.access_token) {
@@ -1342,11 +1348,13 @@ app.whenReady().then(() => {
   });
   ipcMain.handle("auth:youtube:signIn", async () => {
     const { clientId, clientSecret, redirectUri } = youtubeConfig();
-    if (!clientId || !clientSecret) {
-      throw new Error("YouTube OAuth is not configured in this build.");
+    if (!clientId) {
+      throw new Error(YOUTUBE_MISSING_OAUTH_MESSAGE);
     }
 
     const state = randomToken(24);
+    const codeVerifier = randomToken(48);
+    const codeChallenge = crypto.createHash("sha256").update(codeVerifier).digest("base64url");
     const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
     authUrl.searchParams.set("client_id", clientId);
     authUrl.searchParams.set("redirect_uri", redirectUri);
@@ -1356,6 +1364,8 @@ app.whenReady().then(() => {
     authUrl.searchParams.set("access_type", "offline");
     authUrl.searchParams.set("include_granted_scopes", "true");
     authUrl.searchParams.set("prompt", "consent");
+    authUrl.searchParams.set("code_challenge_method", "S256");
+    authUrl.searchParams.set("code_challenge", codeChallenge);
 
     const callbackUrl = await openAuthInBrowser(authUrl.toString(), redirectUri);
     const callback = new URL(callbackUrl);
@@ -1374,19 +1384,24 @@ app.whenReady().then(() => {
       throw new Error("YouTube did not return an authorization code.");
     }
 
+    const tokenParams = new URLSearchParams({
+      code,
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      grant_type: "authorization_code",
+      code_verifier: codeVerifier
+    });
+    if (clientSecret) {
+      tokenParams.set("client_secret", clientSecret);
+    }
+
     const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
         Accept: "application/json"
       },
-      body: new URLSearchParams({
-        code,
-        client_id: clientId,
-        client_secret: clientSecret,
-        redirect_uri: redirectUri,
-        grant_type: "authorization_code"
-      })
+      body: tokenParams
     });
     const tokens = await fetchJsonOrThrow<YouTubeTokenResponse>(tokenResponse, "YouTube token exchange");
     if (!tokens.access_token) {

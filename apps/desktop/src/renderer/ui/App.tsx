@@ -857,6 +857,7 @@ const MainApp: React.FC = () => {
   const authed = Boolean(
     settings.twitchToken || settings.kickAccessToken || settings.youtubeAccessToken || settings.twitchGuest || settings.kickGuest
   );
+  const youtubeOAuthConfigured = Boolean(settings.youtubeClientId?.trim());
 
   const activeMessages = useMemo(() => {
     if (!activeTab) return [];
@@ -1398,6 +1399,10 @@ const MainApp: React.FC = () => {
   };
 
   const signInYouTube = async () => {
+    if (!youtubeOAuthConfigured) {
+      setAuthMessage("YouTube OAuth Client ID is missing in this build. Contact the app maintainer to enable YouTube sign-in.");
+      return;
+    }
     setAuthBusy("youtube");
     setAuthMessage("");
     try {
@@ -1492,7 +1497,7 @@ const MainApp: React.FC = () => {
       <div className="login-gate">
         <div className="login-card">
           <h1>MultiChat</h1>
-          <p>Sign in with Twitch, Kick, or YouTube first. No OAuth setup is required from the user.</p>
+          <p>Sign in with Twitch or Kick first. YouTube sign-in works when this build includes YouTube OAuth credentials.</p>
           <div className="login-buttons">
             <button type="button" onClick={signInTwitch} disabled={authBusy !== null}>
               {authBusy === "twitch" ? "Signing in..." : "Sign in with Twitch"}
@@ -1500,12 +1505,15 @@ const MainApp: React.FC = () => {
             <button type="button" onClick={signInKick} disabled={authBusy !== null}>
               {authBusy === "kick" ? "Signing in..." : "Sign in with Kick"}
             </button>
-            <button type="button" onClick={signInYouTube} disabled={authBusy !== null}>
-              {authBusy === "youtube" ? "Signing in..." : "Sign in with YouTube"}
+            <button type="button" onClick={signInYouTube} disabled={authBusy !== null || !youtubeOAuthConfigured}>
+              {authBusy === "youtube" ? "Signing in..." : youtubeOAuthConfigured ? "Sign in with YouTube" : "YouTube OAuth Missing"}
             </button>
           </div>
-          {!settings.twitchClientId || !settings.kickClientId || !settings.youtubeClientId ? (
+          {!settings.twitchClientId || !settings.kickClientId ? (
             <p className="login-warning">Managed OAuth credentials are missing for one or more platforms in this build.</p>
+          ) : null}
+          {!youtubeOAuthConfigured ? (
+            <p className="login-warning">YouTube OAuth Client ID is missing in this build.</p>
           ) : null}
           {authMessage ? <p className="login-message">{authMessage}</p> : null}
         </div>
