@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { ChatAdapter, ChatAdapterStatus, ChatMessage } from "@multichat/chat-core";
-import { KickAdapter, TwitchAdapter } from "@multichat/chat-core";
+import { KickAdapter, TwitchAdapter, YouTubeAdapter } from "@multichat/chat-core";
 
 const mode = window.location.hash.replace("#", "");
 const broadcast = new BroadcastChannel("multichat-chat");
@@ -9,7 +9,7 @@ const hotkeys = {
   focusSearch: "Control+Shift+F"
 };
 
-type Platform = "twitch" | "kick";
+type Platform = "twitch" | "kick" | "youtube";
 const SEND_TARGET_TAB_ALL = "__all_in_tab__";
 
 type Settings = {
@@ -26,6 +26,14 @@ type Settings = {
   kickUsername?: string;
   kickGuest?: boolean;
   kickScopeVersion?: number;
+  youtubeClientId?: string;
+  youtubeClientSecret?: string;
+  youtubeRedirectUri?: string;
+  youtubeAccessToken?: string;
+  youtubeRefreshToken?: string;
+  youtubeTokenExpiry?: number;
+  youtubeUsername?: string;
+  youtubeLiveChatId?: string;
   overlayTransparent?: boolean;
   verboseLogs?: boolean;
   hideCommands?: boolean;
@@ -36,6 +44,9 @@ type Settings = {
     platform: Platform;
     channel: string;
     key: string;
+    liveChatId?: string;
+    youtubeChannelId?: string;
+    youtubeVideoId?: string;
   }>;
   sessionTabs?: Array<{
     id: string;
@@ -49,6 +60,9 @@ type ChatSource = {
   platform: Platform;
   channel: string;
   key: string;
+  liveChatId?: string;
+  youtubeChannelId?: string;
+  youtubeVideoId?: string;
 };
 
 type ChatTab = {
@@ -83,6 +97,14 @@ const defaultSettings: Settings = {
   kickRefreshToken: "",
   kickUsername: "",
   kickGuest: false,
+  youtubeClientId: "",
+  youtubeClientSecret: "",
+  youtubeRedirectUri: "",
+  youtubeAccessToken: "",
+  youtubeRefreshToken: "",
+  youtubeTokenExpiry: 0,
+  youtubeUsername: "",
+  youtubeLiveChatId: "",
   overlayTransparent: true,
   verboseLogs: false,
   hideCommands: false,
@@ -92,12 +114,20 @@ const defaultSettings: Settings = {
 
 const createId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
-const normalizeChannel = (input: string) => input.trim().toLowerCase().replace(/^#/, "");
+const normalizeChannel = (input: string, platform: Platform = "twitch") => {
+  const trimmed = input.trim().replace(/^#/, "");
+  if (platform === "youtube") {
+    return trimmed.replace(/^@/, "");
+  }
+  return trimmed.toLowerCase();
+};
 
 const hasAuthForPlatform = (platform: Platform, settings: Settings) =>
   platform === "twitch"
     ? Boolean(settings.twitchToken || settings.twitchGuest)
-    : Boolean(settings.kickAccessToken || settings.kickGuest);
+    : platform === "kick"
+      ? Boolean(settings.kickAccessToken || settings.kickGuest)
+      : Boolean(settings.youtubeAccessToken);
 
 const tabLabel = (tab: ChatTab, sourceById: Map<string, ChatSource>) => {
   const sources = tab.sourceIds.map((id) => sourceById.get(id)).filter(Boolean) as ChatSource[];
@@ -133,15 +163,27 @@ const sanitizeSessionSources = (value: Settings["sessionSources"]): ChatSource[]
   for (const entry of value) {
     if (!entry || typeof entry !== "object") continue;
     const id = typeof entry.id === "string" ? entry.id.trim() : "";
-    const platform: Platform | null = entry.platform === "twitch" || entry.platform === "kick" ? entry.platform : null;
-    const channel = typeof entry.channel === "string" ? normalizeChannel(entry.channel) : "";
+    const platform: Platform | null =
+      entry.platform === "twitch" || entry.platform === "kick" || entry.platform === "youtube" ? entry.platform : null;
+    const channel = typeof entry.channel === "string" ? normalizeChannel(entry.channel, platform ?? undefined) : "";
     if (!id || !platform || !channel) continue;
 
-    const key = `${platform}:${channel}`;
+    const liveChatId = typeof entry.liveChatId === "string" ? entry.liveChatId.trim() : "";
+    if (platform === "youtube" && !liveChatId) continue;
+
+    const key = typeof entry.key === "string" && entry.key.trim() ? entry.key.trim() : `${platform}:${channel}`;
     if (seenSourceIds.has(id) || seenSourceKeys.has(key)) continue;
     seenSourceIds.add(id);
     seenSourceKeys.add(key);
-    restored.push({ id, platform, channel, key });
+    restored.push({
+      id,
+      platform,
+      channel,
+      key,
+      liveChatId: liveChatId || undefined,
+      youtubeChannelId: typeof entry.youtubeChannelId === "string" ? entry.youtubeChannelId.trim() || undefined : undefined,
+      youtubeVideoId: typeof entry.youtubeVideoId === "string" ? entry.youtubeVideoId.trim() || undefined : undefined
+    });
   }
 
   return restored;
@@ -812,7 +854,9 @@ const MainApp: React.FC = () => {
     () => (activeTab ? activeTab.sourceIds.map((sourceId) => sourceById.get(sourceId)).filter(Boolean) as ChatSource[] : []),
     [activeTab, sourceById]
   );
-  const authed = Boolean(settings.twitchToken || settings.kickAccessToken || settings.twitchGuest || settings.kickGuest);
+  const authed = Boolean(
+    settings.twitchToken || settings.kickAccessToken || settings.youtubeAccessToken || settings.twitchGuest || settings.kickGuest
+  );
 
   const activeMessages = useMemo(() => {
     if (!activeTab) return [];
@@ -856,26 +900,48 @@ const MainApp: React.FC = () => {
       void window.electronAPI.writeLog(`[${source.key}] ${message}`);
     };
 
-    const adapter: ChatAdapter =
-      source.platform === "twitch"
-        ? new TwitchAdapter({
-            channel: source.channel,
-            auth: { token: currentSettings.twitchToken, username: currentSettings.twitchUsername },
-            logger
-          })
-        : new KickAdapter({
-            channel: source.channel,
-            auth: {
-              accessToken: currentSettings.kickAccessToken,
-              username: currentSettings.kickUsername,
-              guest: currentSettings.kickGuest
-            },
-            resolveChatroomId: async (channel) => {
-              const result = await window.electronAPI.resolveKickChatroom(channel);
-              return result.chatroomId;
-            },
-            logger
-          });
+    let adapter: ChatAdapter;
+    if (source.platform === "twitch") {
+      adapter = new TwitchAdapter({
+        channel: source.channel,
+        auth: { token: currentSettings.twitchToken, username: currentSettings.twitchUsername },
+        logger
+      });
+    } else if (source.platform === "kick") {
+      adapter = new KickAdapter({
+        channel: source.channel,
+        auth: {
+          accessToken: currentSettings.kickAccessToken,
+          username: currentSettings.kickUsername,
+          guest: currentSettings.kickGuest
+        },
+        resolveChatroomId: async (channel) => {
+          const result = await window.electronAPI.resolveKickChatroom(channel);
+          return result.chatroomId;
+        },
+        logger
+      });
+    } else {
+      adapter = new YouTubeAdapter({
+        channel: source.channel,
+        auth: {
+          liveChatId: source.liveChatId
+        },
+        transport: {
+          fetchMessages: async ({ liveChatId, pageToken }) =>
+            window.electronAPI.youtubeFetchMessages({
+              liveChatId,
+              pageToken
+            }),
+          sendMessage: async ({ liveChatId, message }) =>
+            window.electronAPI.youtubeSendMessage({
+              liveChatId,
+              message
+            })
+        },
+        logger
+      });
+    }
 
     adapter.onStatus((status) => {
       setStatusBySource((prev) => ({ ...prev, [source.id]: status }));
@@ -964,7 +1030,7 @@ const MainApp: React.FC = () => {
   };
 
   const addChannelTab = async () => {
-    const channel = normalizeChannel(channelInput);
+    const channel = normalizeChannel(channelInput, platformInput);
     if (!channel) return;
 
     if (!hasAuthForPlatform(platformInput, settings)) {
@@ -972,7 +1038,24 @@ const MainApp: React.FC = () => {
       return;
     }
 
-    const key = `${platformInput}:${channel}`;
+    let key = `${platformInput}:${channel}`;
+    let liveChatId: string | undefined;
+    let youtubeChannelId: string | undefined;
+    let youtubeVideoId: string | undefined;
+
+    if (platformInput === "youtube") {
+      try {
+        const resolved = await window.electronAPI.resolveYouTubeLiveChat(channel);
+        key = `${platformInput}:${resolved.channelId}:${resolved.liveChatId}`;
+        liveChatId = resolved.liveChatId;
+        youtubeChannelId = resolved.channelId;
+        youtubeVideoId = resolved.videoId;
+      } catch (error) {
+        setAuthMessage(error instanceof Error ? error.message : String(error));
+        return;
+      }
+    }
+
     const existingSource = sources.find((source) => source.key === key);
     const existingTab = existingSource
       ? tabs.find((tab) => tab.sourceIds.length === 1 && tab.sourceIds[0] === existingSource.id)
@@ -988,7 +1071,10 @@ const MainApp: React.FC = () => {
       id: createId(),
       platform: platformInput,
       channel,
-      key
+      key,
+      liveChatId,
+      youtubeChannelId,
+      youtubeVideoId
     };
 
     if (!existingSource) {
@@ -1078,6 +1164,19 @@ const MainApp: React.FC = () => {
     }
   };
 
+  const checkForUpdatesNow = async () => {
+    try {
+      const status = await window.electronAPI.checkForUpdates();
+      if (status.message) {
+        setAuthMessage(status.message);
+      } else {
+        setAuthMessage("Checking for updates...");
+      }
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : String(error));
+    }
+  };
+
   const runModeratorAction = async (action: ModeratorAction, message: ChatMessage) => {
     const username = message.username.trim();
     if (!username || username === "system") {
@@ -1094,6 +1193,10 @@ const MainApp: React.FC = () => {
     const adapter = adaptersRef.current.get(source.id);
     if (!adapter) {
       setAuthMessage("Chat connection is not ready for moderator commands.");
+      return;
+    }
+    if (source.platform === "youtube") {
+      setAuthMessage("YouTube moderation actions are not supported in this build.");
       return;
     }
 
@@ -1294,6 +1397,20 @@ const MainApp: React.FC = () => {
     }
   };
 
+  const signInYouTube = async () => {
+    setAuthBusy("youtube");
+    setAuthMessage("");
+    try {
+      const next = await window.electronAPI.signInYouTube();
+      setSettings({ ...defaultSettings, ...next });
+      setAuthMessage(`Signed in to YouTube as ${next.youtubeUsername ?? "unknown user"} (oauth).`);
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setAuthBusy(null);
+    }
+  };
+
   const signOutTwitch = async () => {
     const next = await window.electronAPI.signOutTwitch();
     setSettings({ ...defaultSettings, ...next });
@@ -1304,10 +1421,20 @@ const MainApp: React.FC = () => {
     setSettings({ ...defaultSettings, ...next });
   };
 
+  const signOutYouTube = async () => {
+    const next = await window.electronAPI.signOutYouTube();
+    setSettings({ ...defaultSettings, ...next });
+  };
+
   useEffect(() => {
     if (!authed) return;
     if (!hasAuthForPlatform(platformInput, settings)) {
-      const fallbackPlatform: Platform = settings.twitchToken || settings.twitchGuest ? "twitch" : "kick";
+      const fallbackPlatform: Platform =
+        settings.twitchToken || settings.twitchGuest
+          ? "twitch"
+          : settings.kickAccessToken || settings.kickGuest
+            ? "kick"
+            : "youtube";
       setPlatformInput(fallbackPlatform);
     }
   }, [authed, platformInput, settings]);
@@ -1342,6 +1469,13 @@ const MainApp: React.FC = () => {
     setLockCutoffTimestamp(null);
   }, [activeTabId]);
 
+  useEffect(() => {
+    return window.electronAPI.onUpdateStatus((status) => {
+      if (!status.message || status.state === "idle") return;
+      setAuthMessage(status.message);
+    });
+  }, []);
+
   if (loading) {
     return (
       <div className="login-gate">
@@ -1358,7 +1492,7 @@ const MainApp: React.FC = () => {
       <div className="login-gate">
         <div className="login-card">
           <h1>MultiChat</h1>
-          <p>Sign in with Twitch or Kick first. No OAuth setup is required from the user.</p>
+          <p>Sign in with Twitch, Kick, or YouTube first. No OAuth setup is required from the user.</p>
           <div className="login-buttons">
             <button type="button" onClick={signInTwitch} disabled={authBusy !== null}>
               {authBusy === "twitch" ? "Signing in..." : "Sign in with Twitch"}
@@ -1366,9 +1500,12 @@ const MainApp: React.FC = () => {
             <button type="button" onClick={signInKick} disabled={authBusy !== null}>
               {authBusy === "kick" ? "Signing in..." : "Sign in with Kick"}
             </button>
+            <button type="button" onClick={signInYouTube} disabled={authBusy !== null}>
+              {authBusy === "youtube" ? "Signing in..." : "Sign in with YouTube"}
+            </button>
           </div>
-          {!settings.twitchClientId || !settings.kickClientId ? (
-            <p className="login-warning">Managed OAuth credentials are not bundled in this build, so guest mode will be used.</p>
+          {!settings.twitchClientId || !settings.kickClientId || !settings.youtubeClientId ? (
+            <p className="login-warning">Managed OAuth credentials are missing for one or more platforms in this build.</p>
           ) : null}
           {authMessage ? <p className="login-message">{authMessage}</p> : null}
         </div>
@@ -1403,6 +1540,7 @@ const MainApp: React.FC = () => {
           >
             {settings.twitchToken || settings.twitchGuest ? <option value="twitch">[T] Twitch</option> : null}
             {settings.kickAccessToken || settings.kickGuest ? <option value="kick">[K] Kick</option> : null}
+            {settings.youtubeAccessToken ? <option value="youtube">[Y] YouTube</option> : null}
           </select>
           <input
             value={channelInput}
@@ -1414,6 +1552,9 @@ const MainApp: React.FC = () => {
           <button type="submit">Open Tab</button>
         </form>
         <div className="top-actions">
+          <button type="button" onClick={() => void checkForUpdatesNow()}>
+            Check Updates
+          </button>
           <button type="button" onClick={() => void openChatLogsDir()}>
             Logs
           </button>
@@ -1435,6 +1576,10 @@ const MainApp: React.FC = () => {
           <PlatformIcon platform="kick" />
           Kick: {settings.kickUsername || "off"}
         </span>
+        <span className={settings.youtubeAccessToken ? "account-pill on" : "account-pill"}>
+          <PlatformIcon platform="youtube" />
+          YouTube: {settings.youtubeUsername || "off"}
+        </span>
         {settings.twitchToken || settings.twitchGuest ? (
           <button type="button" className="ghost" onClick={() => void signOutTwitch()}>
             Sign out Twitch
@@ -1451,6 +1596,15 @@ const MainApp: React.FC = () => {
         ) : (
           <button type="button" className="ghost" onClick={() => void signInKick()} disabled={authBusy !== null}>
             {authBusy === "kick" ? "Signing in..." : "Sign in Kick"}
+          </button>
+        )}
+        {settings.youtubeAccessToken ? (
+          <button type="button" className="ghost" onClick={() => void signOutYouTube()}>
+            Sign out YouTube
+          </button>
+        ) : (
+          <button type="button" className="ghost" onClick={() => void signInYouTube()} disabled={authBusy !== null}>
+            {authBusy === "youtube" ? "Signing in..." : "Sign in YouTube"}
           </button>
         )}
       </div>
@@ -1510,7 +1664,7 @@ const MainApp: React.FC = () => {
         {!activeTab ? (
           <div className="empty-state">
             <h2>No tabs open</h2>
-            <p>Enter a Twitch or Kick channel username above to create a new tab.</p>
+            <p>Enter a Twitch, Kick, or YouTube channel username above to create a new tab.</p>
           </div>
         ) : (
           <>

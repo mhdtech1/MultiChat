@@ -1,8 +1,9 @@
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { app, BrowserWindow, Menu, dialog, ipcMain, shell, type MenuItemConstructorOptions, type MessageBoxOptions } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import crypto from "node:crypto";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import electronUpdater from "electron-updater";
 
 const { autoUpdater } = electronUpdater;
@@ -23,6 +24,13 @@ type AppSettings = {
   kickUsername?: string;
   kickGuest?: boolean;
   kickScopeVersion?: number;
+  youtubeClientId?: string;
+  youtubeClientSecret?: string;
+  youtubeRedirectUri?: string;
+  youtubeAccessToken?: string;
+  youtubeRefreshToken?: string;
+  youtubeTokenExpiry?: number;
+  youtubeUsername?: string;
   youtubeApiKey?: string;
   youtubeLiveChatId?: string;
   overlayTransparent?: boolean;
@@ -33,9 +41,12 @@ type AppSettings = {
   highlightKeywords?: string[];
   sessionSources?: Array<{
     id: string;
-    platform: "twitch" | "kick";
+    platform: "twitch" | "kick" | "youtube";
     channel: string;
     key: string;
+    liveChatId?: string;
+    youtubeChannelId?: string;
+    youtubeVideoId?: string;
   }>;
   sessionTabs?: Array<{
     id: string;
@@ -62,11 +73,15 @@ const DEV_UPDATE_MESSAGE = "Auto updates are available in packaged builds only."
 const DEFAULT_UPDATE_MESSAGE = "Checking for updates shortly...";
 const TWITCH_DEFAULT_REDIRECT_URI = "http://localhost:51730/twitch/callback";
 const KICK_DEFAULT_REDIRECT_URI = "http://localhost:51730/kick/callback";
+const YOUTUBE_DEFAULT_REDIRECT_URI = "http://localhost:51730/youtube/callback";
 const TWITCH_MANAGED_CLIENT_ID = "syeui9mom7i5f9060j03tydgpdywbh";
 const KICK_MANAGED_CLIENT_ID = "01KGRFF03VYRJMB3W4369Y07CS";
 const KICK_MANAGED_CLIENT_SECRET = "29f43591eb0496352c66ea36f55c5c21e3fbc5053ba22568194e0c950c174794";
+const YOUTUBE_MANAGED_CLIENT_ID = "";
+const YOUTUBE_MANAGED_CLIENT_SECRET = "";
 const TWITCH_SCOPES = ["chat:read", "chat:edit"];
 const KICK_SCOPES = ["user:read", "channel:read", "chat:write"];
+const YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl"];
 const KICK_SCOPE_VERSION = 2;
 
 class JsonSettingsStore {
@@ -117,25 +132,9 @@ class JsonSettingsStore {
   }
 }
 
-class AuthPopupClosedError extends Error {
-  constructor() {
-    super("Sign-in window closed before authentication completed.");
-  }
-}
-
 const normalizePathname = (pathname: string) => {
   const normalized = pathname.replace(/\/+$/, "");
   return normalized === "" ? "/" : normalized;
-};
-
-const matchesRedirectUri = (candidateUrl: string, redirectUri: string) => {
-  try {
-    const candidate = new URL(candidateUrl);
-    const redirect = new URL(redirectUri);
-    return candidate.origin === redirect.origin && normalizePathname(candidate.pathname) === normalizePathname(redirect.pathname);
-  } catch {
-    return false;
-  }
 };
 
 const randomToken = (bytes = 32) => crypto.randomBytes(bytes).toString("base64url");
@@ -150,35 +149,137 @@ const fetchJsonOrThrow = async <T>(response: Response, source: string): Promise<
   return parsed as T;
 };
 
-const openAuthPopup = async (authUrl: string, redirectUri: string): Promise<string> => {
+const AUTH_CALLBACK_TIMEOUT_MS = 3 * 60 * 1000;
+
+const isLoopbackHost = (hostname: string) => {
+  const normalized = hostname.trim().toLowerCase();
+  return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1" || normalized === "[::1]";
+};
+
+const sendAuthHtml = (response: ServerResponse<IncomingMessage>, statusCode: number, html: string) => {
+  response.writeHead(statusCode, {
+    "Content-Type": "text/html; charset=utf-8",
+    "Cache-Control": "no-store, max-age=0"
+  });
+  response.end(html);
+};
+
+const authCompletePage = `
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>MultiChat Sign-In Complete</title>
+    <style>
+      body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; background: #0f172a; color: #e2e8f0; display: grid; place-items: center; min-height: 100vh; }
+      .card { max-width: 540px; padding: 24px; border: 1px solid #334155; border-radius: 12px; background: #111827; }
+      h1 { margin: 0 0 8px; font-size: 20px; }
+      p { margin: 0; line-height: 1.5; color: #cbd5e1; }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <h1>Sign-in complete</h1>
+      <p>You can close this browser tab and return to MultiChat.</p>
+    </main>
+  </body>
+</html>
+`;
+
+const authHashBridgePage = (pathname: string) => `
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Completing Sign-In...</title>
+    <style>
+      body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; background: #0f172a; color: #e2e8f0; display: grid; place-items: center; min-height: 100vh; }
+      .card { max-width: 540px; padding: 24px; border: 1px solid #334155; border-radius: 12px; background: #111827; }
+      p { margin: 0; line-height: 1.5; color: #cbd5e1; }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <p id="status">Finishing sign-in...</p>
+    </main>
+    <script>
+      (() => {
+        const status = document.getElementById("status");
+        const hash = window.location.hash ? window.location.hash.slice(1) : "";
+        if (!hash) {
+          if (status) status.textContent = "Sign-in response was missing data. You can close this tab and try again.";
+          return;
+        }
+        const target = ${JSON.stringify(pathname)} + "?oauth_fragment=" + encodeURIComponent(hash);
+        window.location.replace(target);
+      })();
+    </script>
+  </body>
+</html>
+`;
+
+const openAuthInBrowser = async (authUrl: string, redirectUri: string): Promise<string> => {
+  const redirect = new URL(redirectUri);
+
+  if (redirect.protocol !== "http:") {
+    throw new Error("OAuth redirect URI must use http:// for desktop sign-in.");
+  }
+  if (!isLoopbackHost(redirect.hostname)) {
+    throw new Error("OAuth redirect URI must use localhost or loopback for desktop sign-in.");
+  }
+
+  const callbackPath = normalizePathname(redirect.pathname);
+  const callbackPort = Number.parseInt(redirect.port || "80", 10);
+
   return new Promise((resolve, reject) => {
-    const authWindow = new BrowserWindow({
-      width: 520,
-      height: 760,
-      parent: mainWindow ?? undefined,
-      modal: Boolean(mainWindow),
-      autoHideMenuBar: true,
-      webPreferences: {
-        contextIsolation: true,
-        nodeIntegration: false
+    let settled = false;
+
+    const server = createServer((request, response) => {
+      const incoming = new URL(request.url ?? "/", redirect.origin);
+      const incomingPath = normalizePathname(incoming.pathname);
+
+      if (incomingPath !== callbackPath) {
+        sendAuthHtml(response, 404, "<h1>Not found</h1>");
+        return;
       }
+
+      const oauthFragment = incoming.searchParams.get("oauth_fragment");
+      const hasDirectCallbackParams =
+        incoming.searchParams.has("code") ||
+        incoming.searchParams.has("error") ||
+        incoming.searchParams.has("state");
+
+      if (oauthFragment && oauthFragment.length > 0) {
+        sendAuthHtml(response, 200, authCompletePage);
+        finish(`${redirect.origin}${redirect.pathname}#${oauthFragment}`);
+        return;
+      }
+
+      if (hasDirectCallbackParams) {
+        sendAuthHtml(response, 200, authCompletePage);
+        finish(`${redirect.origin}${redirect.pathname}${incoming.search}`);
+        return;
+      }
+
+      sendAuthHtml(response, 200, authHashBridgePage(redirect.pathname));
     });
 
-    let settled = false;
+    const timeout = setTimeout(() => {
+      finish(undefined, new Error("Sign-in timed out. Please try again."));
+    }, AUTH_CALLBACK_TIMEOUT_MS);
+
+    const closeServer = () => {
+      clearTimeout(timeout);
+      server.removeAllListeners("error");
+      server.close();
+    };
 
     const finish = (callbackUrl?: string, error?: Error) => {
       if (settled) return;
       settled = true;
-
-      authWindow.removeAllListeners("closed");
-      authWindow.webContents.removeAllListeners("will-redirect");
-      authWindow.webContents.removeAllListeners("will-navigate");
-      authWindow.webContents.removeAllListeners("did-fail-load");
-
-      if (!authWindow.isDestroyed()) {
-        authWindow.close();
-      }
-
+      closeServer();
       if (error) {
         reject(error);
         return;
@@ -186,26 +287,15 @@ const openAuthPopup = async (authUrl: string, redirectUri: string): Promise<stri
       resolve(callbackUrl ?? "");
     };
 
-    const onNavigate = (event: Electron.Event, targetUrl: string) => {
-      if (!matchesRedirectUri(targetUrl, redirectUri)) return;
-      event.preventDefault();
-      finish(targetUrl);
-    };
-
-    authWindow.webContents.on("will-redirect", onNavigate);
-    authWindow.webContents.on("will-navigate", onNavigate);
-    authWindow.webContents.on("did-fail-load", (_event, _code, _description, validatedUrl) => {
-      if (matchesRedirectUri(validatedUrl, redirectUri)) {
-        finish(validatedUrl);
-      }
+    server.on("error", (error) => {
+      const text = error instanceof Error ? error.message : String(error);
+      finish(undefined, new Error(`Unable to listen for OAuth callback: ${text}`));
     });
 
-    authWindow.on("closed", () => {
-      finish(undefined, new AuthPopupClosedError());
-    });
-
-    authWindow.loadURL(authUrl).catch((error) => {
-      finish(undefined, new Error(`Failed to open auth window: ${String(error)}`));
+    server.listen(callbackPort, () => {
+      void shell.openExternal(authUrl).catch((error) => {
+        finish(undefined, new Error(`Failed to open default browser: ${String(error)}`));
+      });
     });
   });
 };
@@ -249,6 +339,246 @@ const parseKickChatroomId = (payload: unknown): number | null => {
   }
 
   return null;
+};
+
+type YouTubeTokenResponse = {
+  access_token?: string;
+  refresh_token?: string;
+  expires_in?: number;
+  token_type?: string;
+};
+
+type YouTubeChannelsResponse = {
+  items?: Array<{
+    id?: string;
+    snippet?: {
+      title?: string;
+    };
+  }>;
+};
+
+type YouTubeSearchChannelsResponse = {
+  items?: Array<{
+    id?: {
+      channelId?: string;
+      videoId?: string;
+    };
+    snippet?: {
+      channelTitle?: string;
+      title?: string;
+    };
+  }>;
+};
+
+type YouTubeVideosResponse = {
+  items?: Array<{
+    id?: string;
+    snippet?: {
+      channelTitle?: string;
+      title?: string;
+    };
+    liveStreamingDetails?: {
+      activeLiveChatId?: string;
+    };
+  }>;
+};
+
+const normalizeYouTubeInput = (input: string) => {
+  const trimmed = input.trim();
+  if (!trimmed) return "";
+
+  const normalized = trimmed.replace(/^https?:\/\/(www\.)?youtube\.com\//i, "");
+  const compact = normalized.split(/[?#]/)[0];
+
+  if (compact.startsWith("channel/")) {
+    return compact.slice("channel/".length).split("/")[0].replace(/^@/, "");
+  }
+  if (compact.startsWith("c/")) {
+    return compact.slice("c/".length).split("/")[0].replace(/^@/, "");
+  }
+  if (compact.startsWith("user/")) {
+    return compact.slice("user/".length).split("/")[0].replace(/^@/, "");
+  }
+
+  return compact.split("/")[0].replace(/^@/, "");
+};
+
+const youtubeConfig = () => ({
+  clientId: store.get("youtubeClientId")?.trim() ?? "",
+  clientSecret: store.get("youtubeClientSecret")?.trim() ?? "",
+  redirectUri: store.get("youtubeRedirectUri")?.trim() || YOUTUBE_DEFAULT_REDIRECT_URI
+});
+
+const saveYouTubeTokens = (tokens: { accessToken: string; refreshToken?: string; expiresIn?: number }) => {
+  const currentRefresh = store.get("youtubeRefreshToken")?.trim() ?? "";
+  const refreshToken = (tokens.refreshToken ?? currentRefresh).trim();
+  const expiresIn = Number(tokens.expiresIn ?? 0);
+  const expiry =
+    Number.isFinite(expiresIn) && expiresIn > 0 ? Date.now() + Math.max(30, expiresIn - 30) * 1000 : Date.now() + 55 * 60 * 1000;
+
+  store.set({
+    youtubeAccessToken: tokens.accessToken.trim(),
+    youtubeRefreshToken: refreshToken,
+    youtubeTokenExpiry: expiry
+  });
+};
+
+const refreshYouTubeAccessToken = async (): Promise<string> => {
+  const { clientId, clientSecret } = youtubeConfig();
+  const refreshToken = store.get("youtubeRefreshToken")?.trim() ?? "";
+  if (!clientId || !clientSecret || !refreshToken) {
+    throw new Error("YouTube sign-in required.");
+  }
+
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Accept: "application/json"
+    },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      grant_type: "refresh_token",
+      refresh_token: refreshToken
+    })
+  });
+  const tokens = await fetchJsonOrThrow<YouTubeTokenResponse>(response, "YouTube token refresh");
+  if (!tokens.access_token) {
+    throw new Error("YouTube token refresh did not return an access token.");
+  }
+  saveYouTubeTokens({
+    accessToken: tokens.access_token,
+    refreshToken: tokens.refresh_token,
+    expiresIn: tokens.expires_in
+  });
+  return tokens.access_token;
+};
+
+const ensureYouTubeAccessToken = async (): Promise<string> => {
+  const accessToken = store.get("youtubeAccessToken")?.trim() ?? "";
+  const expiry = Number(store.get("youtubeTokenExpiry") ?? 0);
+  if (accessToken && Number.isFinite(expiry) && expiry > Date.now() + 60_000) {
+    return accessToken;
+  }
+  if (accessToken && !store.get("youtubeRefreshToken")) {
+    return accessToken;
+  }
+  return refreshYouTubeAccessToken();
+};
+
+const youtubeFetchWithAuth = async (input: string | URL, init: RequestInit = {}, allowRetry = true): Promise<Response> => {
+  const token = await ensureYouTubeAccessToken();
+  const headers = new Headers(init.headers ?? {});
+  headers.set("Authorization", `Bearer ${token}`);
+  if (!headers.has("Accept")) {
+    headers.set("Accept", "application/json");
+  }
+
+  const response = await fetch(input, {
+    ...init,
+    headers
+  });
+
+  if (response.status === 401 && allowRetry && (store.get("youtubeRefreshToken")?.trim() ?? "").length > 0) {
+    await refreshYouTubeAccessToken();
+    return youtubeFetchWithAuth(input, init, false);
+  }
+  return response;
+};
+
+const parseYouTubeChannelFromInput = async (rawInput: string): Promise<{ channelId: string; channelTitle: string }> => {
+  const input = normalizeYouTubeInput(rawInput);
+  if (!input) {
+    throw new Error("YouTube channel is required.");
+  }
+
+  if (input.startsWith("UC") && input.length >= 20) {
+    const byId = new URL("https://www.googleapis.com/youtube/v3/channels");
+    byId.searchParams.set("part", "snippet");
+    byId.searchParams.set("id", input);
+    byId.searchParams.set("maxResults", "1");
+    const response = await youtubeFetchWithAuth(byId);
+    const payload = await fetchJsonOrThrow<YouTubeChannelsResponse>(response, "YouTube channel lookup");
+    const first = Array.isArray(payload.items) ? payload.items[0] : undefined;
+    if (first?.id) {
+      return {
+        channelId: first.id,
+        channelTitle: first.snippet?.title?.trim() || input
+      };
+    }
+  }
+
+  const handle = input.replace(/^@/, "");
+  if (handle) {
+    const byHandle = new URL("https://www.googleapis.com/youtube/v3/channels");
+    byHandle.searchParams.set("part", "snippet");
+    byHandle.searchParams.set("forHandle", handle);
+    byHandle.searchParams.set("maxResults", "1");
+    const response = await youtubeFetchWithAuth(byHandle);
+    const payload = await fetchJsonOrThrow<YouTubeChannelsResponse>(response, "YouTube handle lookup");
+    const first = Array.isArray(payload.items) ? payload.items[0] : undefined;
+    if (first?.id) {
+      return {
+        channelId: first.id,
+        channelTitle: first.snippet?.title?.trim() || handle
+      };
+    }
+  }
+
+  const search = new URL("https://www.googleapis.com/youtube/v3/search");
+  search.searchParams.set("part", "snippet");
+  search.searchParams.set("type", "channel");
+  search.searchParams.set("q", input);
+  search.searchParams.set("maxResults", "1");
+  const response = await youtubeFetchWithAuth(search);
+  const payload = await fetchJsonOrThrow<YouTubeSearchChannelsResponse>(response, "YouTube channel search");
+  const first = Array.isArray(payload.items) ? payload.items[0] : undefined;
+  const channelId = first?.id?.channelId?.trim();
+  if (!channelId) {
+    throw new Error(`YouTube channel "${rawInput}" was not found.`);
+  }
+  return {
+    channelId,
+    channelTitle: first?.snippet?.channelTitle?.trim() || first?.snippet?.title?.trim() || rawInput
+  };
+};
+
+const resolveYouTubeLiveChat = async (rawInput: string) => {
+  const channel = await parseYouTubeChannelFromInput(rawInput);
+
+  const liveSearch = new URL("https://www.googleapis.com/youtube/v3/search");
+  liveSearch.searchParams.set("part", "snippet");
+  liveSearch.searchParams.set("channelId", channel.channelId);
+  liveSearch.searchParams.set("eventType", "live");
+  liveSearch.searchParams.set("type", "video");
+  liveSearch.searchParams.set("maxResults", "1");
+  liveSearch.searchParams.set("order", "date");
+  const searchResponse = await youtubeFetchWithAuth(liveSearch);
+  const searchPayload = await fetchJsonOrThrow<YouTubeSearchChannelsResponse>(searchResponse, "YouTube live stream lookup");
+  const firstVideo = Array.isArray(searchPayload.items) ? searchPayload.items[0] : undefined;
+  const videoId = firstVideo?.id?.videoId?.trim() ?? "";
+  if (!videoId) {
+    throw new Error(`No active live stream found for ${channel.channelTitle}.`);
+  }
+
+  const videoDetails = new URL("https://www.googleapis.com/youtube/v3/videos");
+  videoDetails.searchParams.set("part", "liveStreamingDetails,snippet");
+  videoDetails.searchParams.set("id", videoId);
+  const videoResponse = await youtubeFetchWithAuth(videoDetails);
+  const videoPayload = await fetchJsonOrThrow<YouTubeVideosResponse>(videoResponse, "YouTube live chat lookup");
+  const video = Array.isArray(videoPayload.items) ? videoPayload.items[0] : undefined;
+  const liveChatId = video?.liveStreamingDetails?.activeLiveChatId?.trim() ?? "";
+  if (!liveChatId) {
+    throw new Error(`Live chat is not available for the current stream on ${channel.channelTitle}.`);
+  }
+
+  return {
+    channelId: channel.channelId,
+    channelTitle: video?.snippet?.channelTitle?.trim() || channel.channelTitle,
+    videoId,
+    liveChatId
+  };
 };
 
 type KickLookupResult = {
@@ -450,6 +780,170 @@ const setUpdateStatus = (state: UpdateStatus["state"], message: string) => {
   updateStatusToRenderer();
 };
 
+const waitForUpdateTerminalState = async (timeoutMs = 12_000) => {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (
+      updateStatus.state === "available" ||
+      updateStatus.state === "not-available" ||
+      updateStatus.state === "downloading" ||
+      updateStatus.state === "downloaded" ||
+      updateStatus.state === "error"
+    ) {
+      return updateStatus;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  return updateStatus;
+};
+
+const requestUpdateCheck = async () => {
+  if (!app.isPackaged) {
+    setUpdateStatus("not-available", DEV_UPDATE_MESSAGE);
+    return updateStatus;
+  }
+  try {
+    setUpdateStatus("checking", "Checking for updates...");
+    await autoUpdater.checkForUpdates();
+  } catch (error) {
+    const text = error instanceof Error ? error.message : String(error);
+    setUpdateStatus("error", `Update check failed: ${text}`);
+  }
+  return updateStatus;
+};
+
+const showHelpGuide = async () => {
+  const options: MessageBoxOptions = {
+    type: "info",
+    buttons: ["Close"],
+    defaultId: 0,
+    title: "MultiChat Help Guide",
+    message: "How to use MultiChat",
+    detail: [
+      "1. Sign in with Twitch and/or Kick from the login screen.",
+      "2. Open channel tabs by typing a channel username and pressing Enter.",
+      "3. Use right-click on a tab to merge it into another tab when needed.",
+      "4. Use the composer dropdown to send to one chat or all chats in the active tab.",
+      "5. Right-click messages for moderator actions (timeout, ban, unban, delete on Twitch).",
+      "6. Use Overlay or Viewer buttons for display-focused windows.",
+      "7. Use Logs to open saved local chat logs on your computer."
+    ].join("\n")
+  };
+
+  if (mainWindow) {
+    await dialog.showMessageBox(mainWindow, options);
+    return;
+  }
+  await dialog.showMessageBox(options);
+};
+
+const checkForUpdatesFromMenu = async () => {
+  const status = await requestUpdateCheck();
+  const finalStatus =
+    status.state === "checking" || status.state === "idle" ? await waitForUpdateTerminalState(12_000) : status;
+
+  const options: MessageBoxOptions = {
+    type: finalStatus.state === "error" ? "error" : "info",
+    buttons: ["OK"],
+    defaultId: 0,
+    title: "Check for Updates",
+    message: finalStatus.message || "Update check complete."
+  };
+
+  if (mainWindow) {
+    await dialog.showMessageBox(mainWindow, options);
+    return;
+  }
+  await dialog.showMessageBox(options);
+};
+
+const setupAppMenu = () => {
+  const isMac = process.platform === "darwin";
+  const template: MenuItemConstructorOptions[] = [
+    ...(isMac
+      ? [
+          {
+            label: app.name,
+            submenu: [
+              { role: "about" },
+              { type: "separator" },
+              { role: "services" },
+              { type: "separator" },
+              { role: "hide" },
+              { role: "hideOthers" },
+              { role: "unhide" },
+              { type: "separator" },
+              { role: "quit" }
+            ]
+          } as MenuItemConstructorOptions
+        ]
+      : [
+          {
+            label: "File",
+            submenu: [{ role: "quit" }]
+          } as MenuItemConstructorOptions
+        ]),
+    {
+      label: "Edit",
+      submenu: [
+        { role: "undo" },
+        { role: "redo" },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        { role: "selectAll" }
+      ]
+    },
+    {
+      label: "View",
+      submenu: [
+        { role: "reload" },
+        { role: "forceReload" },
+        { role: "toggleDevTools" },
+        { type: "separator" },
+        { role: "resetZoom" },
+        { role: "zoomIn" },
+        { role: "zoomOut" },
+        { type: "separator" },
+        { role: "togglefullscreen" }
+      ]
+    },
+    {
+      label: "Window",
+      submenu: isMac
+        ? [{ role: "minimize" }, { role: "zoom" }, { type: "separator" }, { role: "front" }]
+        : [{ role: "minimize" }, { role: "close" }]
+    },
+    {
+      label: "Help",
+      submenu: [
+        {
+          label: "Help Guide",
+          click: () => {
+            void showHelpGuide();
+          }
+        },
+        {
+          label: "Check for Updates",
+          click: () => {
+            void checkForUpdatesFromMenu();
+          }
+        },
+        { type: "separator" },
+        {
+          label: "MultiChat Releases",
+          click: () => {
+            void shell.openExternal("https://github.com/mhdtech1/MultiChat/releases");
+          }
+        }
+      ]
+    }
+  ];
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+};
+
 const setupAutoUpdater = () => {
   if (updaterInitialized) return;
   updaterInitialized = true;
@@ -485,10 +979,7 @@ const setupAutoUpdater = () => {
 
   setUpdateStatus("idle", DEFAULT_UPDATE_MESSAGE);
   setTimeout(() => {
-    void autoUpdater.checkForUpdates().catch((error) => {
-      const text = error instanceof Error ? error.message : String(error);
-      setUpdateStatus("error", `Update check failed: ${text}`);
-    });
+    void requestUpdateCheck();
   }, 2000);
 };
 
@@ -577,7 +1068,10 @@ app.whenReady().then(() => {
     twitchRedirectUri: process.env.TWITCH_REDIRECT_URI ?? TWITCH_DEFAULT_REDIRECT_URI,
     kickClientId: process.env.KICK_CLIENT_ID ?? KICK_MANAGED_CLIENT_ID,
     kickClientSecret: process.env.KICK_CLIENT_SECRET ?? KICK_MANAGED_CLIENT_SECRET,
-    kickRedirectUri: process.env.KICK_REDIRECT_URI ?? KICK_DEFAULT_REDIRECT_URI
+    kickRedirectUri: process.env.KICK_REDIRECT_URI ?? KICK_DEFAULT_REDIRECT_URI,
+    youtubeClientId: process.env.YOUTUBE_CLIENT_ID ?? YOUTUBE_MANAGED_CLIENT_ID,
+    youtubeClientSecret: process.env.YOUTUBE_CLIENT_SECRET ?? YOUTUBE_MANAGED_CLIENT_SECRET,
+    youtubeRedirectUri: process.env.YOUTUBE_REDIRECT_URI ?? YOUTUBE_DEFAULT_REDIRECT_URI
   });
 
   const managedTwitchClientId = (process.env.TWITCH_CLIENT_ID ?? TWITCH_MANAGED_CLIENT_ID).trim();
@@ -599,6 +1093,18 @@ app.whenReady().then(() => {
   const managedKickRedirectUri = (process.env.KICK_REDIRECT_URI ?? KICK_DEFAULT_REDIRECT_URI).trim();
   if (!store.get("kickRedirectUri")?.trim() && managedKickRedirectUri) {
     store.set("kickRedirectUri", managedKickRedirectUri);
+  }
+  const managedYouTubeClientId = (process.env.YOUTUBE_CLIENT_ID ?? YOUTUBE_MANAGED_CLIENT_ID).trim();
+  if (!store.get("youtubeClientId")?.trim() && managedYouTubeClientId) {
+    store.set("youtubeClientId", managedYouTubeClientId);
+  }
+  const managedYouTubeClientSecret = (process.env.YOUTUBE_CLIENT_SECRET ?? YOUTUBE_MANAGED_CLIENT_SECRET).trim();
+  if (!store.get("youtubeClientSecret")?.trim() && managedYouTubeClientSecret) {
+    store.set("youtubeClientSecret", managedYouTubeClientSecret);
+  }
+  const managedYouTubeRedirectUri = (process.env.YOUTUBE_REDIRECT_URI ?? YOUTUBE_DEFAULT_REDIRECT_URI).trim();
+  if (!store.get("youtubeRedirectUri")?.trim() && managedYouTubeRedirectUri) {
+    store.set("youtubeRedirectUri", managedYouTubeRedirectUri);
   }
 
   if (store.get("twitchGuest") && store.get("twitchClientId")?.trim()) {
@@ -623,6 +1129,7 @@ app.whenReady().then(() => {
     });
   }
   createMainWindow();
+  setupAppMenu();
   setupAutoUpdater();
 
   ipcMain.handle("settings:get", () => store.store);
@@ -659,7 +1166,7 @@ app.whenReady().then(() => {
     authUrl.searchParams.set("state", state);
     authUrl.searchParams.set("force_verify", "true");
 
-    const callbackUrl = await openAuthPopup(authUrl.toString(), redirectUri);
+    const callbackUrl = await openAuthInBrowser(authUrl.toString(), redirectUri);
     const hash = callbackUrl.includes("#") ? callbackUrl.slice(callbackUrl.indexOf("#") + 1) : "";
     const params = new URLSearchParams(hash);
 
@@ -747,7 +1254,7 @@ app.whenReady().then(() => {
     authUrl.searchParams.set("code_challenge", codeChallenge);
     authUrl.searchParams.set("code_challenge_method", "S256");
 
-    const callbackUrl = await openAuthPopup(authUrl.toString(), redirectUri);
+    const callbackUrl = await openAuthInBrowser(authUrl.toString(), redirectUri);
     const callback = new URL(callbackUrl);
     const error = callback.searchParams.get("error");
     if (error) {
@@ -818,6 +1325,89 @@ app.whenReady().then(() => {
     });
     return store.store;
   });
+  ipcMain.handle("auth:youtube:signIn", async () => {
+    const { clientId, clientSecret, redirectUri } = youtubeConfig();
+    if (!clientId || !clientSecret) {
+      throw new Error("YouTube OAuth is not configured in this build.");
+    }
+
+    const state = randomToken(24);
+    const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+    authUrl.searchParams.set("client_id", clientId);
+    authUrl.searchParams.set("redirect_uri", redirectUri);
+    authUrl.searchParams.set("response_type", "code");
+    authUrl.searchParams.set("scope", YOUTUBE_SCOPES.join(" "));
+    authUrl.searchParams.set("state", state);
+    authUrl.searchParams.set("access_type", "offline");
+    authUrl.searchParams.set("include_granted_scopes", "true");
+    authUrl.searchParams.set("prompt", "consent");
+
+    const callbackUrl = await openAuthInBrowser(authUrl.toString(), redirectUri);
+    const callback = new URL(callbackUrl);
+
+    const error = callback.searchParams.get("error");
+    if (error) {
+      const description = callback.searchParams.get("error_description") ?? "YouTube sign-in failed.";
+      throw new Error(description);
+    }
+    if (callback.searchParams.get("state") !== state) {
+      throw new Error("YouTube sign-in was rejected (state mismatch).");
+    }
+
+    const code = callback.searchParams.get("code");
+    if (!code) {
+      throw new Error("YouTube did not return an authorization code.");
+    }
+
+    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Accept: "application/json"
+      },
+      body: new URLSearchParams({
+        code,
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: redirectUri,
+        grant_type: "authorization_code"
+      })
+    });
+    const tokens = await fetchJsonOrThrow<YouTubeTokenResponse>(tokenResponse, "YouTube token exchange");
+    if (!tokens.access_token) {
+      throw new Error("YouTube token exchange did not return an access token.");
+    }
+
+    saveYouTubeTokens({
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+      expiresIn: tokens.expires_in
+    });
+
+    const channelResponse = await youtubeFetchWithAuth(
+      "https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true&maxResults=1"
+    );
+    const channelPayload = await fetchJsonOrThrow<YouTubeChannelsResponse>(channelResponse, "YouTube profile");
+    const first = Array.isArray(channelPayload.items) ? channelPayload.items[0] : undefined;
+    const username = first?.snippet?.title?.trim() ?? "";
+
+    store.set({
+      youtubeUsername: username,
+      youtubeRedirectUri: redirectUri
+    });
+
+    return store.store;
+  });
+  ipcMain.handle("auth:youtube:signOut", () => {
+    store.set({
+      youtubeAccessToken: "",
+      youtubeRefreshToken: "",
+      youtubeTokenExpiry: 0,
+      youtubeUsername: "",
+      youtubeLiveChatId: ""
+    });
+    return store.store;
+  });
   ipcMain.handle("kick:resolveChatroom", async (_event, channel: string) => {
     const slug = channel.trim().toLowerCase();
     if (!slug) {
@@ -838,6 +1428,74 @@ app.whenReady().then(() => {
       throw new Error("Kick chatroom id not found for this channel.");
     }
     return { chatroomId };
+  });
+  ipcMain.handle("youtube:resolveLiveChat", async (_event, channel: string) => {
+    const input = channel.trim();
+    if (!input) {
+      throw new Error("YouTube channel is required.");
+    }
+    const resolved = await resolveYouTubeLiveChat(input);
+    store.set({
+      youtubeLiveChatId: resolved.liveChatId
+    });
+    return resolved;
+  });
+  ipcMain.handle("youtube:fetchMessages", async (_event, payload: { liveChatId?: string; pageToken?: string }) => {
+    const liveChatId = payload?.liveChatId?.trim();
+    if (!liveChatId) {
+      throw new Error("YouTube live chat id is required.");
+    }
+    const requestUrl = new URL("https://www.googleapis.com/youtube/v3/liveChat/messages");
+    requestUrl.searchParams.set("part", "id,snippet,authorDetails");
+    requestUrl.searchParams.set("liveChatId", liveChatId);
+    requestUrl.searchParams.set("maxResults", "200");
+    const pageToken = payload?.pageToken?.trim();
+    if (pageToken) {
+      requestUrl.searchParams.set("pageToken", pageToken);
+    }
+
+    const response = await youtubeFetchWithAuth(requestUrl);
+    const data = await fetchJsonOrThrow<{
+      nextPageToken?: string;
+      pollingIntervalMillis?: number;
+      items?: unknown[];
+    }>(response, "YouTube live chat messages");
+
+    return {
+      nextPageToken: data.nextPageToken,
+      pollingIntervalMillis: data.pollingIntervalMillis,
+      items: Array.isArray(data.items) ? data.items : []
+    };
+  });
+  ipcMain.handle("youtube:sendMessage", async (_event, payload: { liveChatId?: string; message?: string }) => {
+    const liveChatId = payload?.liveChatId?.trim();
+    const message = payload?.message?.trim();
+    if (!liveChatId) {
+      throw new Error("YouTube live chat id is required.");
+    }
+    if (!message) {
+      throw new Error("Message cannot be empty.");
+    }
+
+    const endpoint = new URL("https://www.googleapis.com/youtube/v3/liveChat/messages");
+    endpoint.searchParams.set("part", "snippet");
+
+    const response = await youtubeFetchWithAuth(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        snippet: {
+          liveChatId,
+          type: "textMessageEvent",
+          textMessageDetails: {
+            messageText: message
+          }
+        }
+      })
+    });
+    await fetchJsonOrThrow<unknown>(response, "YouTube send message");
   });
   ipcMain.handle("log:write", (_event, message: string) => {
     const verbose = store.get("verboseLogs");
@@ -867,17 +1525,7 @@ app.whenReady().then(() => {
     viewerWindow?.close();
   });
   ipcMain.handle("updates:check", async () => {
-    if (!app.isPackaged) {
-      setUpdateStatus("not-available", DEV_UPDATE_MESSAGE);
-      return updateStatus;
-    }
-    try {
-      await autoUpdater.checkForUpdates();
-    } catch (error) {
-      const text = error instanceof Error ? error.message : String(error);
-      setUpdateStatus("error", `Update check failed: ${text}`);
-    }
-    return updateStatus;
+    return requestUpdateCheck();
   });
   ipcMain.handle("updates:download", async () => {
     if (!app.isPackaged) {

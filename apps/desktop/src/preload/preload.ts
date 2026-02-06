@@ -14,6 +14,13 @@ type AppSettings = {
   kickUsername?: string;
   kickGuest?: boolean;
   kickScopeVersion?: number;
+  youtubeClientId?: string;
+  youtubeClientSecret?: string;
+  youtubeRedirectUri?: string;
+  youtubeAccessToken?: string;
+  youtubeRefreshToken?: string;
+  youtubeTokenExpiry?: number;
+  youtubeUsername?: string;
   youtubeApiKey?: string;
   youtubeLiveChatId?: string;
   overlayTransparent?: boolean;
@@ -24,9 +31,12 @@ type AppSettings = {
   highlightKeywords?: string[];
   sessionSources?: Array<{
     id: string;
-    platform: "twitch" | "kick";
+    platform: "twitch" | "kick" | "youtube";
     channel: string;
     key: string;
+    liveChatId?: string;
+    youtubeChannelId?: string;
+    youtubeVideoId?: string;
   }>;
   sessionTabs?: Array<{
     id: string;
@@ -64,8 +74,19 @@ const api = {
   signOutTwitch: (): Promise<AppSettings> => ipcRenderer.invoke("auth:twitch:signOut"),
   signInKick: (): Promise<AppSettings> => ipcRenderer.invoke("auth:kick:signIn"),
   signOutKick: (): Promise<AppSettings> => ipcRenderer.invoke("auth:kick:signOut"),
+  signInYouTube: (): Promise<AppSettings> => ipcRenderer.invoke("auth:youtube:signIn"),
+  signOutYouTube: (): Promise<AppSettings> => ipcRenderer.invoke("auth:youtube:signOut"),
   resolveKickChatroom: (channel: string): Promise<{ chatroomId: number }> =>
     ipcRenderer.invoke("kick:resolveChatroom", channel),
+  resolveYouTubeLiveChat: (channel: string): Promise<{ liveChatId: string; channelId: string; channelTitle: string; videoId: string }> =>
+    ipcRenderer.invoke("youtube:resolveLiveChat", channel),
+  youtubeFetchMessages: (payload: { liveChatId: string; pageToken?: string }): Promise<{
+    nextPageToken?: string;
+    pollingIntervalMillis?: number;
+    items?: unknown[];
+  }> => ipcRenderer.invoke("youtube:fetchMessages", payload),
+  youtubeSendMessage: (payload: { liveChatId: string; message: string }): Promise<void> =>
+    ipcRenderer.invoke("youtube:sendMessage", payload),
   checkForUpdates: (): Promise<UpdateStatus> => ipcRenderer.invoke("updates:check"),
   downloadUpdate: (): Promise<void> => ipcRenderer.invoke("updates:download"),
   installUpdate: (): Promise<void> => ipcRenderer.invoke("updates:install"),

@@ -12,6 +12,13 @@ type AppSettings = {
   kickUsername?: string;
   kickGuest?: boolean;
   kickScopeVersion?: number;
+  youtubeClientId?: string;
+  youtubeClientSecret?: string;
+  youtubeRedirectUri?: string;
+  youtubeAccessToken?: string;
+  youtubeRefreshToken?: string;
+  youtubeTokenExpiry?: number;
+  youtubeUsername?: string;
   youtubeApiKey?: string;
   youtubeLiveChatId?: string;
   overlayTransparent?: boolean;
@@ -22,9 +29,12 @@ type AppSettings = {
   highlightKeywords?: string[];
   sessionSources?: Array<{
     id: string;
-    platform: "twitch" | "kick";
+    platform: "twitch" | "kick" | "youtube";
     channel: string;
     key: string;
+    liveChatId?: string;
+    youtubeChannelId?: string;
+    youtubeVideoId?: string;
   }>;
   sessionTabs?: Array<{
     id: string;
@@ -62,7 +72,21 @@ type ElectronAPI = {
   signOutTwitch: () => Promise<AppSettings>;
   signInKick: () => Promise<AppSettings>;
   signOutKick: () => Promise<AppSettings>;
+  signInYouTube: () => Promise<AppSettings>;
+  signOutYouTube: () => Promise<AppSettings>;
   resolveKickChatroom: (channel: string) => Promise<{ chatroomId: number }>;
+  resolveYouTubeLiveChat: (channel: string) => Promise<{
+    liveChatId: string;
+    channelId: string;
+    channelTitle: string;
+    videoId: string;
+  }>;
+  youtubeFetchMessages: (payload: { liveChatId: string; pageToken?: string }) => Promise<{
+    nextPageToken?: string;
+    pollingIntervalMillis?: number;
+    items?: unknown[];
+  }>;
+  youtubeSendMessage: (payload: { liveChatId: string; message: string }) => Promise<void>;
   checkForUpdates: () => Promise<UpdateStatus>;
   downloadUpdate: () => Promise<void>;
   installUpdate: () => Promise<void>;
