@@ -13,18 +13,30 @@ importers:
       '@multichat/chat-core':
         specifier: workspace:*
         version: link:../../packages/chat-core
+      argparse:
+        specifier: ^2.0.1
+        version: 2.0.1
       builder-util-runtime:
         specifier: 9.5.1
         version: 9.5.1
+      debug:
+        specifier: ^4.3.7
+        version: 4.4.3
       electron-updater:
         specifier: ^6.3.9
         version: 6.7.3
       fs-extra:
         specifier: ^10.1.0
         version: 10.1.0
+      graceful-fs:
+        specifier: ^4.2.11
+        version: 4.2.11
       js-yaml:
         specifier: ^4.1.0
         version: 4.1.1
+      jsonfile:
+        specifier: ^6.1.0
+        version: 6.2.0
       lazy-val:
         specifier: ^1.0.5
         version: 1.0.5
@@ -34,18 +46,27 @@ importers:
       lodash.isequal:
         specifier: ^4.5.0
         version: 4.5.0
+      ms:
+        specifier: ^2.1.3
+        version: 2.1.3
       react:
         specifier: ^18.3.1
         version: 18.3.1
       react-dom:
         specifier: ^18.3.1
         version: 18.3.1(react@18.3.1)
+      sax:
+        specifier: ^1.4.1
+        version: 1.4.4
       semver:
         specifier: ~7.7.3
         version: 7.7.4
       tiny-typed-emitter:
         specifier: ^2.1.0
         version: 2.1.0
+      universalify:
+        specifier: ^2.0.1
+        version: 2.0.1
     devDependencies:
       '@types/node':
         specifier: ^20.14.10
@@ -63,7 +84,7 @@ importers:
         specifier: ^9.0.1
         version: 9.2.1
       electron:
-        specifier: ^31.2.0
+        specifier: 31.7.7
         version: 31.7.7
       electron-builder:
         specifier: ^24.13.3
