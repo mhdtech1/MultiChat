@@ -39,7 +39,6 @@ type Settings = {
   tiktokSessionId?: string;
   tiktokTtTargetIdc?: string;
   tiktokUsername?: string;
-  tiktokSignApiKey?: string;
   overlayTransparent?: boolean;
   verboseLogs?: boolean;
   hideCommands?: boolean;
@@ -122,7 +121,6 @@ const defaultSettings: Settings = {
   tiktokSessionId: "",
   tiktokTtTargetIdc: "",
   tiktokUsername: "",
-  tiktokSignApiKey: "",
   overlayTransparent: true,
   verboseLogs: false,
   hideCommands: false,
@@ -151,10 +149,10 @@ const hasAuthForPlatform = (platform: Platform, settings: Settings) =>
   platform === "twitch"
     ? Boolean(settings.twitchToken || settings.twitchGuest)
     : platform === "kick"
-      ? Boolean(settings.kickAccessToken || settings.kickGuest)
+      ? true
       : platform === "youtube"
-        ? Boolean(settings.youtubeAlphaEnabled && settings.youtubeAccessToken)
-        : Boolean(settings.tiktokAlphaEnabled && hasTikTokSession(settings));
+        ? true
+        : true;
 
 const tabLabel = (tab: ChatTab, sourceById: Map<string, ChatSource>) => {
   const sources = tab.sourceIds.map((id) => sourceById.get(id)).filter(Boolean) as ChatSource[];
@@ -695,8 +693,6 @@ const MainApp: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [authBusy, setAuthBusy] = useState<Platform | null>(null);
   const [authMessage, setAuthMessage] = useState("");
-  const [tiktokApiKeyInput, setTikTokApiKeyInput] = useState("");
-  const [showTikTokKeyEditor, setShowTikTokKeyEditor] = useState(false);
 
   const [platformInput, setPlatformInput] = useState<Platform>("twitch");
   const [channelInput, setChannelInput] = useState("");
@@ -891,23 +887,35 @@ const MainApp: React.FC = () => {
     () => (activeTab ? activeTab.sourceIds.map((sourceId) => sourceById.get(sourceId)).filter(Boolean) as ChatSource[] : []),
     [activeTab, sourceById]
   );
+  const writableActiveTabSources = useMemo(
+    () =>
+      activeTabSources.filter((source) => {
+        if (source.platform === "twitch") {
+          return Boolean(settings.twitchToken);
+        }
+        if (source.platform === "kick") {
+          return Boolean(settings.kickAccessToken);
+        }
+        return false;
+      }),
+    [activeTabSources, settings.kickAccessToken, settings.twitchToken]
+  );
   const youtubeAlphaEnabled = Boolean(settings.youtubeAlphaEnabled);
   const tiktokAlphaEnabled = Boolean(settings.tiktokAlphaEnabled);
-  const tiktokSignedIn = hasTikTokSession(settings);
-  const authed = Boolean(
-    settings.twitchToken ||
-      settings.kickAccessToken ||
-      (youtubeAlphaEnabled && settings.youtubeAccessToken) ||
-      (tiktokAlphaEnabled && tiktokSignedIn) ||
-      settings.twitchGuest ||
-      settings.kickGuest
-  );
-  const youtubeOAuthConfigured = youtubeAlphaEnabled && Boolean(settings.youtubeClientId?.trim());
-  const tiktokSignApiKeyConfigured = Boolean((settings.tiktokSignApiKey ?? "").trim());
-
-  useEffect(() => {
-    setTikTokApiKeyInput(settings.tiktokSignApiKey ?? "");
-  }, [settings.tiktokSignApiKey]);
+  const availablePlatforms = useMemo(() => {
+    const next: Platform[] = [];
+    if (settings.twitchToken || settings.twitchGuest) {
+      next.push("twitch");
+    }
+    next.push("kick");
+    if (youtubeAlphaEnabled) {
+      next.push("youtube");
+    }
+    if (tiktokAlphaEnabled) {
+      next.push("tiktok");
+    }
+    return next;
+  }, [settings.twitchGuest, settings.twitchToken, tiktokAlphaEnabled, youtubeAlphaEnabled]);
 
   const activeMessages = useMemo(() => {
     if (!activeTab) return [];
@@ -951,9 +959,11 @@ const MainApp: React.FC = () => {
   }, [activeMessages, newestLocked]);
 
   const composerPlaceholder =
-    sendTargetId === SEND_TARGET_TAB_ALL && activeTabSources.length > 1
-      ? `Type a message to all ${activeTabSources.length} chats in this tab`
-      : "Type a message";
+    writableActiveTabSources.length === 0
+      ? "Read-only for YouTube/TikTok in this build"
+      : sendTargetId === SEND_TARGET_TAB_ALL && writableActiveTabSources.length > 1
+        ? `Type a message to all ${writableActiveTabSources.length} chats in this tab`
+        : "Type a message";
 
   const ensureAdapterConnected = async (source: ChatSource, currentSettings: Settings) => {
     if (adaptersRef.current.has(source.id)) return;
@@ -1100,8 +1110,8 @@ const MainApp: React.FC = () => {
     const channel = normalizeChannel(channelInput, platformInput);
     if (!channel) return;
 
-    if (!hasAuthForPlatform(platformInput, settings)) {
-      setAuthMessage(`Sign in to ${platformInput} before opening ${platformInput}/${channel}.`);
+    if (platformInput === "twitch" && !hasAuthForPlatform("twitch", settings)) {
+      setAuthMessage(`Sign in to twitch before opening twitch/${channel}.`);
       return;
     }
 
@@ -1336,7 +1346,7 @@ const MainApp: React.FC = () => {
     const content = composerText.trim();
     if (!content || !activeTab) return;
 
-    const activeSourceIds = activeTab.sourceIds.filter((sourceId) => sourceById.has(sourceId));
+    const activeSourceIds = writableActiveTabSources.map((source) => source.id);
     const targetSourceIds =
       sendTargetId === SEND_TARGET_TAB_ALL
         ? activeSourceIds
@@ -1408,13 +1418,6 @@ const MainApp: React.FC = () => {
         .map((entry) => `${entry.label}: ${entry.error}`)
         .join(" | ");
       const extraFailures = failed.length > 3 ? ` (+${failed.length - 3} more)` : "";
-      const needsTikTokKeySetup = failed.some((entry) =>
-        /tiktok|sign api key|api key/i.test(entry.label) || /sign api key|api key/i.test(entry.error)
-      );
-      if (needsTikTokKeySetup) {
-        setShowTikTokKeyEditor(true);
-      }
-
       if (sentCount > 0) {
         setAuthMessage(`Sent to ${sentCount}/${targetSourceIds.length}. Failed: ${failureSummary}${extraFailures}`);
       } else {
@@ -1467,49 +1470,6 @@ const MainApp: React.FC = () => {
     }
   };
 
-  const signInYouTube = async () => {
-    if (!youtubeAlphaEnabled) {
-      setAuthMessage("YouTube is alpha-only in this build.");
-      return;
-    }
-    if (!youtubeOAuthConfigured) {
-      setAuthMessage("YouTube OAuth Client ID is missing in this build. Contact the app maintainer to enable YouTube sign-in.");
-      return;
-    }
-    setAuthBusy("youtube");
-    setAuthMessage("");
-    try {
-      const next = await window.electronAPI.signInYouTube();
-      setSettings({ ...defaultSettings, ...next });
-      setAuthMessage(`Signed in to YouTube as ${next.youtubeUsername ?? "unknown user"} (oauth).`);
-    } catch (error) {
-      setAuthMessage(error instanceof Error ? error.message : String(error));
-    } finally {
-      setAuthBusy(null);
-    }
-  };
-
-  const signInTikTok = async () => {
-    if (!tiktokAlphaEnabled) {
-      setAuthMessage("TikTok is alpha-only in this build.");
-      return;
-    }
-    setAuthBusy("tiktok");
-    setAuthMessage("");
-    try {
-      const next = await window.electronAPI.signInTikTok();
-      setSettings({ ...defaultSettings, ...next });
-      const username = next.tiktokUsername?.trim() ? next.tiktokUsername : "signed-in user";
-      setAuthMessage(`Signed in to TikTok as ${username}.`);
-      setShowTikTokKeyEditor(false);
-    } catch (error) {
-      setAuthMessage(error instanceof Error ? error.message : String(error));
-      setShowTikTokKeyEditor(true);
-    } finally {
-      setAuthBusy(null);
-    }
-  };
-
   const signOutTwitch = async () => {
     const next = await window.electronAPI.signOutTwitch();
     setSettings({ ...defaultSettings, ...next });
@@ -1520,67 +1480,26 @@ const MainApp: React.FC = () => {
     setSettings({ ...defaultSettings, ...next });
   };
 
-  const signOutYouTube = async () => {
-    const next = await window.electronAPI.signOutYouTube();
-    setSettings({ ...defaultSettings, ...next });
-  };
-
-  const signOutTikTok = async () => {
-    const next = await window.electronAPI.signOutTikTok();
-    setSettings({ ...defaultSettings, ...next });
-  };
-
-  const saveTikTokApiKey = async () => {
-    try {
-      const next = await window.electronAPI.setSettings({
-        tiktokSignApiKey: tiktokApiKeyInput.trim()
-      });
-      setSettings({ ...defaultSettings, ...next });
-      setAuthMessage(
-        (next.tiktokSignApiKey ?? "").trim()
-          ? "TikTok API key saved. You can now send messages in TikTok chats."
-          : "TikTok API key cleared."
-      );
-      if ((next.tiktokSignApiKey ?? "").trim()) {
-        setShowTikTokKeyEditor(false);
-      }
-    } catch (error) {
-      setAuthMessage(error instanceof Error ? error.message : String(error));
-    }
-  };
-
-  useEffect(() => {
-    if (!authed) return;
-    if (!hasAuthForPlatform(platformInput, settings)) {
-      const fallbackPlatform: Platform =
-        settings.twitchToken || settings.twitchGuest
-          ? "twitch"
-          : settings.kickAccessToken || settings.kickGuest
-            ? "kick"
-            : youtubeAlphaEnabled && settings.youtubeAccessToken
-              ? "youtube"
-              : tiktokAlphaEnabled && tiktokSignedIn
-                ? "tiktok"
-                : "twitch";
-      setPlatformInput(fallbackPlatform);
-    }
-  }, [authed, platformInput, settings, tiktokAlphaEnabled, tiktokSignedIn, youtubeAlphaEnabled]);
-
   useEffect(() => {
     if (!sessionHydrated || sources.length === 0) return;
     for (const source of sources) {
-      if (!hasAuthForPlatform(source.platform, settings)) continue;
+      if (source.platform === "twitch" && !hasAuthForPlatform("twitch", settings)) continue;
       void ensureAdapterConnected(source, settings);
     }
   }, [sessionHydrated, sources, settings]);
 
   useEffect(() => {
-    if (!activeTab || activeTabSources.length === 0) {
+    if (availablePlatforms.includes(platformInput)) return;
+    setPlatformInput(availablePlatforms[0] ?? "kick");
+  }, [availablePlatforms, platformInput]);
+
+  useEffect(() => {
+    if (!activeTab || writableActiveTabSources.length === 0) {
       setSendTargetId(SEND_TARGET_TAB_ALL);
       return;
     }
 
-    const validSourceIds = activeTabSources.map((source) => source.id);
+    const validSourceIds = writableActiveTabSources.map((source) => source.id);
     const defaultTarget = validSourceIds.length === 1 ? validSourceIds[0] : SEND_TARGET_TAB_ALL;
 
     setSendTargetId((previous) => {
@@ -1589,7 +1508,7 @@ const MainApp: React.FC = () => {
       }
       return validSourceIds.includes(previous) ? previous : defaultTarget;
     });
-  }, [activeTab, activeTabSources]);
+  }, [activeTab, writableActiveTabSources]);
 
   useEffect(() => {
     setNewestLocked(true);
@@ -1609,46 +1528,6 @@ const MainApp: React.FC = () => {
         <div className="login-card">
           <h1>MultiChat</h1>
           <p>Loading your local profile...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!authed) {
-    return (
-      <div className="login-gate">
-        <div className="login-card">
-          <h1>MultiChat</h1>
-          <p>Sign in with Twitch, Kick, or TikTok first.</p>
-          <div className="login-buttons">
-            <button type="button" onClick={signInTwitch} disabled={authBusy !== null}>
-              {authBusy === "twitch" ? "Signing in..." : "Sign in with Twitch"}
-            </button>
-            <button type="button" onClick={signInKick} disabled={authBusy !== null}>
-              {authBusy === "kick" ? "Signing in..." : "Sign in with Kick"}
-            </button>
-            {tiktokAlphaEnabled ? (
-              <button type="button" onClick={signInTikTok} disabled={authBusy !== null}>
-                {authBusy === "tiktok" ? "Signing in..." : "Sign in with TikTok"}
-              </button>
-            ) : null}
-            {youtubeAlphaEnabled ? (
-              <button type="button" onClick={signInYouTube} disabled={authBusy !== null || !youtubeOAuthConfigured}>
-                {authBusy === "youtube" ? "Signing in..." : youtubeOAuthConfigured ? "Sign in with YouTube" : "YouTube OAuth Missing"}
-              </button>
-            ) : null}
-          </div>
-          {!settings.twitchClientId || !settings.kickClientId ? (
-            <p className="login-warning">Managed OAuth credentials are missing for one or more platforms in this build.</p>
-          ) : null}
-          {youtubeAlphaEnabled && !youtubeOAuthConfigured ? (
-            <p className="login-warning">YouTube OAuth Client ID is missing in this build.</p>
-          ) : null}
-          {tiktokAlphaEnabled ? <p className="login-warning">TikTok LIVE is enabled as an alpha feature in this build.</p> : null}
-          {tiktokAlphaEnabled && !tiktokSignApiKeyConfigured && showTikTokKeyEditor ? (
-            <p className="login-warning">Add a TikTok Sign API key after login to enable sending messages.</p>
-          ) : null}
-          {authMessage ? <p className="login-message">{authMessage}</p> : null}
         </div>
       </div>
     );
@@ -1679,10 +1558,12 @@ const MainApp: React.FC = () => {
             onChange={(event) => setPlatformInput(event.target.value as Platform)}
             className="platform-select"
           >
-            {settings.twitchToken || settings.twitchGuest ? <option value="twitch">[T] Twitch</option> : null}
-            {settings.kickAccessToken || settings.kickGuest ? <option value="kick">[K] Kick</option> : null}
-            {youtubeAlphaEnabled && settings.youtubeAccessToken ? <option value="youtube">[Y] YouTube</option> : null}
-            {tiktokAlphaEnabled && tiktokSignedIn ? <option value="tiktok">[Ti] TikTok</option> : null}
+            {availablePlatforms.map((platform) => (
+              <option key={platform} value={platform}>
+                [{platformIconGlyph(platform)}] {platform[0].toUpperCase()}
+                {platform.slice(1)}
+              </option>
+            ))}
           </select>
           <input
             value={channelInput}
@@ -1694,15 +1575,53 @@ const MainApp: React.FC = () => {
           <button type="submit">Open Tab</button>
         </form>
         <div className="top-actions">
-          <button type="button" onClick={() => void checkForUpdatesNow()}>
-            Check Updates
-          </button>
-          <button type="button" onClick={() => window.electronAPI.openOverlay()}>
-            Overlay
-          </button>
-          <button type="button" onClick={() => window.electronAPI.openViewer()}>
-            Viewer
-          </button>
+          <details className="menu-dropdown">
+            <summary>Menu</summary>
+            <div className="menu-dropdown-panel">
+              <div className="menu-group">
+                <strong>View</strong>
+                <button type="button" onClick={() => window.electronAPI.openOverlay()}>
+                  Open Overlay
+                </button>
+                <button type="button" onClick={() => window.electronAPI.openViewer()}>
+                  Open Viewer
+                </button>
+              </div>
+              <div className="menu-group">
+                <strong>Accounts</strong>
+                <details className="menu-submenu">
+                  <summary>Twitch</summary>
+                  {settings.twitchToken || settings.twitchGuest ? (
+                    <button type="button" onClick={() => void signOutTwitch()}>
+                      Sign out Twitch
+                    </button>
+                  ) : (
+                    <button type="button" onClick={() => void signInTwitch()} disabled={authBusy !== null}>
+                      {authBusy === "twitch" ? "Signing in..." : "Sign in Twitch"}
+                    </button>
+                  )}
+                </details>
+                <details className="menu-submenu">
+                  <summary>Kick</summary>
+                  {settings.kickAccessToken || settings.kickGuest ? (
+                    <button type="button" onClick={() => void signOutKick()}>
+                      Sign out Kick
+                    </button>
+                  ) : (
+                    <button type="button" onClick={() => void signInKick()} disabled={authBusy !== null}>
+                      {authBusy === "kick" ? "Signing in..." : "Sign in Kick"}
+                    </button>
+                  )}
+                </details>
+              </div>
+              <div className="menu-group">
+                <strong>System</strong>
+                <button type="button" onClick={() => void checkForUpdatesNow()}>
+                  Check for Updates
+                </button>
+              </div>
+            </div>
+          </details>
         </div>
       </header>
 
@@ -1711,81 +1630,22 @@ const MainApp: React.FC = () => {
           <PlatformIcon platform="twitch" />
           Twitch: {settings.twitchUsername || "off"}
         </span>
-        <span className={settings.kickAccessToken || settings.kickGuest ? "account-pill on" : "account-pill"}>
+        <span className={settings.kickAccessToken ? "account-pill on" : "account-pill"}>
           <PlatformIcon platform="kick" />
-          Kick: {settings.kickUsername || "off"}
+          Kick typing: {settings.kickUsername || "off"}
         </span>
         {youtubeAlphaEnabled ? (
-          <span className={settings.youtubeAccessToken ? "account-pill on" : "account-pill"}>
+          <span className="account-pill on">
             <PlatformIcon platform="youtube" />
-            YouTube: {settings.youtubeUsername || "off"}
+            YouTube: read-only
           </span>
         ) : null}
         {tiktokAlphaEnabled ? (
-          <span className={tiktokSignedIn ? "account-pill on" : "account-pill"}>
+          <span className="account-pill on">
             <PlatformIcon platform="tiktok" />
-            TikTok: {tiktokSignedIn ? settings.tiktokUsername || "signed-in" : "off"}
+            TikTok: read-only
           </span>
         ) : null}
-        {tiktokAlphaEnabled && showTikTokKeyEditor ? (
-          <div className="tiktok-api-key">
-            <input
-              type="password"
-              value={tiktokApiKeyInput}
-              onChange={(event) => setTikTokApiKeyInput(event.target.value)}
-              placeholder="TikTok Sign API Key"
-              autoCapitalize="off"
-              autoCorrect="off"
-            />
-            <button type="button" className="ghost" onClick={() => void saveTikTokApiKey()}>
-              Save TikTok Key
-            </button>
-          </div>
-        ) : null}
-        {settings.twitchToken || settings.twitchGuest ? (
-          <button type="button" className="ghost" onClick={() => void signOutTwitch()}>
-            Sign out Twitch
-          </button>
-        ) : (
-          <button type="button" className="ghost" onClick={() => void signInTwitch()} disabled={authBusy !== null}>
-            {authBusy === "twitch" ? "Signing in..." : "Sign in Twitch"}
-          </button>
-        )}
-        {settings.kickAccessToken || settings.kickGuest ? (
-          <button type="button" className="ghost" onClick={() => void signOutKick()}>
-            Sign out Kick
-          </button>
-        ) : (
-          <button type="button" className="ghost" onClick={() => void signInKick()} disabled={authBusy !== null}>
-            {authBusy === "kick" ? "Signing in..." : "Sign in Kick"}
-          </button>
-        )}
-        {youtubeAlphaEnabled
-          ? settings.youtubeAccessToken
-            ? (
-                <button type="button" className="ghost" onClick={() => void signOutYouTube()}>
-                  Sign out YouTube
-                </button>
-              )
-            : (
-                <button type="button" className="ghost" onClick={() => void signInYouTube()} disabled={authBusy !== null}>
-                  {authBusy === "youtube" ? "Signing in..." : "Sign in YouTube"}
-                </button>
-              )
-          : null}
-        {tiktokAlphaEnabled
-          ? tiktokSignedIn
-            ? (
-                <button type="button" className="ghost" onClick={() => void signOutTikTok()}>
-                  Sign out TikTok
-                </button>
-              )
-            : (
-                <button type="button" className="ghost" onClick={() => void signInTikTok()} disabled={authBusy !== null}>
-                  {authBusy === "tiktok" ? "Signing in..." : "Sign in TikTok"}
-                </button>
-              )
-          : null}
       </div>
 
       <nav className="tabbar">
@@ -1939,12 +1799,12 @@ const MainApp: React.FC = () => {
                 void sendActiveMessage();
               }}
             >
-              {activeTabSources.length > 0 ? (
+              {writableActiveTabSources.length > 0 ? (
                 <select value={sendTargetId} onChange={(event) => setSendTargetId(event.target.value)}>
-                  {activeTabSources.length > 1 ? (
-                    <option value={SEND_TARGET_TAB_ALL}>[ALL] All chats in this tab ({activeTabSources.length})</option>
+                  {writableActiveTabSources.length > 1 ? (
+                    <option value={SEND_TARGET_TAB_ALL}>[ALL] All writable chats in this tab ({writableActiveTabSources.length})</option>
                   ) : null}
-                  {activeTabSources.map((source) => (
+                  {writableActiveTabSources.map((source) => (
                     <option key={source.id} value={source.id}>
                       [{platformIconGlyph(source.platform)}] {source.platform}/{source.channel}
                     </option>
@@ -1956,8 +1816,9 @@ const MainApp: React.FC = () => {
                 onChange={(event) => setComposerText(event.target.value)}
                 placeholder={composerPlaceholder}
                 maxLength={500}
+                disabled={writableActiveTabSources.length === 0}
               />
-              <button type="submit" disabled={sending || !composerText.trim()}>
+              <button type="submit" disabled={sending || writableActiveTabSources.length === 0 || !composerText.trim()}>
                 {sending ? "Sending..." : "Send"}
               </button>
             </form>

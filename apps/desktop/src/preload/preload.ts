@@ -28,7 +28,6 @@ type AppSettings = {
   tiktokSessionId?: string;
   tiktokTtTargetIdc?: string;
   tiktokUsername?: string;
-  tiktokSignApiKey?: string;
   overlayTransparent?: boolean;
   verboseLogs?: boolean;
   columns?: number;

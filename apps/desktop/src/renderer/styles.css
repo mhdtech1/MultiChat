@@ -166,6 +166,91 @@ select {
 .top-actions {
   display: flex;
   gap: 8px;
+  position: relative;
+}
+
+.menu-dropdown {
+  position: relative;
+}
+
+.menu-dropdown > summary {
+  list-style: none;
+  border: 1px solid var(--border-soft);
+  background: var(--bg-panel);
+  color: var(--text-main);
+  border-radius: 9px;
+  padding: 10px 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.menu-dropdown > summary::-webkit-details-marker {
+  display: none;
+}
+
+.menu-dropdown[open] > summary {
+  border-color: var(--accent);
+}
+
+.menu-dropdown-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 40;
+  min-width: 240px;
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: rgba(17, 29, 35, 0.98);
+  box-shadow: 0 16px 45px var(--shadow);
+}
+
+.menu-group {
+  display: grid;
+  gap: 6px;
+}
+
+.menu-group strong {
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.menu-group button {
+  border: 1px solid var(--border-soft);
+  background: #18303a;
+  color: var(--text-main);
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.menu-group button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.menu-submenu {
+  border: 1px solid rgba(38, 66, 79, 0.85);
+  border-radius: 8px;
+  padding: 6px;
+  display: grid;
+  gap: 6px;
+}
+
+.menu-submenu > summary {
+  list-style: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-main);
+}
+
+.menu-submenu > summary::-webkit-details-marker {
+  display: none;
 }
 
 .account-strip {

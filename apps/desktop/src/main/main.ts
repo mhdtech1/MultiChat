@@ -55,7 +55,6 @@ type AppSettings = {
   tiktokSessionId?: string;
   tiktokTtTargetIdc?: string;
   tiktokUsername?: string;
-  tiktokSignApiKey?: string;
   overlayTransparent?: boolean;
   verboseLogs?: boolean;
   columns?: number;
@@ -89,13 +88,14 @@ const LEGACY_SIGNATURE_UPDATE_MESSAGE =
   "Updater could not apply this update due to a legacy app signature. Download and install the latest MultiChat release once from GitHub; future restart updates will then work.";
 const YOUTUBE_MISSING_OAUTH_MESSAGE =
   "YouTube sign-in is not configured in this build. Configure a YouTube OAuth Client ID (secret optional) and try again.";
+const YOUTUBE_READONLY_UNAVAILABLE_MESSAGE = "YouTube read-only is not configured in this build.";
 const YOUTUBE_ALPHA_DISABLED_MESSAGE = "YouTube is an alpha-only feature and is disabled in this beta build.";
 const TIKTOK_ALPHA_DISABLED_MESSAGE = "TikTok LIVE is an alpha-only feature and is disabled in this beta build.";
 const TIKTOK_SIGN_IN_CANCELLED_MESSAGE = "TikTok sign-in was cancelled before completion.";
 const TIKTOK_SIGN_IN_TIMEOUT_MESSAGE = "TikTok sign-in timed out. Please try again.";
 const TIKTOK_SIGN_IN_REQUIRED_MESSAGE = "Sign in with TikTok before sending messages.";
 const TIKTOK_SIGN_KEY_REQUIRED_MESSAGE =
-  "TikTok sending requires a Sign API key. Add it in MultiChat under TikTok API Key, then try again.";
+  "TikTok sending is not configured in this build.";
 const TIKTOK_AUTH_PARTITION = "persist:multichat-tiktok-auth";
 const TIKTOK_AUTH_TIMEOUT_MS = 4 * 60 * 1000;
 const TIKTOK_LOGIN_URL = "https://www.tiktok.com/login";
@@ -108,16 +108,13 @@ const KICK_MANAGED_CLIENT_ID = "01KGRFF03VYRJMB3W4369Y07CS";
 const KICK_MANAGED_CLIENT_SECRET = "29f43591eb0496352c66ea36f55c5c21e3fbc5053ba22568194e0c950c174794";
 const YOUTUBE_MANAGED_CLIENT_ID = "1008732662207-rufcsa7rafob02h29docduk7pboim0s8.apps.googleusercontent.com";
 const YOUTUBE_MANAGED_CLIENT_SECRET = "";
+const YOUTUBE_MANAGED_API_KEY = "";
 const TWITCH_SCOPES = ["chat:read", "chat:edit"];
 const KICK_SCOPES = ["user:read", "channel:read", "chat:write"];
 const YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl"];
 const KICK_SCOPE_VERSION = 2;
-const YOUTUBE_ALPHA_ENABLED = ["1", "true", "yes", "on"].includes(
-  (process.env.MULTICHAT_YOUTUBE_ALPHA ?? "").trim().toLowerCase()
-);
-const TIKTOK_ALPHA_ENABLED = !["0", "false", "no", "off"].includes(
-  (process.env.MULTICHAT_TIKTOK_ALPHA ?? "1").trim().toLowerCase()
-);
+const YOUTUBE_ALPHA_ENABLED = true;
+const TIKTOK_ALPHA_ENABLED = true;
 
 class JsonSettingsStore {
   private readonly filePath: string;
@@ -781,6 +778,9 @@ const youtubeConfig = () => ({
   redirectUri: store.get("youtubeRedirectUri")?.trim() || YOUTUBE_DEFAULT_REDIRECT_URI
 });
 
+const getYouTubePublicApiKey = () =>
+  (store.get("youtubeApiKey")?.trim() ?? "") || (process.env.YOUTUBE_API_KEY ?? YOUTUBE_MANAGED_API_KEY).trim();
+
 const saveYouTubeTokens = (tokens: { accessToken: string; refreshToken?: string; expiresIn?: number }) => {
   const currentRefresh = store.get("youtubeRefreshToken")?.trim() ?? "";
   const refreshToken = (tokens.refreshToken ?? currentRefresh).trim();
@@ -863,6 +863,40 @@ const youtubeFetchWithAuth = async (input: string | URL, init: RequestInit = {},
   return response;
 };
 
+const youtubeFetchReadOnly = async (input: string | URL, init: RequestInit = {}): Promise<Response> => {
+  const hasOAuthSession = Boolean((store.get("youtubeAccessToken")?.trim() ?? "") || (store.get("youtubeRefreshToken")?.trim() ?? ""));
+  if (hasOAuthSession) {
+    try {
+      const authedResponse = await youtubeFetchWithAuth(input, init);
+      if (authedResponse.status !== 401 && authedResponse.status !== 403) {
+        return authedResponse;
+      }
+    } catch {
+      // Fall through to API-key mode.
+    }
+  }
+
+  const apiKey = getYouTubePublicApiKey();
+  if (!apiKey) {
+    throw new Error(YOUTUBE_READONLY_UNAVAILABLE_MESSAGE);
+  }
+
+  const url = new URL(typeof input === "string" ? input : input.toString());
+  if (!url.searchParams.get("key")) {
+    url.searchParams.set("key", apiKey);
+  }
+
+  const headers = new Headers(init.headers ?? {});
+  if (!headers.has("Accept")) {
+    headers.set("Accept", "application/json");
+  }
+
+  return fetch(url, {
+    ...init,
+    headers
+  });
+};
+
 const parseYouTubeChannelFromInput = async (rawInput: string): Promise<{ channelId: string; channelTitle: string }> => {
   const input = normalizeYouTubeInput(rawInput);
   if (!input) {
@@ -874,7 +908,7 @@ const parseYouTubeChannelFromInput = async (rawInput: string): Promise<{ channel
     byId.searchParams.set("part", "snippet");
     byId.searchParams.set("id", input);
     byId.searchParams.set("maxResults", "1");
-    const response = await youtubeFetchWithAuth(byId);
+    const response = await youtubeFetchReadOnly(byId);
     const payload = await fetchJsonOrThrow<YouTubeChannelsResponse>(response, "YouTube channel lookup");
     const first = Array.isArray(payload.items) ? payload.items[0] : undefined;
     if (first?.id) {
@@ -891,7 +925,7 @@ const parseYouTubeChannelFromInput = async (rawInput: string): Promise<{ channel
     byHandle.searchParams.set("part", "snippet");
     byHandle.searchParams.set("forHandle", handle);
     byHandle.searchParams.set("maxResults", "1");
-    const response = await youtubeFetchWithAuth(byHandle);
+    const response = await youtubeFetchReadOnly(byHandle);
     const payload = await fetchJsonOrThrow<YouTubeChannelsResponse>(response, "YouTube handle lookup");
     const first = Array.isArray(payload.items) ? payload.items[0] : undefined;
     if (first?.id) {
@@ -907,7 +941,7 @@ const parseYouTubeChannelFromInput = async (rawInput: string): Promise<{ channel
   search.searchParams.set("type", "channel");
   search.searchParams.set("q", input);
   search.searchParams.set("maxResults", "1");
-  const response = await youtubeFetchWithAuth(search);
+  const response = await youtubeFetchReadOnly(search);
   const payload = await fetchJsonOrThrow<YouTubeSearchChannelsResponse>(response, "YouTube channel search");
   const first = Array.isArray(payload.items) ? payload.items[0] : undefined;
   const channelId = first?.id?.channelId?.trim();
@@ -930,7 +964,7 @@ const resolveYouTubeLiveChat = async (rawInput: string) => {
   liveSearch.searchParams.set("type", "video");
   liveSearch.searchParams.set("maxResults", "1");
   liveSearch.searchParams.set("order", "date");
-  const searchResponse = await youtubeFetchWithAuth(liveSearch);
+  const searchResponse = await youtubeFetchReadOnly(liveSearch);
   const searchPayload = await fetchJsonOrThrow<YouTubeSearchChannelsResponse>(searchResponse, "YouTube live stream lookup");
   const firstVideo = Array.isArray(searchPayload.items) ? searchPayload.items[0] : undefined;
   const videoId = firstVideo?.id?.videoId?.trim() ?? "";
@@ -941,7 +975,7 @@ const resolveYouTubeLiveChat = async (rawInput: string) => {
   const videoDetails = new URL("https://www.googleapis.com/youtube/v3/videos");
   videoDetails.searchParams.set("part", "liveStreamingDetails,snippet");
   videoDetails.searchParams.set("id", videoId);
-  const videoResponse = await youtubeFetchWithAuth(videoDetails);
+  const videoResponse = await youtubeFetchReadOnly(videoDetails);
   const videoPayload = await fetchJsonOrThrow<YouTubeVideosResponse>(videoResponse, "YouTube live chat lookup");
   const video = Array.isArray(videoPayload.items) ? videoPayload.items[0] : undefined;
   const liveChatId = video?.liveStreamingDetails?.activeLiveChatId?.trim() ?? "";
@@ -1453,12 +1487,12 @@ app.whenReady().then(() => {
     youtubeClientId: YOUTUBE_ALPHA_ENABLED ? process.env.YOUTUBE_CLIENT_ID ?? YOUTUBE_MANAGED_CLIENT_ID : "",
     youtubeClientSecret: YOUTUBE_ALPHA_ENABLED ? process.env.YOUTUBE_CLIENT_SECRET ?? YOUTUBE_MANAGED_CLIENT_SECRET : "",
     youtubeRedirectUri: process.env.YOUTUBE_REDIRECT_URI ?? YOUTUBE_DEFAULT_REDIRECT_URI,
+    youtubeApiKey: YOUTUBE_ALPHA_ENABLED ? process.env.YOUTUBE_API_KEY ?? YOUTUBE_MANAGED_API_KEY : "",
     youtubeAlphaEnabled: YOUTUBE_ALPHA_ENABLED,
     tiktokAlphaEnabled: TIKTOK_ALPHA_ENABLED,
     tiktokSessionId: "",
     tiktokTtTargetIdc: "",
-    tiktokUsername: "",
-    tiktokSignApiKey: process.env.TIKTOK_SIGN_API_KEY ?? ""
+    tiktokUsername: ""
   });
 
   const managedTwitchClientId = (process.env.TWITCH_CLIENT_ID ?? TWITCH_MANAGED_CLIENT_ID).trim();
@@ -1494,6 +1528,10 @@ app.whenReady().then(() => {
     if (!store.get("youtubeRedirectUri")?.trim() && managedYouTubeRedirectUri) {
       store.set("youtubeRedirectUri", managedYouTubeRedirectUri);
     }
+    const managedYouTubeApiKey = (process.env.YOUTUBE_API_KEY ?? YOUTUBE_MANAGED_API_KEY).trim();
+    if (!store.get("youtubeApiKey")?.trim() && managedYouTubeApiKey) {
+      store.set("youtubeApiKey", managedYouTubeApiKey);
+    }
   } else {
     store.set({
       youtubeAlphaEnabled: false,
@@ -1509,8 +1547,7 @@ app.whenReady().then(() => {
       tiktokAlphaEnabled: false,
       tiktokSessionId: "",
       tiktokTtTargetIdc: "",
-      tiktokUsername: "",
-      tiktokSignApiKey: ""
+      tiktokUsername: ""
     });
   }
 
@@ -1597,8 +1634,7 @@ app.whenReady().then(() => {
       Object.assign(nextUpdates, {
         tiktokSessionId: "",
         tiktokTtTargetIdc: "",
-        tiktokUsername: "",
-        tiktokSignApiKey: ""
+        tiktokUsername: ""
       });
     }
 
@@ -2008,7 +2044,7 @@ app.whenReady().then(() => {
       requestUrl.searchParams.set("pageToken", pageToken);
     }
 
-    const response = await youtubeFetchWithAuth(requestUrl);
+    const response = await youtubeFetchReadOnly(requestUrl);
     const data = await fetchJsonOrThrow<{
       nextPageToken?: string;
       pollingIntervalMillis?: number;
@@ -2061,8 +2097,7 @@ app.whenReady().then(() => {
 
     const sessionId = store.get("tiktokSessionId")?.trim() ?? "";
     const ttTargetIdc = store.get("tiktokTtTargetIdc")?.trim() ?? "";
-    const runtimeSignApiKey = store.get("tiktokSignApiKey")?.trim() ?? "";
-    const activeSignApiKey = runtimeSignApiKey || TIKTOK_SIGN_API_KEY;
+    const activeSignApiKey = TIKTOK_SIGN_API_KEY;
     const hasAuthenticatedSession = Boolean(sessionId && ttTargetIdc);
 
     const connectionOptions: Record<string, unknown> = {
@@ -2181,8 +2216,7 @@ app.whenReady().then(() => {
     const message = payload?.message?.trim();
     const sessionId = store.get("tiktokSessionId")?.trim() ?? "";
     const ttTargetIdc = store.get("tiktokTtTargetIdc")?.trim() ?? "";
-    const runtimeSignApiKey = store.get("tiktokSignApiKey")?.trim() ?? "";
-    const activeSignApiKey = runtimeSignApiKey || TIKTOK_SIGN_API_KEY;
+    const activeSignApiKey = TIKTOK_SIGN_API_KEY;
     if (!connectionId) {
       throw new Error("TikTok connection id is required.");
     }
