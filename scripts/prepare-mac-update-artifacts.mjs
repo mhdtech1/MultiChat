@@ -2,7 +2,7 @@
 
 import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import yaml from "js-yaml";
@@ -60,6 +60,7 @@ const appUpdatePublishConfig = (() => {
 
 const tempDir = mkdtempSync(path.join(os.tmpdir(), "multichat-mac-release-"));
 const stagedAppPath = path.join(tempDir, "MultiChat.app");
+const dmgRootPath = path.join(tempDir, "dmg-root");
 const verifyExtractDir = path.join(tempDir, "verify-extract");
 
 const toSha512 = (filePath) => {
@@ -100,7 +101,10 @@ try {
   });
 
   rmSync(dmgPath, { force: true });
-  execFileSync("hdiutil", ["create", "-volname", "MultiChat", "-srcfolder", stagedAppPath, "-ov", "-format", "UDZO", dmgPath], {
+  mkdirSync(dmgRootPath, { recursive: true });
+  execFileSync("ditto", [stagedAppPath, path.join(dmgRootPath, "MultiChat.app")], { stdio: "inherit" });
+  symlinkSync("/Applications", path.join(dmgRootPath, "Applications"));
+  execFileSync("hdiutil", ["create", "-volname", "MultiChat", "-srcfolder", dmgRootPath, "-ov", "-format", "UDZO", dmgPath], {
     stdio: "inherit"
   });
 
