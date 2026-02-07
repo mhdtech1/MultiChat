@@ -131,6 +131,20 @@ const defaultSettings: Settings = {
 const hasTikTokSession = (settings: Settings) =>
   Boolean((settings.tiktokSessionId ?? "").trim() && (settings.tiktokTtTargetIdc ?? "").trim());
 const normalizeUserKey = (value: string) => value.trim().toLowerCase();
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const isTwitchMentionForUser = (message: ChatMessage, twitchUsername?: string) => {
+  if (message.platform !== "twitch") return false;
+  const username = (twitchUsername ?? "").trim().replace(/^@+/, "");
+  if (!username) return false;
+  if (normalizeUserKey(message.username) === normalizeUserKey(username)) return false;
+  const text = message.message ?? "";
+  if (!text.trim()) return false;
+
+  const escaped = escapeRegExp(username);
+  const mentionPattern = new RegExp(`(^|\\W)@?${escaped}(\\W|$)`, "i");
+  return mentionPattern.test(text);
+};
 
 const createId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -721,6 +735,8 @@ const MainApp: React.FC = () => {
   const lastMessageByUser = useRef<Map<string, number>>(new Map());
   const emoteFetchInFlight = useRef<Set<string>>(new Set());
   const channelEmoteMapBySourceIdRef = useRef<Record<string, EmoteMap>>({});
+  const mentionAudioContextRef = useRef<AudioContext | null>(null);
+  const lastMentionAlertAtRef = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -1057,6 +1073,49 @@ const MainApp: React.FC = () => {
         const updated = [...(prev[source.id] ?? []), message].slice(-800);
         return { ...prev, [source.id]: updated };
       });
+
+      if (isTwitchMentionForUser(message, currentSettings.twitchUsername)) {
+        const now = Date.now();
+        if (now - lastMentionAlertAtRef.current > 1000) {
+          lastMentionAlertAtRef.current = now;
+
+          try {
+            const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+            if (Ctx) {
+              const audioContext = mentionAudioContextRef.current ?? new Ctx();
+              mentionAudioContextRef.current = audioContext;
+              if (audioContext.state === "suspended") {
+                void audioContext.resume();
+              }
+              const startAt = audioContext.currentTime;
+              const oscillator = audioContext.createOscillator();
+              const gain = audioContext.createGain();
+              oscillator.type = "sine";
+              oscillator.frequency.setValueAtTime(880, startAt);
+              gain.gain.setValueAtTime(0.0001, startAt);
+              gain.gain.exponentialRampToValueAtTime(0.13, startAt + 0.01);
+              gain.gain.exponentialRampToValueAtTime(0.0001, startAt + 0.22);
+              oscillator.connect(gain);
+              gain.connect(audioContext.destination);
+              oscillator.start(startAt);
+              oscillator.stop(startAt + 0.24);
+            }
+          } catch {
+            // no-op
+          }
+
+          if ("Notification" in window && Notification.permission === "granted") {
+            const notification = new Notification(`Twitch mention in #${message.channel}`, {
+              body: `${message.displayName}: ${message.message}`.slice(0, 240),
+              silent: true
+            });
+            notification.onclick = () => {
+              window.focus();
+              notification.close();
+            };
+          }
+        }
+      }
 
       if (source.platform === "twitch" && !channelEmoteMapBySourceIdRef.current[source.id]) {
         const roomId = extractTwitchRoomId(message);
@@ -1520,6 +1579,15 @@ const MainApp: React.FC = () => {
       if (!status.message || status.state === "idle") return;
       setAuthMessage(status.message);
     });
+  }, []);
+
+  useEffect(() => {
+    if (!("Notification" in window)) return;
+    if (Notification.permission === "default") {
+      void Notification.requestPermission().catch(() => {
+        // no-op
+      });
+    }
   }, []);
 
   if (loading) {
