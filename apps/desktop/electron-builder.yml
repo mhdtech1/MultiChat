@@ -1,5 +1,6 @@
 appId: com.multichat.desktop
 productName: MultiChat
+afterPack: ../../scripts/after-pack-prune-locales.cjs
 files:
   - dist/main/**
   - dist/preload/**

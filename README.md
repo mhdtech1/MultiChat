@@ -38,9 +38,9 @@ Permanent fix (in progress):
 - Twitch chat sign-in flow (OAuth) with token/username auto-fill.
 - Kick sign-in flow (OAuth) with token storage for future adapter use.
 - Unified message model across Twitch/Kick/YouTube.
-- OBS-friendly overlay pop-out window and viewer mode.
+- Fullscreen viewer mode for display-first setups.
 - Local-only moderation helpers (keyword filters, highlights, copy actions).
-- Hotkeys for overlay, search focus, and clearing the chat.
+- Hotkeys for search focus and clearing chat.
 - Local JSON settings storage (local only).
 - Secure IPC (contextIsolation + preload API).
 

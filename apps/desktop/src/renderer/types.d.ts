@@ -26,8 +26,16 @@ type AppSettings = {
   tiktokSessionId?: string;
   tiktokTtTargetIdc?: string;
   tiktokUsername?: string;
-  overlayTransparent?: boolean;
   verboseLogs?: boolean;
+  performanceMode?: boolean;
+  smartFilterSpam?: boolean;
+  smartFilterScam?: boolean;
+  confirmSendAll?: boolean;
+  tabAlertRules?: Record<string, {
+    keyword?: string;
+    sound?: boolean;
+    notify?: boolean;
+  }>;
   columns?: number;
   hideCommands?: boolean;
   keywordFilters?: string[];
@@ -66,8 +74,6 @@ type ElectronAPI = {
   setSettings: (updates: AppSettings) => Promise<AppSettings>;
   writeLog: (message: string) => Promise<void>;
   toggleVerbose: (enabled: boolean) => Promise<void>;
-  openOverlay: () => Promise<void>;
-  closeOverlay: () => Promise<void>;
   openViewer: () => Promise<void>;
   closeViewer: () => Promise<void>;
   signInTwitch: () => Promise<AppSettings>;

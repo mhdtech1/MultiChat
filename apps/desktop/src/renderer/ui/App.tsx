@@ -5,7 +5,6 @@ import { KickAdapter, TikTokAdapter, TwitchAdapter, YouTubeAdapter } from "@mult
 const mode = window.location.hash.replace("#", "");
 const broadcast = new BroadcastChannel("multichat-chat");
 const hotkeys = {
-  overlay: "Control+Shift+O",
   focusSearch: "Control+Shift+F"
 };
 
@@ -39,8 +38,16 @@ type Settings = {
   tiktokSessionId?: string;
   tiktokTtTargetIdc?: string;
   tiktokUsername?: string;
-  overlayTransparent?: boolean;
   verboseLogs?: boolean;
+  performanceMode?: boolean;
+  smartFilterSpam?: boolean;
+  smartFilterScam?: boolean;
+  confirmSendAll?: boolean;
+  tabAlertRules?: Record<string, {
+    keyword?: string;
+    sound?: boolean;
+    notify?: boolean;
+  }>;
   hideCommands?: boolean;
   keywordFilters?: string[];
   highlightKeywords?: string[];
@@ -94,6 +101,7 @@ type UserLogTarget = {
 };
 
 type ModeratorAction = "timeout_60" | "timeout_600" | "ban" | "unban" | "delete";
+type ReplayWindow = 0 | 5 | 10 | 30;
 
 const defaultSettings: Settings = {
   twitchToken: "",
@@ -121,8 +129,12 @@ const defaultSettings: Settings = {
   tiktokSessionId: "",
   tiktokTtTargetIdc: "",
   tiktokUsername: "",
-  overlayTransparent: true,
   verboseLogs: false,
+  performanceMode: false,
+  smartFilterSpam: true,
+  smartFilterScam: true,
+  confirmSendAll: true,
+  tabAlertRules: {},
   hideCommands: false,
   keywordFilters: [],
   highlightKeywords: []
@@ -132,6 +144,16 @@ const hasTikTokSession = (settings: Settings) =>
   Boolean((settings.tiktokSessionId ?? "").trim() && (settings.tiktokTtTargetIdc ?? "").trim());
 const normalizeUserKey = (value: string) => value.trim().toLowerCase();
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const SCAM_PATTERN =
+  /(t\.me\/|bit\.ly|tinyurl|free (gift|nitro|sub)|claim reward|steamcommunity\.com\/gift|crypto giveaway|double your)/i;
+const COMMAND_SNIPPETS = [
+  "!so {user}",
+  "/timeout {user} 60",
+  "/timeout {user} 600",
+  "/ban {user}",
+  "/unban {user}",
+  "/clear"
+] as const;
 
 const isTwitchMentionForUser = (message: ChatMessage, twitchUsername?: string) => {
   if (message.platform !== "twitch") return false;
@@ -617,41 +639,10 @@ const getRawMessageId = (message: ChatMessage): string | null => {
 };
 
 export const App: React.FC = () => {
-  if (mode === "overlay") {
-    return <OverlayView />;
-  }
   if (mode === "viewer") {
     return <ViewerView />;
   }
   return <MainApp />;
-};
-
-const OverlayView: React.FC = () => {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-
-  useEffect(() => {
-    const handler = (event: MessageEvent<ChatMessage>) => {
-      setMessages((prev) => [...prev.slice(-200), event.data]);
-    };
-    broadcast.addEventListener("message", handler);
-    return () => broadcast.removeEventListener("message", handler);
-  }, []);
-
-  return (
-    <div className="overlay">
-      <header>
-        <span>Overlay Mode</span>
-      </header>
-      <div className="overlay-messages">
-        {messages.map((message) => (
-          <div key={message.id} className="message">
-            <strong style={{ color: message.color }}>{message.displayName}</strong>
-            <span>{message.message}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
 };
 
 const ViewerView: React.FC = () => {
@@ -714,6 +705,13 @@ const MainApp: React.FC = () => {
   const [composerText, setComposerText] = useState("");
   const [sendTargetId, setSendTargetId] = useState<string>(SEND_TARGET_TAB_ALL);
   const [sending, setSending] = useState(false);
+  const [replayWindow, setReplayWindow] = useState<ReplayWindow>(0);
+  const [quickModUser, setQuickModUser] = useState("");
+  const [identityTarget, setIdentityTarget] = useState<{ username: string; displayName: string } | null>(null);
+  const [tabAlertKeywordInput, setTabAlertKeywordInput] = useState("");
+  const [tabAlertSound, setTabAlertSound] = useState(true);
+  const [tabAlertNotify, setTabAlertNotify] = useState(true);
+  const [snippetToInsert, setSnippetToInsert] = useState("");
 
   const [sources, setSources] = useState<ChatSource[]>([]);
   const [tabs, setTabs] = useState<ChatTab[]>([]);
@@ -737,6 +735,10 @@ const MainApp: React.FC = () => {
   const channelEmoteMapBySourceIdRef = useRef<Record<string, EmoteMap>>({});
   const mentionAudioContextRef = useRef<AudioContext | null>(null);
   const lastMentionAlertAtRef = useRef(0);
+  const spamFilterRef = useRef<Map<string, number>>(new Map());
+  const tabsRef = useRef<ChatTab[]>([]);
+  const sourceByIdRef = useRef<Map<string, ChatSource>>(new Map());
+  const lastTabAlertAtRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
     let active = true;
@@ -758,6 +760,9 @@ const MainApp: React.FC = () => {
         if (!active) return;
         const nextSettings = { ...defaultSettings, ...saved };
         setSettings(nextSettings);
+        setTabAlertKeywordInput((nextSettings.tabAlertRules?.[saved.sessionActiveTabId ?? ""]?.keyword ?? "").trim());
+        setTabAlertSound(nextSettings.tabAlertRules?.[saved.sessionActiveTabId ?? ""]?.sound !== false);
+        setTabAlertNotify(nextSettings.tabAlertRules?.[saved.sessionActiveTabId ?? ""]?.notify !== false);
 
         const restoredSources = sanitizeSessionSources(saved.sessionSources).filter((source) => {
           if (source.platform === "youtube" && !nextSettings.youtubeAlphaEnabled) return false;
@@ -813,7 +818,15 @@ const MainApp: React.FC = () => {
   }, [channelEmoteMapBySourceId]);
 
   useEffect(() => {
+    tabsRef.current = tabs;
+  }, [tabs]);
+
+  useEffect(() => {
     let cancelled = false;
+    if (settings.performanceMode) {
+      setGlobalEmoteMap({});
+      return;
+    }
     void Promise.all([fetchBttvGlobalEmotes(), fetchSevenTvGlobalEmotes()]).then(([bttvMap, sevenTvMap]) => {
       if (cancelled) return;
       setGlobalEmoteMap({
@@ -824,7 +837,7 @@ const MainApp: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [settings.performanceMode]);
 
   useEffect(() => {
     const validSourceIds = new Set(sources.map((source) => source.id));
@@ -844,6 +857,7 @@ const MainApp: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false;
+    if (settings.performanceMode) return;
     const twitchSources = sources.filter((source) => source.platform === "twitch");
     for (const source of twitchSources) {
       if (channelEmoteMapBySourceId[source.id]) continue;
@@ -867,14 +881,11 @@ const MainApp: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [channelEmoteMapBySourceId, settings.twitchClientId, settings.twitchToken, sources]);
+  }, [channelEmoteMapBySourceId, settings.performanceMode, settings.twitchClientId, settings.twitchToken, sources]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       const key = `${event.ctrlKey ? "Control+" : ""}${event.shiftKey ? "Shift+" : ""}${event.key.toUpperCase()}`;
-      if (key === hotkeys.overlay.toUpperCase()) {
-        void window.electronAPI.openOverlay();
-      }
       if (key === hotkeys.focusSearch.toUpperCase()) {
         event.preventDefault();
         searchRef.current?.focus();
@@ -894,6 +905,9 @@ const MainApp: React.FC = () => {
   }, []);
 
   const sourceById = useMemo(() => new Map(sources.map((source) => [source.id, source])), [sources]);
+  useEffect(() => {
+    sourceByIdRef.current = sourceById;
+  }, [sourceById]);
   const sourceByPlatformChannel = useMemo(
     () => new Map(sources.map((source) => [`${source.platform}:${source.channel}`, source])),
     [sources]
@@ -943,15 +957,34 @@ const MainApp: React.FC = () => {
     return collapseFanoutLocalEchoes(sorted);
   }, [activeTab, messagesBySource, search]);
 
+  const replayFilteredMessages = useMemo(() => {
+    if (replayWindow <= 0) return activeMessages;
+    const cutoff = Date.now() - replayWindow * 60 * 1000;
+    return activeMessages.filter((message) => messageTimestamp(message) >= cutoff);
+  }, [activeMessages, replayWindow]);
+
   const visibleMessages = useMemo(() => {
-    if (newestLocked || lockCutoffTimestamp === null) return activeMessages;
-    return activeMessages.filter((message) => messageTimestamp(message) <= lockCutoffTimestamp);
-  }, [activeMessages, lockCutoffTimestamp, newestLocked]);
+    if (newestLocked || lockCutoffTimestamp === null) return replayFilteredMessages;
+    return replayFilteredMessages.filter((message) => messageTimestamp(message) <= lockCutoffTimestamp);
+  }, [replayFilteredMessages, lockCutoffTimestamp, newestLocked]);
 
   const pendingNewestCount = useMemo(() => {
     if (newestLocked) return 0;
-    return Math.max(0, activeMessages.length - visibleMessages.length);
-  }, [activeMessages.length, newestLocked, visibleMessages.length]);
+    return Math.max(0, replayFilteredMessages.length - visibleMessages.length);
+  }, [newestLocked, replayFilteredMessages.length, visibleMessages.length]);
+
+  const chatHealth = useMemo(() => {
+    const now = Date.now();
+    const oneMinute = now - 60_000;
+    const fiveMinutes = now - 5 * 60_000;
+    const messagesPerMinute = replayFilteredMessages.filter((message) => messageTimestamp(message) >= oneMinute).length;
+    const uniqueChatters = new Set(
+      replayFilteredMessages
+        .filter((message) => messageTimestamp(message) >= fiveMinutes)
+        .map((message) => normalizeUserKey(message.username))
+    ).size;
+    return { messagesPerMinute, uniqueChatters };
+  }, [replayFilteredMessages]);
 
   const userLogMessages = useMemo(() => {
     if (!userLogTarget) return [];
@@ -963,6 +996,16 @@ const MainApp: React.FC = () => {
     const filtered = merged.filter((message) => normalizeUserKey(message.username) === username);
     return filtered.sort((a, b) => messageTimestamp(b) - messageTimestamp(a)).slice(0, 500);
   }, [messagesBySource, sources, userLogTarget]);
+
+  const identityMessages = useMemo(() => {
+    if (!identityTarget) return [];
+    const key = normalizeUserKey(identityTarget.username);
+    const merged = sources.flatMap((source) => messagesBySource[source.id] ?? []);
+    return merged
+      .filter((message) => normalizeUserKey(message.username) === key)
+      .sort((a, b) => messageTimestamp(b) - messageTimestamp(a))
+      .slice(0, 200);
+  }, [identityTarget, messagesBySource, sources]);
 
   useEffect(() => {
     const list = messageListRef.current;
@@ -980,6 +1023,51 @@ const MainApp: React.FC = () => {
       : sendTargetId === SEND_TARGET_TAB_ALL && writableActiveTabSources.length > 1
         ? `Type a message to all ${writableActiveTabSources.length} chats in this tab`
         : "Type a message";
+
+  const triggerAttention = (title: string, body: string, alertKey: string, allowSound = true, allowNotify = true) => {
+    const now = Date.now();
+    const last = lastTabAlertAtRef.current.get(alertKey) ?? 0;
+    if (now - last < 1200) return;
+    lastTabAlertAtRef.current.set(alertKey, now);
+
+    if (allowSound) {
+      try {
+        const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (Ctx) {
+          const audioContext = mentionAudioContextRef.current ?? new Ctx();
+          mentionAudioContextRef.current = audioContext;
+          if (audioContext.state === "suspended") {
+            void audioContext.resume();
+          }
+          const startAt = audioContext.currentTime;
+          const oscillator = audioContext.createOscillator();
+          const gain = audioContext.createGain();
+          oscillator.type = "sine";
+          oscillator.frequency.setValueAtTime(880, startAt);
+          gain.gain.setValueAtTime(0.0001, startAt);
+          gain.gain.exponentialRampToValueAtTime(0.13, startAt + 0.01);
+          gain.gain.exponentialRampToValueAtTime(0.0001, startAt + 0.22);
+          oscillator.connect(gain);
+          gain.connect(audioContext.destination);
+          oscillator.start(startAt);
+          oscillator.stop(startAt + 0.24);
+        }
+      } catch {
+        // no-op
+      }
+    }
+
+    if (allowNotify && "Notification" in window && Notification.permission === "granted") {
+      const notification = new Notification(title, {
+        body: body.slice(0, 240),
+        silent: true
+      });
+      notification.onclick = () => {
+        window.focus();
+        notification.close();
+      };
+    }
+  };
 
   const ensureAdapterConnected = async (source: ChatSource, currentSettings: Settings) => {
     if (adaptersRef.current.has(source.id)) return;
@@ -1061,6 +1149,13 @@ const MainApp: React.FC = () => {
       lastMessageByUser.current.set(userKey, now);
 
       if (currentSettings.hideCommands && message.message.startsWith("!")) return;
+      if (currentSettings.smartFilterScam !== false && SCAM_PATTERN.test(message.message)) return;
+      if (currentSettings.smartFilterSpam !== false) {
+        const fingerprint = `${normalizeUserKey(message.username)}|${message.channel}|${message.message.trim().toLowerCase()}`;
+        const prevSeenAt = spamFilterRef.current.get(fingerprint) ?? 0;
+        if (now - prevSeenAt < 8000) return;
+        spamFilterRef.current.set(fingerprint, now);
+      }
       if (
         currentSettings.keywordFilters?.some((word) =>
           message.message.toLowerCase().includes(word.toLowerCase())
@@ -1070,51 +1165,36 @@ const MainApp: React.FC = () => {
       }
 
       setMessagesBySource((prev) => {
-        const updated = [...(prev[source.id] ?? []), message].slice(-800);
+        const maxHistory = currentSettings.performanceMode ? 300 : 800;
+        const updated = [...(prev[source.id] ?? []), message].slice(-maxHistory);
         return { ...prev, [source.id]: updated };
       });
 
       if (isTwitchMentionForUser(message, currentSettings.twitchUsername)) {
-        const now = Date.now();
         if (now - lastMentionAlertAtRef.current > 1000) {
           lastMentionAlertAtRef.current = now;
-
-          try {
-            const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-            if (Ctx) {
-              const audioContext = mentionAudioContextRef.current ?? new Ctx();
-              mentionAudioContextRef.current = audioContext;
-              if (audioContext.state === "suspended") {
-                void audioContext.resume();
-              }
-              const startAt = audioContext.currentTime;
-              const oscillator = audioContext.createOscillator();
-              const gain = audioContext.createGain();
-              oscillator.type = "sine";
-              oscillator.frequency.setValueAtTime(880, startAt);
-              gain.gain.setValueAtTime(0.0001, startAt);
-              gain.gain.exponentialRampToValueAtTime(0.13, startAt + 0.01);
-              gain.gain.exponentialRampToValueAtTime(0.0001, startAt + 0.22);
-              oscillator.connect(gain);
-              gain.connect(audioContext.destination);
-              oscillator.start(startAt);
-              oscillator.stop(startAt + 0.24);
-            }
-          } catch {
-            // no-op
-          }
-
-          if ("Notification" in window && Notification.permission === "granted") {
-            const notification = new Notification(`Twitch mention in #${message.channel}`, {
-              body: `${message.displayName}: ${message.message}`.slice(0, 240),
-              silent: true
-            });
-            notification.onclick = () => {
-              window.focus();
-              notification.close();
-            };
-          }
+          triggerAttention(
+            `Twitch mention in #${message.channel}`,
+            `${message.displayName}: ${message.message}`,
+            `mention:${message.channel}`
+          );
         }
+      }
+
+      const tabRules = currentSettings.tabAlertRules ?? {};
+      const sourceTabs = tabsRef.current.filter((tab) => tab.sourceIds.includes(source.id));
+      for (const tab of sourceTabs) {
+        const rule = tabRules[tab.id];
+        const keyword = (rule?.keyword ?? "").trim();
+        if (!keyword) continue;
+        if (!message.message.toLowerCase().includes(keyword.toLowerCase())) continue;
+        triggerAttention(
+          `Tab alert in ${source.platform}/${source.channel}`,
+          `${message.displayName}: ${message.message}`,
+          `tab:${tab.id}:${keyword.toLowerCase()}`,
+          rule?.sound !== false,
+          rule?.notify !== false
+        );
       }
 
       if (source.platform === "twitch" && !channelEmoteMapBySourceIdRef.current[source.id]) {
@@ -1420,6 +1500,22 @@ const MainApp: React.FC = () => {
       return;
     }
 
+    if (
+      settings.confirmSendAll !== false &&
+      sendTargetId === SEND_TARGET_TAB_ALL &&
+      targetSourceIds.length > 1 &&
+      !window.confirm(
+        `Send this message to ${targetSourceIds.length} chats?\n\n${targetSourceIds
+          .map((id) => {
+            const source = sourceById.get(id);
+            return source ? `- ${source.platform}/${source.channel}` : `- ${id}`;
+          })
+          .join("\n")}`
+      )
+    ) {
+      return;
+    }
+
     setSending(true);
     setAuthMessage("");
     try {
@@ -1437,10 +1533,7 @@ const MainApp: React.FC = () => {
           }
           try {
             await adapter.sendMessage(content);
-            return {
-              ok: true as const,
-              label
-            };
+            return { ok: true as const, label };
           } catch (error) {
             return {
               ok: false as const,
@@ -1487,6 +1580,48 @@ const MainApp: React.FC = () => {
     } finally {
       setSending(false);
     }
+  };
+
+  const runQuickMod = async (action: Exclude<ModeratorAction, "delete">) => {
+    const username = quickModUser.trim().replace(/^@+/, "");
+    if (!username) {
+      setAuthMessage("Enter a username for quick moderation.");
+      return;
+    }
+    const targetIds =
+      sendTargetId === SEND_TARGET_TAB_ALL
+        ? writableActiveTabSources.map((source) => source.id)
+        : writableActiveTabSources.some((source) => source.id === sendTargetId)
+          ? [sendTargetId]
+          : writableActiveTabSources.slice(0, 1).map((source) => source.id);
+    if (targetIds.length === 0) {
+      setAuthMessage("No writable chat target for moderation.");
+      return;
+    }
+
+    const command =
+      action === "timeout_60"
+        ? `/timeout ${username} 60`
+        : action === "timeout_600"
+          ? `/timeout ${username} 600`
+          : action === "ban"
+            ? `/ban ${username}`
+            : `/unban ${username}`;
+
+    const results = await Promise.all(
+      targetIds.map(async (sourceId) => {
+        const adapter = adaptersRef.current.get(sourceId);
+        if (!adapter) return false;
+        try {
+          await adapter.sendMessage(command);
+          return true;
+        } catch {
+          return false;
+        }
+      })
+    );
+    const ok = results.filter(Boolean).length;
+    setAuthMessage(ok > 0 ? `Quick mod sent to ${ok}/${targetIds.length} chats.` : "Quick mod failed.");
   };
 
   const jumpToNewest = () => {
@@ -1551,6 +1686,33 @@ const MainApp: React.FC = () => {
     if (availablePlatforms.includes(platformInput)) return;
     setPlatformInput(availablePlatforms[0] ?? "kick");
   }, [availablePlatforms, platformInput]);
+
+  useEffect(() => {
+    if (!activeTabId) return;
+    const rule = settings.tabAlertRules?.[activeTabId];
+    setTabAlertKeywordInput((rule?.keyword ?? "").trim());
+    setTabAlertSound(rule?.sound !== false);
+    setTabAlertNotify(rule?.notify !== false);
+  }, [activeTabId, settings.tabAlertRules]);
+
+  const persistSettings = async (updates: Partial<Settings>) => {
+    const next = await window.electronAPI.setSettings(updates as Settings);
+    setSettings({ ...defaultSettings, ...next });
+  };
+
+  const saveCurrentTabAlertRule = async () => {
+    if (!activeTabId) return;
+    const nextRules = {
+      ...(settings.tabAlertRules ?? {}),
+      [activeTabId]: {
+        keyword: tabAlertKeywordInput.trim(),
+        sound: tabAlertSound,
+        notify: tabAlertNotify
+      }
+    };
+    await persistSettings({ tabAlertRules: nextRules });
+    setAuthMessage("Tab alert rule saved.");
+  };
 
   useEffect(() => {
     if (!activeTab || writableActiveTabSources.length === 0) {
@@ -1648,12 +1810,18 @@ const MainApp: React.FC = () => {
             <div className="menu-dropdown-panel">
               <div className="menu-group">
                 <strong>View</strong>
-                <button type="button" onClick={() => window.electronAPI.openOverlay()}>
-                  Open Overlay
-                </button>
                 <button type="button" onClick={() => window.electronAPI.openViewer()}>
                   Open Viewer
                 </button>
+                <label className="menu-inline">
+                  Replay
+                  <select value={replayWindow} onChange={(event) => setReplayWindow(Number(event.target.value) as ReplayWindow)}>
+                    <option value={0}>All</option>
+                    <option value={5}>5 min</option>
+                    <option value={10}>10 min</option>
+                    <option value={30}>30 min</option>
+                  </select>
+                </label>
               </div>
               <div className="menu-group">
                 <strong>Accounts</strong>
@@ -1683,7 +1851,61 @@ const MainApp: React.FC = () => {
                 </details>
               </div>
               <div className="menu-group">
+                <strong>Filters</strong>
+                <label className="menu-check">
+                  <input
+                    type="checkbox"
+                    checked={settings.smartFilterSpam !== false}
+                    onChange={(event) => void persistSettings({ smartFilterSpam: event.target.checked })}
+                  />
+                  Smart spam filter
+                </label>
+                <label className="menu-check">
+                  <input
+                    type="checkbox"
+                    checked={settings.smartFilterScam !== false}
+                    onChange={(event) => void persistSettings({ smartFilterScam: event.target.checked })}
+                  />
+                  Scam phrase filter
+                </label>
+                <label className="menu-check">
+                  <input
+                    type="checkbox"
+                    checked={settings.performanceMode === true}
+                    onChange={(event) => void persistSettings({ performanceMode: event.target.checked })}
+                  />
+                  Performance mode
+                </label>
+              </div>
+              <div className="menu-group">
+                <strong>Current Tab Alerts</strong>
+                <input
+                  value={tabAlertKeywordInput}
+                  onChange={(event) => setTabAlertKeywordInput(event.target.value)}
+                  placeholder="Keyword (e.g. urgent)"
+                />
+                <label className="menu-check">
+                  <input type="checkbox" checked={tabAlertSound} onChange={(event) => setTabAlertSound(event.target.checked)} />
+                  Play sound
+                </label>
+                <label className="menu-check">
+                  <input type="checkbox" checked={tabAlertNotify} onChange={(event) => setTabAlertNotify(event.target.checked)} />
+                  Desktop notification
+                </label>
+                <button type="button" onClick={() => void saveCurrentTabAlertRule()} disabled={!activeTabId}>
+                  Save tab alert
+                </button>
+              </div>
+              <div className="menu-group">
                 <strong>System</strong>
+                <label className="menu-check">
+                  <input
+                    type="checkbox"
+                    checked={settings.confirmSendAll !== false}
+                    onChange={(event) => void persistSettings({ confirmSendAll: event.target.checked })}
+                  />
+                  Confirm send-to-all
+                </label>
                 <button type="button" onClick={() => void checkForUpdatesNow()}>
                   Check for Updates
                 </button>
@@ -1761,8 +1983,8 @@ const MainApp: React.FC = () => {
         <span>
           {activeTab
             ? newestLocked
-              ? `${visibleMessages.length} messages`
-              : `${visibleMessages.length} messages (${pendingNewestCount} new paused)`
+              ? `${visibleMessages.length} messages · ${chatHealth.messagesPerMinute}/min · ${chatHealth.uniqueChatters} chatters`
+              : `${visibleMessages.length} messages (${pendingNewestCount} new paused) · ${chatHealth.messagesPerMinute}/min · ${chatHealth.uniqueChatters} chatters`
             : "Open a channel tab to start"}
         </span>
       </section>
@@ -1834,7 +2056,18 @@ const MainApp: React.FC = () => {
                       </span>
                       <span>{new Date(message.timestamp).toLocaleTimeString()}</span>
                     </span>
-                    <strong style={{ color: message.color }}>{message.displayName}</strong>
+                    <button
+                      type="button"
+                      className="username-button"
+                      style={{ color: message.color }}
+                      onClick={() =>
+                        setIdentityTarget({
+                          username: message.username,
+                          displayName: message.displayName || message.username
+                        })}
+                    >
+                      {message.displayName}
+                    </button>
                     <span className="line-message">
                       {messageChunks.map((chunk, index) =>
                         chunk.type === "text" ? (
@@ -1886,10 +2119,51 @@ const MainApp: React.FC = () => {
                 maxLength={500}
                 disabled={writableActiveTabSources.length === 0}
               />
+              <select
+                value={snippetToInsert}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setSnippetToInsert("");
+                  if (!value) return;
+                  setComposerText((previous) => `${previous}${previous ? " " : ""}${value}`.trim());
+                }}
+                disabled={writableActiveTabSources.length === 0}
+              >
+                <option value="">Snippets</option>
+                {COMMAND_SNIPPETS.map((snippet) => (
+                  <option key={snippet} value={snippet}>
+                    {snippet}
+                  </option>
+                ))}
+              </select>
               <button type="submit" disabled={sending || writableActiveTabSources.length === 0 || !composerText.trim()}>
                 {sending ? "Sending..." : "Send"}
               </button>
             </form>
+            {writableActiveTabSources.length > 0 ? (
+              <div className="quick-mod-panel">
+                <strong>Quick Mod</strong>
+                <input
+                  value={quickModUser}
+                  onChange={(event) => setQuickModUser(event.target.value)}
+                  placeholder="@username"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                />
+                <button type="button" onClick={() => void runQuickMod("timeout_60")}>
+                  Timeout 1m
+                </button>
+                <button type="button" onClick={() => void runQuickMod("timeout_600")}>
+                  Timeout 10m
+                </button>
+                <button type="button" onClick={() => void runQuickMod("ban")}>
+                  Ban
+                </button>
+                <button type="button" onClick={() => void runQuickMod("unban")}>
+                  Unban
+                </button>
+              </div>
+            ) : null}
           </>
         )}
       </main>
@@ -1974,6 +2248,37 @@ const MainApp: React.FC = () => {
                 <p className="user-logs-empty">No messages from this user in the current session yet.</p>
               ) : (
                 userLogMessages.map((message) => (
+                  <div key={`${message.id}-${message.timestamp}-${message.channel}`} className="user-log-line">
+                    <span className="user-log-meta">
+                      {new Date(message.timestamp).toLocaleString()} · {message.platform}/{message.channel}
+                    </span>
+                    <span className="user-log-text">{message.message}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {identityTarget ? (
+        <div className="user-logs-overlay" onClick={() => setIdentityTarget(null)}>
+          <div className="user-logs-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="user-logs-header">
+              <div>
+                <strong>Session identity card: {identityTarget.displayName}</strong>
+                <span>@{identityTarget.username}</span>
+              </div>
+              <button type="button" className="ghost" onClick={() => setIdentityTarget(null)}>
+                Close
+              </button>
+            </div>
+            <p className="user-logs-note">Recent messages across all platforms in this session.</p>
+            <div className="user-logs-list">
+              {identityMessages.length === 0 ? (
+                <p className="user-logs-empty">No cross-platform history for this user yet.</p>
+              ) : (
+                identityMessages.map((message) => (
                   <div key={`${message.id}-${message.timestamp}-${message.channel}`} className="user-log-line">
                     <span className="user-log-meta">
                       {new Date(message.timestamp).toLocaleString()} · {message.platform}/{message.channel}

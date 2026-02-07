@@ -55,8 +55,16 @@ type AppSettings = {
   tiktokSessionId?: string;
   tiktokTtTargetIdc?: string;
   tiktokUsername?: string;
-  overlayTransparent?: boolean;
   verboseLogs?: boolean;
+  performanceMode?: boolean;
+  smartFilterSpam?: boolean;
+  smartFilterScam?: boolean;
+  confirmSendAll?: boolean;
+  tabAlertRules?: Record<string, {
+    keyword?: string;
+    sound?: boolean;
+    notify?: boolean;
+  }>;
   columns?: number;
   hideCommands?: boolean;
   keywordFilters?: string[];
@@ -1156,7 +1164,6 @@ const writeLog = (message: string) => {
 };
 
 let mainWindow: BrowserWindow | null = null;
-let overlayWindow: BrowserWindow | null = null;
 let viewerWindow: BrowserWindow | null = null;
 let updateStatus: UpdateStatus = { state: "idle", message: "" };
 let store!: JsonSettingsStore;
@@ -1247,7 +1254,7 @@ const showHelpGuide = async () => {
       "3. Use right-click on a tab to merge it into another tab when needed.",
       "4. Use the composer dropdown to send to one chat or all chats in the active tab.",
       "5. Right-click messages for moderator actions (timeout, ban, unban, delete on Twitch).",
-      "6. Use Overlay or Viewer buttons for display-focused windows.",
+      "6. Use Viewer mode for fullscreen display output.",
       "7. Right-click a Twitch/Kick message and use View User Logs for in-app, session-only message history."
     ].join("\n")
   };
@@ -1431,31 +1438,6 @@ const createMainWindow = () => {
   });
 };
 
-const createOverlayWindow = () => {
-  if (overlayWindow) return;
-  overlayWindow = new BrowserWindow({
-    width: 400,
-    height: 600,
-    transparent: store.get("overlayTransparent") ?? true,
-    frame: false,
-    alwaysOnTop: true,
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      preload: path.join(__dirname, "../preload/preload.js")
-    }
-  });
-
-  const devServerUrl = process.env.VITE_DEV_SERVER_URL || "http://localhost:5173";
-  const overlayUrl = app.isPackaged
-    ? `file://${path.join(__dirname, "../renderer/index.html")}#overlay`
-    : `${devServerUrl}#overlay`;
-  overlayWindow.loadURL(overlayUrl);
-  overlayWindow.on("closed", () => {
-    overlayWindow = null;
-  });
-};
-
 const createViewerWindow = () => {
   if (viewerWindow) return;
   viewerWindow = new BrowserWindow({
@@ -1482,8 +1464,11 @@ const createViewerWindow = () => {
 app.whenReady().then(() => {
   store = new JsonSettingsStore({
     columns: 2,
-    overlayTransparent: true,
     verboseLogs: false,
+    performanceMode: false,
+    smartFilterSpam: true,
+    smartFilterScam: true,
+    confirmSendAll: true,
     twitchGuest: false,
     kickGuest: false,
     kickScopeVersion: KICK_SCOPE_VERSION,
@@ -1622,7 +1607,6 @@ app.whenReady().then(() => {
 
   ipcMain.handle("settings:get", () => store.store);
   ipcMain.handle("settings:set", (_event, updates: AppSettings) => {
-    const previousTransparent = store.get("overlayTransparent");
     const nextUpdates: Partial<AppSettings> = {
       ...updates,
       youtubeAlphaEnabled: YOUTUBE_ALPHA_ENABLED,
@@ -1689,11 +1673,6 @@ app.whenReady().then(() => {
     }
 
     store.set(nextUpdates);
-    const nextTransparent = store.get("overlayTransparent");
-    if (overlayWindow && previousTransparent !== nextTransparent) {
-      overlayWindow.close();
-      createOverlayWindow();
-    }
     return store.store;
   });
   ipcMain.handle("auth:twitch:signIn", async () => {
@@ -2257,10 +2236,6 @@ app.whenReady().then(() => {
   });
   ipcMain.handle("log:toggle", (_event, enabled: boolean) => {
     store.set("verboseLogs", enabled);
-  });
-  ipcMain.handle("overlay:open", () => createOverlayWindow());
-  ipcMain.handle("overlay:close", () => {
-    overlayWindow?.close();
   });
   ipcMain.handle("viewer:open", () => createViewerWindow());
   ipcMain.handle("viewer:close", () => {

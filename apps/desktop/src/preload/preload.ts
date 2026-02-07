@@ -28,8 +28,16 @@ type AppSettings = {
   tiktokSessionId?: string;
   tiktokTtTargetIdc?: string;
   tiktokUsername?: string;
-  overlayTransparent?: boolean;
   verboseLogs?: boolean;
+  performanceMode?: boolean;
+  smartFilterSpam?: boolean;
+  smartFilterScam?: boolean;
+  confirmSendAll?: boolean;
+  tabAlertRules?: Record<string, {
+    keyword?: string;
+    sound?: boolean;
+    notify?: boolean;
+  }>;
   columns?: number;
   hideCommands?: boolean;
   keywordFilters?: string[];
@@ -68,8 +76,6 @@ const api = {
   setSettings: (updates: AppSettings): Promise<AppSettings> => ipcRenderer.invoke("settings:set", updates),
   writeLog: (message: string): Promise<void> => ipcRenderer.invoke("log:write", message),
   toggleVerbose: (enabled: boolean): Promise<void> => ipcRenderer.invoke("log:toggle", enabled),
-  openOverlay: (): Promise<void> => ipcRenderer.invoke("overlay:open"),
-  closeOverlay: (): Promise<void> => ipcRenderer.invoke("overlay:close"),
   openViewer: (): Promise<void> => ipcRenderer.invoke("viewer:open"),
   closeViewer: (): Promise<void> => ipcRenderer.invoke("viewer:close"),
   signInTwitch: (): Promise<AppSettings> => ipcRenderer.invoke("auth:twitch:signIn"),
