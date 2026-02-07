@@ -87,6 +87,29 @@ To build for each OS, run the build command on that OS or use CI runners for mac
 Auto-updates are configured through GitHub Releases (`mhdtech1/MultiChat`).
 After publishing a newer release, the app downloads it in the background and applies it on app restart.
 
+### Windows Code Signing (GitHub Actions)
+
+To avoid `Unknown publisher` and reduce SmartScreen warnings, add these GitHub repo secrets:
+
+- `WIN_CSC_LINK`: Base64-encoded `.pfx` certificate file content
+- `WIN_CSC_KEY_PASSWORD`: Password for that `.pfx`
+
+Create `WIN_CSC_LINK` from your `.pfx`:
+
+- macOS/Linux:
+  `base64 -i your-cert.pfx | pbcopy`
+- Windows PowerShell:
+  `[Convert]::ToBase64String([IO.File]::ReadAllBytes("your-cert.pfx"))`
+
+Then create a release tag (example `v0.1.9`) and push it:
+
+```bash
+git tag v0.1.9
+git push origin v0.1.9
+```
+
+The workflow at `/Users/mazendahroug/Documents/New project/.github/workflows/release.yml` will build installers and publish signed Windows artifacts to the GitHub Release.
+
 ## Configuration
 
 Settings are stored locally in `settings.json` under Electron `userData` (not in git). Use the in-app Settings panel.
