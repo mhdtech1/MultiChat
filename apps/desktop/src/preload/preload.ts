@@ -82,6 +82,7 @@ const api = {
   signOutTwitch: (): Promise<AppSettings> => ipcRenderer.invoke("auth:twitch:signOut"),
   signInKick: (): Promise<AppSettings> => ipcRenderer.invoke("auth:kick:signIn"),
   signOutKick: (): Promise<AppSettings> => ipcRenderer.invoke("auth:kick:signOut"),
+  refreshKickAuth: (): Promise<AppSettings> => ipcRenderer.invoke("auth:kick:refresh"),
   signInYouTube: (): Promise<AppSettings> => ipcRenderer.invoke("auth:youtube:signIn"),
   signOutYouTube: (): Promise<AppSettings> => ipcRenderer.invoke("auth:youtube:signOut"),
   signInTikTok: (): Promise<AppSettings> => ipcRenderer.invoke("auth:tiktok:signIn"),

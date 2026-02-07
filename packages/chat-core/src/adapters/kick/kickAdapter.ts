@@ -7,6 +7,8 @@ export type KickAuth = {
   guest?: boolean;
 };
 
+const KICK_REAUTH_REQUIRED_MESSAGE = "Kick session expired. Sign in to Kick again.";
+
 type KickChannelApiResponse = {
   id?: number;
   slug?: string;
@@ -77,13 +79,23 @@ export class KickAdapter implements ChatAdapter {
   private status: ChatAdapterStatus = "disconnected";
   private readonly channel: string;
   private readonly auth: KickAuth;
+  private accessToken: string;
   private readonly chatroomResolver?: (channel: string) => Promise<number>;
+  private readonly refreshAccessToken?: () => Promise<string | null>;
   private readonly logger?: (message: string) => void;
 
-  constructor(options: ChatAdapterOptions & { auth?: KickAuth; resolveChatroomId?: (channel: string) => Promise<number> }) {
+  constructor(
+    options: ChatAdapterOptions & {
+      auth?: KickAuth;
+      resolveChatroomId?: (channel: string) => Promise<number>;
+      refreshAccessToken?: () => Promise<string | null>;
+    }
+  ) {
     this.channel = options.channel;
     this.auth = options.auth ?? {};
+    this.accessToken = this.auth.accessToken?.trim() ?? "";
     this.chatroomResolver = options.resolveChatroomId;
+    this.refreshAccessToken = options.refreshAccessToken;
     this.logger = options.logger;
   }
 
@@ -315,19 +327,29 @@ export class KickAdapter implements ChatAdapter {
       return this.broadcasterUserId;
     }
 
-    if (!this.auth.accessToken || this.auth.guest) {
+    if (this.auth.guest) {
       throw new Error("Kick send requires a signed-in account.");
     }
 
+    let token = await this.ensureAccessToken();
     const params = new URLSearchParams();
     params.append("slug", this.channel);
 
-    const response = await fetch(`https://api.kick.com/public/v1/channels?${params.toString()}`, {
+    let response = await fetch(`https://api.kick.com/public/v1/channels?${params.toString()}`, {
       headers: {
-        Authorization: `Bearer ${this.auth.accessToken}`,
+        Authorization: `Bearer ${token}`,
         Accept: "application/json"
       }
     });
+    if ((response.status === 401 || response.status === 403) && this.refreshAccessToken) {
+      token = await this.refreshKickTokenOrThrow();
+      response = await fetch(`https://api.kick.com/public/v1/channels?${params.toString()}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json"
+        }
+      });
+    }
 
     const text = await response.text();
     const payload = text ? parseJson<unknown>(text) : null;
@@ -360,15 +382,16 @@ export class KickAdapter implements ChatAdapter {
       throw new Error("Message is too long.");
     }
 
-    if (!this.auth.accessToken || this.auth.guest) {
+    if (this.auth.guest) {
       throw new Error("Kick send requires a signed-in account.");
     }
 
+    let token = await this.ensureAccessToken();
     const broadcasterUserId = await this.resolveBroadcasterUserId();
-    const response = await fetch("https://api.kick.com/public/v1/chat", {
+    let response = await fetch("https://api.kick.com/public/v1/chat", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${this.auth.accessToken}`,
+        Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
         Accept: "application/json"
       },
@@ -378,8 +401,27 @@ export class KickAdapter implements ChatAdapter {
         type: "user"
       })
     });
+    if ((response.status === 401 || response.status === 403) && this.refreshAccessToken) {
+      token = await this.refreshKickTokenOrThrow();
+      response = await fetch("https://api.kick.com/public/v1/chat", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          Accept: "application/json"
+        },
+        body: JSON.stringify({
+          broadcaster_user_id: broadcasterUserId,
+          content,
+          type: "user"
+        })
+      });
+    }
 
     if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        throw new Error(KICK_REAUTH_REQUIRED_MESSAGE);
+      }
       const text = await response.text();
       const parsed = text ? parseJson<Record<string, unknown>>(text) : null;
       const messageText =
@@ -388,5 +430,24 @@ export class KickAdapter implements ChatAdapter {
           : `Kick message send failed (${response.status}).`;
       throw new Error(messageText);
     }
+  }
+
+  private async ensureAccessToken(): Promise<string> {
+    if (this.accessToken) {
+      return this.accessToken;
+    }
+    return this.refreshKickTokenOrThrow();
+  }
+
+  private async refreshKickTokenOrThrow(): Promise<string> {
+    if (!this.refreshAccessToken) {
+      throw new Error(KICK_REAUTH_REQUIRED_MESSAGE);
+    }
+    const nextToken = (await this.refreshAccessToken())?.trim() ?? "";
+    if (!nextToken) {
+      throw new Error(KICK_REAUTH_REQUIRED_MESSAGE);
+    }
+    this.accessToken = nextToken;
+    return nextToken;
   }
 }

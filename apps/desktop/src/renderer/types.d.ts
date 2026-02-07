@@ -80,6 +80,7 @@ type ElectronAPI = {
   signOutTwitch: () => Promise<AppSettings>;
   signInKick: () => Promise<AppSettings>;
   signOutKick: () => Promise<AppSettings>;
+  refreshKickAuth: () => Promise<AppSettings>;
   signInYouTube: () => Promise<AppSettings>;
   signOutYouTube: () => Promise<AppSettings>;
   signInTikTok: () => Promise<AppSettings>;

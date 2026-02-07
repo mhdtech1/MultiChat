@@ -1095,6 +1095,15 @@ const MainApp: React.FC = () => {
           const result = await window.electronAPI.resolveKickChatroom(channel);
           return result.chatroomId;
         },
+        refreshAccessToken: async () => {
+          try {
+            const next = await window.electronAPI.refreshKickAuth();
+            setSettings({ ...defaultSettings, ...next });
+            return next.kickAccessToken?.trim() ?? null;
+          } catch {
+            return null;
+          }
+        },
         logger
       });
     } else if (source.platform === "youtube") {

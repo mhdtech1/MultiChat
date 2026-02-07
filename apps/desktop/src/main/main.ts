@@ -94,6 +94,7 @@ const DEV_UPDATE_MESSAGE = "Auto updates are available in packaged builds only."
 const DEFAULT_UPDATE_MESSAGE = "Checking for updates shortly...";
 const LEGACY_SIGNATURE_UPDATE_MESSAGE =
   "Updater could not apply this update due to a legacy app signature. Download and install the latest MultiChat release once from GitHub; future restart updates will then work.";
+const KICK_REAUTH_REQUIRED_MESSAGE = "Kick session expired. Sign in to Kick again.";
 const YOUTUBE_MISSING_OAUTH_MESSAGE =
   "YouTube sign-in is not configured in this build. Configure a YouTube OAuth Client ID (secret optional) and try again.";
 const YOUTUBE_READONLY_UNAVAILABLE_MESSAGE = "YouTube read-only is not configured in this build.";
@@ -733,6 +734,12 @@ type YouTubeTokenResponse = {
   token_type?: string;
 };
 
+type KickOAuthTokenResponse = {
+  access_token?: string;
+  refresh_token?: string;
+  token_type?: string;
+};
+
 type YouTubeChannelsResponse = {
   items?: Array<{
     id?: string;
@@ -793,6 +800,49 @@ const youtubeConfig = () => ({
   clientSecret: store.get("youtubeClientSecret")?.trim() ?? "",
   redirectUri: store.get("youtubeRedirectUri")?.trim() || YOUTUBE_DEFAULT_REDIRECT_URI
 });
+
+const refreshKickAccessToken = async (): Promise<string> => {
+  const clientId = store.get("kickClientId")?.trim() ?? "";
+  const clientSecret = store.get("kickClientSecret")?.trim() ?? "";
+  const refreshToken = store.get("kickRefreshToken")?.trim() ?? "";
+  if (!clientId || !clientSecret || !refreshToken) {
+    throw new Error(KICK_REAUTH_REQUIRED_MESSAGE);
+  }
+
+  let tokens: KickOAuthTokenResponse;
+  try {
+    const response = await fetch("https://id.kick.com/oauth/token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Accept: "application/json"
+      },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        grant_type: "refresh_token",
+        refresh_token: refreshToken
+      })
+    });
+    tokens = await fetchJsonOrThrow<KickOAuthTokenResponse>(response, "Kick token refresh");
+  } catch {
+    throw new Error(KICK_REAUTH_REQUIRED_MESSAGE);
+  }
+
+  const accessToken = tokens.access_token?.trim() ?? "";
+  if (!accessToken) {
+    throw new Error(KICK_REAUTH_REQUIRED_MESSAGE);
+  }
+
+  const nextRefreshToken = tokens.refresh_token?.trim() || refreshToken;
+  store.set({
+    kickAccessToken: accessToken,
+    kickRefreshToken: nextRefreshToken,
+    kickGuest: false
+  });
+
+  return accessToken;
+};
 
 const getYouTubePublicApiKey = () =>
   (store.get("youtubeApiKey")?.trim() ?? "") || (process.env.YOUTUBE_API_KEY ?? YOUTUBE_MANAGED_API_KEY).trim();
@@ -1855,6 +1905,10 @@ app.whenReady().then(() => {
       kickUsername: "",
       kickGuest: false
     });
+    return store.store;
+  });
+  ipcMain.handle("auth:kick:refresh", async () => {
+    await refreshKickAccessToken();
     return store.store;
   });
   ipcMain.handle("auth:youtube:signIn", async () => {
