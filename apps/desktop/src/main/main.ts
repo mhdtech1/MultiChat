@@ -394,6 +394,14 @@ const parseKickUserName = (response: unknown): string | undefined => {
 const formatUpdaterErrorMessage = (errorText: string) => {
   const lower = errorText.toLowerCase();
   if (
+    lower.includes("eperm") &&
+    lower.includes("operation not permitted") &&
+    lower.includes("rename") &&
+    lower.includes("updater")
+  ) {
+    return "Updater could not replace its pending installer file. Close MultiChat, delete the updater cache folder in %LOCALAPPDATA%, and reopen the app to retry.";
+  }
+  if (
     lower.includes("code signature") ||
     lower.includes("code requirement") ||
     lower.includes("shipit") ||
