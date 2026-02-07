@@ -7,6 +7,31 @@ Creator-facing and viewer-facing multi-chat desktop app built with Electron + Vi
 - macOS (DMG): [Download MultiChat for macOS](https://github.com/mhdtech1/MultiChat/releases/latest/download/MultiChat-mac.dmg)
 - Windows (EXE): [Download MultiChat for Windows](https://github.com/mhdtech1/MultiChat/releases/latest/download/MultiChat-win.exe)
 
+## macOS Gatekeeper Warning (Current)
+
+If macOS says:
+
+`Apple could not verify “MultiChat” is free of malware...`
+
+that means the app is not yet signed + notarized with Apple Developer ID in release CI.
+
+Temporary open steps:
+
+1. Open the DMG and drag `MultiChat.app` to `Applications`.
+2. In `Applications`, right-click `MultiChat.app` and click `Open`.
+3. Click `Open` again in the security prompt.
+
+If that prompt does not appear:
+
+1. Open `System Settings -> Privacy & Security`.
+2. Find the blocked MultiChat item and click `Open Anyway`.
+
+Permanent fix (in progress):
+
+- Sign with `Developer ID Application`.
+- Notarize with Apple.
+- Staple notarization ticket before publishing DMG.
+
 ## Features
 
 - Multi-column chat (1–4 columns) with channel tabs, search, and filters.
@@ -108,7 +133,21 @@ git tag v0.1.9
 git push origin v0.1.9
 ```
 
-The workflow at `/Users/mazendahroug/Documents/New project/.github/workflows/release.yml` will build installers and publish signed Windows artifacts to the GitHub Release.
+The workflow at `.github/workflows/release.yml` builds installers and publishes release artifacts to GitHub Releases.
+
+### macOS Signing + Notarization (GitHub Actions)
+
+To remove Gatekeeper warnings permanently, configure Apple signing credentials in GitHub secrets and notarize in CI.
+
+Recommended credentials:
+
+- `CSC_LINK`: Base64-encoded `.p12` Developer ID Application certificate
+- `CSC_KEY_PASSWORD`: Password for that `.p12`
+- `APPLE_API_KEY`: Base64-encoded App Store Connect API key (`.p8`)
+- `APPLE_API_KEY_ID`: App Store Connect key id
+- `APPLE_API_ISSUER`: App Store Connect issuer id
+
+Once those are configured in workflow, releases can be signed/notarized automatically.
 
 ## Configuration
 
