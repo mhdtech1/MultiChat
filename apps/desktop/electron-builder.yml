@@ -95,6 +95,8 @@ win:
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
+  allowElevation: true
+  include: public/installer.nsh
 publish:
   provider: github
   owner: mhdtech1

@@ -284,6 +284,10 @@ select {
   border-radius: 10px;
   background: rgba(17, 29, 35, 0.98);
   box-shadow: 0 16px 45px var(--shadow);
+  max-height: min(78vh, 760px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .menu-group {
@@ -369,6 +373,10 @@ select {
   margin-top: 6px;
   display: grid;
   gap: 8px;
+  max-height: min(42vh, 360px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .menu-connection-row {
@@ -423,6 +431,13 @@ select {
   padding: 6px;
   display: grid;
   gap: 6px;
+}
+
+.menu-submenu[open] {
+  max-height: min(48vh, 420px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .menu-submenu > summary {
@@ -928,6 +943,10 @@ select {
   border: 1px solid var(--border-soft);
   background: rgba(17, 29, 35, 0.96);
   box-shadow: 0 16px 45px var(--shadow);
+  max-height: min(74vh, 640px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .context-menu strong {
