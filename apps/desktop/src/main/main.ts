@@ -1214,7 +1214,8 @@ const writeLog = (message: string) => {
 };
 
 let mainWindow: BrowserWindow | null = null;
-let viewerWindow: BrowserWindow | null = null;
+let overlayWindow: BrowserWindow | null = null;
+let overlayLocked = false;
 let updateStatus: UpdateStatus = { state: "idle", message: "" };
 let store!: JsonSettingsStore;
 let updaterInitialized = false;
@@ -1304,7 +1305,7 @@ const showHelpGuide = async () => {
       "3. Use right-click on a tab to merge it into another tab when needed.",
       "4. Use the composer dropdown to send to one chat or all chats in the active tab.",
       "5. Right-click messages for moderator actions (timeout, ban, unban, delete on Twitch).",
-      "6. Use Viewer mode for fullscreen display output.",
+      "6. Use Overlay mode for stream-safe chat display (lock to pin, unlock to move/close).",
       "7. Right-click a Twitch/Kick message and use View User Logs for in-app, session-only message history."
     ].join("\n")
   };
@@ -1484,16 +1485,36 @@ const createMainWindow = () => {
 
   mainWindow.on("closed", () => {
     mainWindow = null;
+    overlayWindow?.close();
     void disconnectAllTikTokConnections();
   });
 };
 
-const createViewerWindow = () => {
-  if (viewerWindow) return;
-  viewerWindow = new BrowserWindow({
-    width: 1400,
-    height: 900,
-    fullscreen: true,
+const applyOverlayLockState = (locked: boolean) => {
+  overlayLocked = locked;
+  if (!overlayWindow || overlayWindow.isDestroyed()) {
+    return { locked: overlayLocked };
+  }
+  overlayWindow.setMovable(!locked);
+  overlayWindow.setResizable(!locked);
+  return { locked: overlayLocked };
+};
+
+const createOverlayWindow = () => {
+  if (overlayWindow) {
+    overlayWindow.focus();
+    return;
+  }
+  overlayWindow = new BrowserWindow({
+    width: 1100,
+    height: 700,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: true,
+    movable: true,
+    hasShadow: false,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -1501,13 +1522,19 @@ const createViewerWindow = () => {
     }
   });
 
+  overlayWindow.setAlwaysOnTop(true, "screen-saver");
+  overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  overlayWindow.setIgnoreMouseEvents(false);
+  applyOverlayLockState(false);
+
   const devServerUrl = process.env.VITE_DEV_SERVER_URL || "http://localhost:5173";
-  const viewerUrl = app.isPackaged
-    ? `file://${path.join(__dirname, "../renderer/index.html")}#viewer`
-    : `${devServerUrl}#viewer`;
-  viewerWindow.loadURL(viewerUrl);
-  viewerWindow.on("closed", () => {
-    viewerWindow = null;
+  const overlayUrl = app.isPackaged
+    ? `file://${path.join(__dirname, "../renderer/index.html")}#overlay`
+    : `${devServerUrl}#overlay`;
+  overlayWindow.loadURL(overlayUrl);
+  overlayWindow.on("closed", () => {
+    overlayWindow = null;
+    overlayLocked = false;
   });
 };
 
@@ -2291,9 +2318,12 @@ app.whenReady().then(() => {
   ipcMain.handle("log:toggle", (_event, enabled: boolean) => {
     store.set("verboseLogs", enabled);
   });
-  ipcMain.handle("viewer:open", () => createViewerWindow());
-  ipcMain.handle("viewer:close", () => {
-    viewerWindow?.close();
+  ipcMain.handle("overlay:open", () => createOverlayWindow());
+  ipcMain.handle("overlay:close", () => {
+    overlayWindow?.close();
+  });
+  ipcMain.handle("overlay:setLocked", (_event, locked: boolean) => {
+    return applyOverlayLockState(Boolean(locked));
   });
   ipcMain.handle("updates:check", async () => {
     return requestUpdateCheck();

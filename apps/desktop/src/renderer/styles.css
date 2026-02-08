@@ -552,7 +552,7 @@ select {
 }
 
 .platform-icon {
-  width: 16px;
+  min-width: 22px;
   height: 16px;
   display: inline-flex;
   align-items: center;
@@ -561,9 +561,11 @@ select {
   border: 1px solid var(--border-soft);
   background: #243640;
   color: var(--text-main);
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 700;
+  letter-spacing: 0.03em;
   line-height: 1;
+  padding: 0 4px;
 }
 
 .platform-icon.twitch {
@@ -617,6 +619,65 @@ select {
 .line-message {
   line-height: 1.4;
   word-break: break-word;
+}
+
+.role-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.line-author {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.role-badge {
+  min-width: 28px;
+  height: 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border-soft);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 0 4px;
+}
+
+.role-badge.role-broadcaster {
+  border-color: #e2b04b;
+  background: rgba(226, 176, 75, 0.22);
+}
+
+.role-badge.role-moderator {
+  border-color: #4ec997;
+  background: rgba(78, 201, 151, 0.2);
+}
+
+.role-badge.role-staff {
+  border-color: #73b8ff;
+  background: rgba(115, 184, 255, 0.2);
+}
+
+.role-badge.role-vip {
+  border-color: #cf7ef8;
+  background: rgba(207, 126, 248, 0.2);
+}
+
+.role-badge.role-subscriber {
+  border-color: #e28786;
+  background: rgba(226, 135, 134, 0.2);
+}
+
+.role-badge.role-verified {
+  border-color: #73b8ff;
+  background: rgba(115, 184, 255, 0.2);
 }
 
 .username-button {
@@ -786,33 +847,74 @@ select {
   font-size: 12px;
 }
 
-.viewer {
+.overlay {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(8, 14, 18, 0.3);
+  backdrop-filter: blur(2px);
   color: #f5f5f5;
 }
 
-.viewer header {
-  display: flex;
-  justify-content: space-between;
-  padding: 12px;
-  background: rgba(0, 0, 0, 0.4);
+.overlay.locked .overlay-header {
+  border-bottom-color: rgba(226, 176, 75, 0.45);
 }
 
-.viewer-messages {
+.overlay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.55);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  -webkit-app-region: drag;
+}
+
+.overlay-header h1 {
+  margin: 0;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.overlay-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  -webkit-app-region: no-drag;
+}
+
+.overlay-controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #d7e6ef;
+}
+
+.overlay-controls select,
+.overlay-controls button {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(9, 17, 22, 0.84);
+  color: #f5f5f5;
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+
+.overlay-controls button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.overlay-messages {
   flex: 1;
   padding: 12px;
   overflow-y: auto;
-  font-size: 18px;
+  font-size: 22px;
 }
 
-.viewer-messages {
-  font-size: 24px;
-}
-
-.viewer-message {
+.overlay-message {
   padding: 8px 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }

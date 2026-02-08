@@ -15,6 +15,9 @@ export class TwitchAdapter implements ChatAdapter {
   private socket: WebSocket | null = null;
   private status: ChatAdapterStatus = "disconnected";
   private reconnectAttempts = 0;
+  private selfBadges: string[] = [];
+  private selfColor: string | undefined;
+  private selfDisplayName: string | undefined;
   private readonly channel: string;
   private readonly auth: TwitchAuth;
   private readonly logger?: (message: string) => void;
@@ -69,6 +72,32 @@ export class TwitchAdapter implements ChatAdapter {
         }
         const parsed = parseIrcMessage(line);
         if (!parsed) return;
+        if (parsed.command === "USERSTATE") {
+          const channel = parsed.params[0]?.replace(/^#/, "") || this.channel;
+          const username = this.auth.username || parsed.tags["display-name"] || "twitch-user";
+          const displayName = parsed.tags["display-name"] || username;
+          const badges = parsed.tags.badges ? parsed.tags.badges.split(",").filter(Boolean) : [];
+          this.selfBadges = badges;
+          this.selfColor = parsed.tags.color || undefined;
+          this.selfDisplayName = displayName;
+          this.emitter.emit("message", {
+            id: `selfstate-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            platform: "twitch",
+            channel,
+            username,
+            displayName,
+            message: "",
+            timestamp: new Date().toISOString(),
+            badges,
+            color: this.selfColor,
+            raw: {
+              ...parsed.tags,
+              selfRoleState: true,
+              hidden: true
+            }
+          } satisfies ChatMessage);
+          return;
+        }
         const normalized = normalizeTwitchMessage(parsed);
         if (normalized) {
           this.emitter.emit("message", normalized);
@@ -151,10 +180,11 @@ export class TwitchAdapter implements ChatAdapter {
       platform: "twitch",
       channel: this.channel,
       username: this.auth.username,
-      displayName: this.auth.username,
+      displayName: this.selfDisplayName || this.auth.username,
       message: content,
       timestamp: new Date().toISOString(),
-      badges: [],
+      badges: [...this.selfBadges],
+      color: this.selfColor,
       raw: { localEcho: true }
     } satisfies ChatMessage);
   }

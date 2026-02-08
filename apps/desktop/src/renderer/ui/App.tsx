@@ -102,6 +102,11 @@ type UserLogTarget = {
 
 type ModeratorAction = "timeout_60" | "timeout_600" | "ban" | "unban" | "delete";
 type ReplayWindow = 0 | 5 | 10 | 30;
+type RoleBadge = {
+  key: string;
+  label: string;
+  icon: string;
+};
 
 const defaultSettings: Settings = {
   twitchToken: "",
@@ -185,7 +190,7 @@ const hasAuthForPlatform = (platform: Platform, settings: Settings) =>
   platform === "twitch"
     ? Boolean(settings.twitchToken || settings.twitchGuest)
     : platform === "kick"
-      ? true
+      ? Boolean(settings.kickAccessToken)
       : platform === "youtube"
         ? true
         : true;
@@ -203,12 +208,157 @@ const tabLabel = (tab: ChatTab, sourceById: Map<string, ChatSource>) => {
 
 const platformIconGlyph = (platform: string) => {
   const value = platform.trim().toLowerCase();
-  if (value === "twitch") return "T";
-  if (value === "kick") return "K";
-  if (value === "youtube") return "Y";
-  if (value === "tiktok") return "Ti";
+  if (value === "twitch") return "TW";
+  if (value === "kick") return "KI";
+  if (value === "youtube") return "YT";
+  if (value === "tiktok") return "TT";
   return "?";
 };
+
+const normalizeBadgeKey = (rawBadge: string) => rawBadge.trim().toLowerCase().split(/[/:]/)[0] ?? "";
+
+const isTruthyFlag = (value: unknown) => value === true || value === 1 || value === "1" || value === "true";
+
+const collectBadgeCandidates = (value: unknown): string[] => {
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => collectBadgeCandidates(item));
+  }
+  if (!value || typeof value !== "object") {
+    return [];
+  }
+
+  const record = value as Record<string, unknown>;
+  const candidates: string[] = [];
+  const directKeys = ["set_id", "type", "badge", "text", "label", "name", "slug", "id"];
+  for (const key of directKeys) {
+    const direct = record[key];
+    if (typeof direct === "string" && direct.trim()) {
+      candidates.push(direct);
+    }
+  }
+  if ("badges" in record) {
+    candidates.push(...collectBadgeCandidates(record.badges));
+  }
+  if ("identity" in record) {
+    const identity = asRecord(record.identity);
+    if (identity?.badges) {
+      candidates.push(...collectBadgeCandidates(identity.badges));
+    }
+  }
+  return candidates;
+};
+
+const roleBadgeFromKey = (key: string): RoleBadge | null => {
+  if (!key) return null;
+  if (key === "broadcaster" || key === "streamer" || key === "owner") {
+    return { key: "broadcaster", label: "Broadcaster", icon: "BRD" };
+  }
+  if (key === "moderator" || key === "mod" || key === "global_mod") {
+    return { key: "moderator", label: "Moderator", icon: "MOD" };
+  }
+  if (key === "admin" || key === "staff") {
+    return { key: "staff", label: "Staff", icon: "STF" };
+  }
+  if (key === "vip") {
+    return { key: "vip", label: "VIP", icon: "VIP" };
+  }
+  if (key === "subscriber" || key === "sub" || key === "founder") {
+    return { key: "subscriber", label: "Subscriber", icon: "SUB" };
+  }
+  if (key === "verified" || key === "partner") {
+    return { key: "verified", label: "Verified", icon: "VER" };
+  }
+  return null;
+};
+
+const roleBadgesForMessage = (message: ChatMessage): RoleBadge[] => {
+  const raw = asRecord(message.raw);
+  const rawBadges: string[] = [];
+  if (Array.isArray(message.badges)) {
+    rawBadges.push(...message.badges);
+  }
+  if (typeof raw?.badges === "string") {
+    rawBadges.push(...raw.badges.split(",").filter(Boolean));
+  } else if (raw?.badges) {
+    rawBadges.push(...collectBadgeCandidates(raw.badges));
+  }
+  if (typeof raw?.["badge-info"] === "string") {
+    rawBadges.push(...raw["badge-info"].split(",").filter(Boolean));
+  }
+  const rawSender = asRecord(raw?.sender);
+  if (rawSender) {
+    rawBadges.push(...collectBadgeCandidates(rawSender.badges));
+    const senderIdentity = asRecord(rawSender.identity);
+    if (senderIdentity) {
+      rawBadges.push(...collectBadgeCandidates(senderIdentity.badges));
+      if (isTruthyFlag(senderIdentity.is_moderator) || isTruthyFlag(senderIdentity.mod) || isTruthyFlag(senderIdentity.is_mod)) {
+        rawBadges.push("moderator");
+      }
+      if (
+        isTruthyFlag(senderIdentity.is_broadcaster) ||
+        isTruthyFlag(senderIdentity.broadcaster) ||
+        isTruthyFlag(senderIdentity.owner)
+      ) {
+        rawBadges.push("broadcaster");
+      }
+      if (isTruthyFlag(senderIdentity.vip)) {
+        rawBadges.push("vip");
+      }
+      if (isTruthyFlag(senderIdentity.subscriber)) {
+        rawBadges.push("subscriber");
+      }
+      if (isTruthyFlag(senderIdentity.verified)) {
+        rawBadges.push("verified");
+      }
+    }
+  }
+
+  const seen = new Set<string>();
+  const resolved: RoleBadge[] = [];
+
+  const addByKey = (key: string) => {
+    const badge = roleBadgeFromKey(normalizeBadgeKey(key));
+    if (!badge || seen.has(badge.key)) return;
+    seen.add(badge.key);
+    resolved.push(badge);
+  };
+
+  for (const rawBadge of rawBadges) {
+    addByKey(rawBadge);
+  }
+  if (raw?.mod === "1" || raw?.mod === 1) {
+    addByKey("moderator");
+  }
+  if (raw?.subscriber === "1" || raw?.subscriber === 1) {
+    addByKey("subscriber");
+  }
+  if (raw?.vip === "1" || raw?.vip === 1) {
+    addByKey("vip");
+  }
+  if (typeof raw?.["user-type"] === "string") {
+    addByKey(raw["user-type"]);
+  }
+  if (isTruthyFlag(raw?.is_moderator) || isTruthyFlag(raw?.is_mod)) {
+    addByKey("moderator");
+  }
+  if (isTruthyFlag(raw?.is_broadcaster) || isTruthyFlag(raw?.broadcaster) || isTruthyFlag(raw?.owner)) {
+    addByKey("broadcaster");
+  }
+  if (isTruthyFlag(raw?.is_verified) || isTruthyFlag(raw?.verified)) {
+    addByKey("verified");
+  }
+
+  return resolved;
+};
+
+const messageHasModerationBadge = (message: ChatMessage) =>
+  roleBadgesForMessage(message).some((badge) => badge.key === "moderator" || badge.key === "broadcaster" || badge.key === "staff");
 
 const PlatformIcon: React.FC<{ platform: string }> = ({ platform }) => (
   <span className={`platform-icon ${platform.trim().toLowerCase()}`} aria-hidden="true">
@@ -291,6 +441,9 @@ const isLocalEcho = (message: ChatMessage) => {
   const raw = asRecord(message.raw);
   return raw?.localEcho === true;
 };
+
+const messageContentFingerprint = (message: ChatMessage) =>
+  `${message.platform}|${message.channel}|${normalizeUserKey(message.username)}|${message.message.trim().toLowerCase()}`;
 
 const collapseFanoutLocalEchoes = (messages: ChatMessage[]): ChatMessage[] => {
   const collapsed: ChatMessage[] = [];
@@ -472,6 +625,40 @@ const fetchTwitchThirdPartyEmotes = async (
   return fetchTwitchThirdPartyEmotesByUserId(userId);
 };
 
+const checkTwitchModeratorStatus = async (channel: string, username: string): Promise<boolean | null> => {
+  const normalizedChannel = normalizeChannel(channel, "twitch");
+  const normalizedUser = normalizeUserKey(username);
+  if (!normalizedChannel || !normalizedUser) return null;
+  try {
+    const response = await fetch(`https://tmi.twitch.tv/group/user/${encodeURIComponent(normalizedChannel)}/chatters`, {
+      headers: {
+        Accept: "application/json"
+      }
+    });
+    if (!response.ok) return null;
+    const payload = (await response.json()) as unknown;
+    const record = asRecord(payload);
+    const chatters = asRecord(record?.chatters);
+    if (!chatters) return null;
+
+    const inList = (key: string) => {
+      const value = chatters[key];
+      if (!Array.isArray(value)) return false;
+      return value.some((item) => typeof item === "string" && normalizeUserKey(item) === normalizedUser);
+    };
+
+    return (
+      inList("broadcaster") ||
+      inList("moderators") ||
+      inList("staff") ||
+      inList("admins") ||
+      inList("global_mods")
+    );
+  } catch {
+    return null;
+  }
+};
+
 const compactMessageChunks = (chunks: MessageChunk[]): MessageChunk[] => {
   const compacted: MessageChunk[] = [];
   for (const chunk of chunks) {
@@ -639,15 +826,16 @@ const getRawMessageId = (message: ChatMessage): string | null => {
 };
 
 export const App: React.FC = () => {
-  if (mode === "viewer") {
-    return <ViewerView />;
+  if (mode === "overlay") {
+    return <OverlayView />;
   }
   return <MainApp />;
 };
 
-const ViewerView: React.FC = () => {
+const OverlayView: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [channelFilter, setChannelFilter] = useState<string>("");
+  const [locked, setLocked] = useState(false);
 
   useEffect(() => {
     const handler = (event: MessageEvent<ChatMessage>) => {
@@ -660,11 +848,17 @@ const ViewerView: React.FC = () => {
   const visible = messages.filter((message) => !channelFilter || message.channel === channelFilter);
   const channels = Array.from(new Set(messages.map((message) => message.channel)));
 
+  useEffect(() => {
+    void window.electronAPI.setOverlayLocked(locked).catch(() => {
+      // no-op
+    });
+  }, [locked]);
+
   return (
-    <div className="viewer">
-      <header>
-        <h1>Viewer Mode</h1>
-        <div>
+    <div className={`overlay${locked ? " locked" : ""}`}>
+      <header className="overlay-header">
+        <h1>Overlay</h1>
+        <div className="overlay-controls">
           <label>
             Channel
             <select value={channelFilter} onChange={(event) => setChannelFilter(event.target.value)}>
@@ -676,14 +870,17 @@ const ViewerView: React.FC = () => {
               ))}
             </select>
           </label>
-          <button type="button" onClick={() => window.electronAPI.closeViewer()}>
+          <button type="button" onClick={() => setLocked((previous) => !previous)}>
+            {locked ? "Unlock" : "Lock"}
+          </button>
+          <button type="button" onClick={() => window.electronAPI.closeOverlay()} disabled={locked}>
             Exit
           </button>
         </div>
       </header>
-      <div className="viewer-messages">
+      <div className="overlay-messages">
         {visible.map((message) => (
-          <div key={message.id} className="viewer-message">
+          <div key={message.id} className="overlay-message">
             <strong>{message.displayName}</strong>
             <span>{message.message}</span>
           </div>
@@ -698,6 +895,7 @@ const MainApp: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [authBusy, setAuthBusy] = useState<Platform | null>(null);
   const [authMessage, setAuthMessage] = useState("");
+  const [readOnlyGuideMode, setReadOnlyGuideMode] = useState(false);
 
   const [platformInput, setPlatformInput] = useState<Platform>("twitch");
   const [channelInput, setChannelInput] = useState("");
@@ -718,6 +916,7 @@ const MainApp: React.FC = () => {
   const [activeTabId, setActiveTabId] = useState("");
   const [messagesBySource, setMessagesBySource] = useState<Record<string, ChatMessage[]>>({});
   const [statusBySource, setStatusBySource] = useState<Record<string, ChatAdapterStatus>>({});
+  const [moderatorBySource, setModeratorBySource] = useState<Record<string, boolean>>({});
   const [globalEmoteMap, setGlobalEmoteMap] = useState<EmoteMap>({});
   const [channelEmoteMapBySourceId, setChannelEmoteMapBySourceId] = useState<Record<string, EmoteMap>>({});
   const [tabMenu, setTabMenu] = useState<TabMenuState | null>(null);
@@ -780,8 +979,18 @@ const MainApp: React.FC = () => {
         setTabs(restoredTabs);
         setActiveTabId(restoredActiveTabId);
 
-        if (restoredSources.length > 0) {
-          void connectRestoredSources(restoredSources, nextSettings);
+        const reconnectableSources = restoredSources.filter((source) => {
+          if (source.platform === "twitch") {
+            return Boolean(nextSettings.twitchToken || nextSettings.twitchGuest);
+          }
+          if (source.platform === "kick") {
+            return Boolean(nextSettings.kickAccessToken);
+          }
+          return true;
+        });
+
+        if (reconnectableSources.length > 0) {
+          void connectRestoredSources(reconnectableSources, nextSettings);
         }
       })
       .catch((error) => {
@@ -856,6 +1065,22 @@ const MainApp: React.FC = () => {
   }, [sources]);
 
   useEffect(() => {
+    const validSourceIds = new Set(sources.map((source) => source.id));
+    setModeratorBySource((previous) => {
+      const next: Record<string, boolean> = {};
+      for (const [sourceId, canModerate] of Object.entries(previous)) {
+        if (validSourceIds.has(sourceId)) {
+          next[sourceId] = canModerate;
+        }
+      }
+      if (Object.keys(next).length === Object.keys(previous).length) {
+        return previous;
+      }
+      return next;
+    });
+  }, [sources]);
+
+  useEffect(() => {
     let cancelled = false;
     if (settings.performanceMode) return;
     const twitchSources = sources.filter((source) => source.platform === "twitch");
@@ -917,6 +1142,8 @@ const MainApp: React.FC = () => {
     () => (activeTab ? activeTab.sourceIds.map((sourceId) => sourceById.get(sourceId)).filter(Boolean) as ChatSource[] : []),
     [activeTab, sourceById]
   );
+  const activeTabIsMerged = activeTabSources.length > 1;
+  const activeSingleSource = activeTabSources.length === 1 ? activeTabSources[0] : null;
   const writableActiveTabSources = useMemo(
     () =>
       activeTabSources.filter((source) => {
@@ -930,14 +1157,33 @@ const MainApp: React.FC = () => {
       }),
     [activeTabSources, settings.kickAccessToken, settings.twitchToken]
   );
+  const canModerateSource = (source: ChatSource | null): boolean => {
+    if (!source) return false;
+    if (source.platform !== "twitch" && source.platform !== "kick") return false;
+
+    const currentUsername = normalizeUserKey(
+      source.platform === "twitch" ? settings.twitchUsername ?? "" : settings.kickUsername ?? ""
+    );
+    if (!currentUsername) return false;
+    if (normalizeUserKey(source.channel) === currentUsername) {
+      return true;
+    }
+    if (moderatorBySource[source.id] === true) {
+      return true;
+    }
+    if (source.platform === "kick") {
+      return Boolean(settings.kickAccessToken);
+    }
+    return false;
+  };
+  const canModerateActiveTab = !activeTabIsMerged && canModerateSource(activeSingleSource);
   const youtubeAlphaEnabled = Boolean(settings.youtubeAlphaEnabled);
   const tiktokAlphaEnabled = Boolean(settings.tiktokAlphaEnabled);
-  const availablePlatforms = useMemo(() => {
+  const hasTwitchAuth = Boolean(settings.twitchToken || settings.twitchGuest);
+  const hasKickAuth = Boolean(settings.kickAccessToken);
+  const hasPrimaryAuth = hasTwitchAuth || hasKickAuth;
+  const readOnlyPlatforms = useMemo(() => {
     const next: Platform[] = [];
-    if (settings.twitchToken || settings.twitchGuest) {
-      next.push("twitch");
-    }
-    next.push("kick");
     if (youtubeAlphaEnabled) {
       next.push("youtube");
     }
@@ -945,7 +1191,26 @@ const MainApp: React.FC = () => {
       next.push("tiktok");
     }
     return next;
-  }, [settings.twitchGuest, settings.twitchToken, tiktokAlphaEnabled, youtubeAlphaEnabled]);
+  }, [tiktokAlphaEnabled, youtubeAlphaEnabled]);
+  const availablePlatforms = useMemo(() => {
+    if (!hasPrimaryAuth && readOnlyGuideMode) {
+      return readOnlyPlatforms;
+    }
+    const next: Platform[] = [];
+    if (hasTwitchAuth) {
+      next.push("twitch");
+    }
+    if (hasKickAuth) {
+      next.push("kick");
+    }
+    if (youtubeAlphaEnabled) {
+      next.push("youtube");
+    }
+    if (tiktokAlphaEnabled) {
+      next.push("tiktok");
+    }
+    return next;
+  }, [hasKickAuth, hasPrimaryAuth, hasTwitchAuth, readOnlyGuideMode, readOnlyPlatforms, tiktokAlphaEnabled, youtubeAlphaEnabled]);
 
   const activeMessages = useMemo(() => {
     if (!activeTab) return [];
@@ -1152,10 +1417,41 @@ const MainApp: React.FC = () => {
 
     adapter.onMessage((message) => {
       const now = Date.now();
-      const userKey = `${message.platform}-${message.channel}-${message.username}`;
-      const last = lastMessageByUser.current.get(userKey) ?? 0;
-      if (now - last < 400) return;
-      lastMessageByUser.current.set(userKey, now);
+      const raw = asRecord(message.raw);
+      const isHiddenMeta = raw?.hidden === true;
+      const isSelfRoleState = raw?.selfRoleState === true;
+      const currentUsername =
+        source.platform === "twitch"
+          ? normalizeUserKey(currentSettings.twitchUsername ?? "")
+          : source.platform === "kick"
+            ? normalizeUserKey(currentSettings.kickUsername ?? "")
+            : "";
+      const isSelf = currentUsername.length > 0 && normalizeUserKey(message.username) === currentUsername;
+      if ((source.platform === "twitch" || source.platform === "kick") && isSelf) {
+        if (messageHasModerationBadge(message)) {
+          setModeratorBySource((previous) =>
+            previous[source.id] === true
+              ? previous
+              : {
+                  ...previous,
+                  [source.id]: true
+                }
+          );
+        } else if (isSelfRoleState) {
+          setModeratorBySource((previous) => ({
+            ...previous,
+            [source.id]: false
+          }));
+        }
+      }
+      if (isHiddenMeta) {
+        return;
+      }
+
+      const dedupeKey = messageContentFingerprint(message);
+      const last = lastMessageByUser.current.get(dedupeKey) ?? 0;
+      if (isLocalEcho(message) && now - last < 400) return;
+      lastMessageByUser.current.set(dedupeKey, now);
 
       if (currentSettings.hideCommands && message.message.startsWith("!")) return;
       if (currentSettings.smartFilterScam !== false && SCAM_PATTERN.test(message.message)) return;
@@ -1175,7 +1471,27 @@ const MainApp: React.FC = () => {
 
       setMessagesBySource((prev) => {
         const maxHistory = currentSettings.performanceMode ? 300 : 800;
-        const updated = [...(prev[source.id] ?? []), message].slice(-maxHistory);
+        const existing = prev[source.id] ?? [];
+        let updated = existing;
+        if (!isLocalEcho(message)) {
+          const normalizedMessage = message.message.trim();
+          for (let index = existing.length - 1; index >= 0; index -= 1) {
+            const candidate = existing[index];
+            if (!isLocalEcho(candidate)) continue;
+            if (candidate.platform !== message.platform || candidate.channel !== message.channel) continue;
+            if (normalizeUserKey(candidate.username) !== normalizeUserKey(message.username)) continue;
+            if (candidate.message.trim() !== normalizedMessage) continue;
+            if (Math.abs(messageTimestamp(candidate) - messageTimestamp(message)) > 6000) continue;
+            const replaced = [...existing];
+            replaced[index] = message;
+            updated = replaced;
+            break;
+          }
+        }
+        if (updated === existing) {
+          updated = [...existing, message];
+        }
+        updated = updated.slice(-maxHistory);
         return { ...prev, [source.id]: updated };
       });
 
@@ -1231,6 +1547,26 @@ const MainApp: React.FC = () => {
     });
 
     adaptersRef.current.set(source.id, adapter);
+    if (source.platform === "twitch" || source.platform === "kick") {
+      const currentUsername =
+        source.platform === "twitch"
+          ? normalizeUserKey(currentSettings.twitchUsername ?? "")
+          : normalizeUserKey(currentSettings.kickUsername ?? "");
+      const isBroadcaster = currentUsername.length > 0 && normalizeUserKey(source.channel) === currentUsername;
+      setModeratorBySource((previous) => ({
+        ...previous,
+        [source.id]: isBroadcaster
+      }));
+      if (source.platform === "twitch" && currentUsername.length > 0 && !isBroadcaster) {
+        void checkTwitchModeratorStatus(source.channel, currentUsername).then((isModerator) => {
+          if (isModerator === null) return;
+          setModeratorBySource((previous) => ({
+            ...previous,
+            [source.id]: isModerator
+          }));
+        });
+      }
+    }
     try {
       await adapter.connect();
     } catch (error) {
@@ -1260,6 +1596,10 @@ const MainApp: React.FC = () => {
 
     if (platformInput === "twitch" && !hasAuthForPlatform("twitch", settings)) {
       setAuthMessage(`Sign in to twitch before opening twitch/${channel}.`);
+      return;
+    }
+    if (platformInput === "kick" && !hasAuthForPlatform("kick", settings)) {
+      setAuthMessage(`Sign in to kick before opening kick/${channel}.`);
       return;
     }
 
@@ -1412,6 +1752,10 @@ const MainApp: React.FC = () => {
   };
 
   const runModeratorAction = async (action: ModeratorAction, message: ChatMessage) => {
+    if (!canModerateActiveTab) {
+      setAuthMessage("Moderator actions are available only in a single-channel tab where you are mod/broadcaster.");
+      return;
+    }
     const username = message.username.trim();
     if (!username || username === "system") {
       setAuthMessage("This message cannot be moderated.");
@@ -1421,6 +1765,10 @@ const MainApp: React.FC = () => {
     const source = sourceByPlatformChannel.get(`${message.platform}:${message.channel}`);
     if (!source) {
       setAuthMessage("Cannot map this message to a connected chat source.");
+      return;
+    }
+    if (!activeSingleSource || source.id !== activeSingleSource.id) {
+      setAuthMessage("Moderator actions are limited to the active single-channel tab.");
       return;
     }
 
@@ -1592,6 +1940,10 @@ const MainApp: React.FC = () => {
   };
 
   const runQuickMod = async (action: Exclude<ModeratorAction, "delete">) => {
+    if (!canModerateActiveTab) {
+      setAuthMessage("Quick mod is available only in a single-channel tab where you are mod/broadcaster.");
+      return;
+    }
     const username = quickModUser.trim().replace(/^@+/, "");
     if (!username) {
       setAuthMessage("Enter a username for quick moderation.");
@@ -1683,10 +2035,72 @@ const MainApp: React.FC = () => {
     setSettings({ ...defaultSettings, ...next });
   };
 
+  const enterReadOnlyGuide = async () => {
+    if (readOnlyPlatforms.length === 0) {
+      setAuthMessage("YouTube/TikTok read-only is not available in this build.");
+      return;
+    }
+
+    const restrictedSources = sources.filter((source) => source.platform === "twitch" || source.platform === "kick");
+    const restrictedSourceIds = new Set(restrictedSources.map((source) => source.id));
+
+    if (restrictedSourceIds.size > 0) {
+      const nextSources = sources.filter((source) => !restrictedSourceIds.has(source.id));
+      const nextTabs = tabs
+        .map((tab) => ({
+          ...tab,
+          sourceIds: tab.sourceIds.filter((sourceId) => !restrictedSourceIds.has(sourceId))
+        }))
+        .filter((tab) => tab.sourceIds.length > 0);
+      const nextActiveTabId = nextTabs.some((tab) => tab.id === activeTabId) ? activeTabId : (nextTabs[0]?.id ?? "");
+
+      setSources(nextSources);
+      setTabs(nextTabs);
+      setActiveTabId(nextActiveTabId);
+      setMessagesBySource((previous) => {
+        const next = { ...previous };
+        for (const sourceId of restrictedSourceIds) {
+          delete next[sourceId];
+        }
+        return next;
+      });
+      setStatusBySource((previous) => {
+        const next = { ...previous };
+        for (const sourceId of restrictedSourceIds) {
+          delete next[sourceId];
+        }
+        return next;
+      });
+
+      for (const source of restrictedSources) {
+        const adapter = adaptersRef.current.get(source.id);
+        if (!adapter) continue;
+        try {
+          await adapter.disconnect();
+        } catch {
+          // no-op
+        } finally {
+          adaptersRef.current.delete(source.id);
+        }
+      }
+    }
+
+    setReadOnlyGuideMode(true);
+    setPlatformInput(readOnlyPlatforms[0] ?? "youtube");
+    setAuthMessage("Read-only guide enabled: YouTube/TikTok chats only.");
+  };
+
+  useEffect(() => {
+    if (hasPrimaryAuth && readOnlyGuideMode) {
+      setReadOnlyGuideMode(false);
+    }
+  }, [hasPrimaryAuth, readOnlyGuideMode]);
+
   useEffect(() => {
     if (!sessionHydrated || sources.length === 0) return;
     for (const source of sources) {
       if (source.platform === "twitch" && !hasAuthForPlatform("twitch", settings)) continue;
+      if (source.platform === "kick" && !hasAuthForPlatform("kick", settings)) continue;
       void ensureAdapterConnected(source, settings);
     }
   }, [sessionHydrated, sources, settings]);
@@ -1746,6 +2160,31 @@ const MainApp: React.FC = () => {
   }, [activeTabId]);
 
   useEffect(() => {
+    if (!activeSingleSource || activeSingleSource.platform !== "twitch") return;
+    const username = normalizeUserKey(settings.twitchUsername ?? "");
+    if (!username) return;
+    const sourceId = activeSingleSource.id;
+    if (normalizeUserKey(activeSingleSource.channel) === username) {
+      setModeratorBySource((previous) => ({
+        ...previous,
+        [sourceId]: true
+      }));
+      return;
+    }
+    let cancelled = false;
+    void checkTwitchModeratorStatus(activeSingleSource.channel, username).then((isModerator) => {
+      if (cancelled || isModerator === null) return;
+      setModeratorBySource((previous) => ({
+        ...previous,
+        [sourceId]: isModerator
+      }));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSingleSource, settings.twitchUsername]);
+
+  useEffect(() => {
     return window.electronAPI.onUpdateStatus((status) => {
       if (!status.message || status.state === "idle") return;
       setAuthMessage(status.message);
@@ -1771,6 +2210,46 @@ const MainApp: React.FC = () => {
       </div>
     );
   }
+
+  if (!hasPrimaryAuth && !readOnlyGuideMode) {
+    return (
+      <div className="login-gate">
+        <div className="login-card">
+          <h1>MultiChat</h1>
+          <p>Sign in to Twitch or Kick to unlock full app features.</p>
+          <div className="login-buttons">
+            <button type="button" onClick={() => void signInTwitch()} disabled={authBusy !== null}>
+              {authBusy === "twitch" ? "Signing in Twitch..." : "Sign in Twitch"}
+            </button>
+            <button type="button" onClick={() => void signInKick()} disabled={authBusy !== null}>
+              {authBusy === "kick" ? "Signing in Kick..." : "Sign in Kick"}
+            </button>
+          </div>
+          {readOnlyPlatforms.length > 0 ? (
+            <div className="login-buttons">
+              <button type="button" onClick={() => void enterReadOnlyGuide()} disabled={authBusy !== null}>
+                Continue with YouTube/TikTok guide
+              </button>
+            </div>
+          ) : null}
+          {authMessage ? <p className="login-message">{authMessage}</p> : null}
+        </div>
+      </div>
+    );
+  }
+
+  const messageMenuSource = messageMenu
+    ? sourceByPlatformChannel.get(`${messageMenu.message.platform}:${messageMenu.message.channel}`) ?? null
+    : null;
+  const canShowModerationMenu = Boolean(
+    messageMenu &&
+      messageMenuSource &&
+      !activeTabIsMerged &&
+      activeSingleSource &&
+      messageMenuSource.id === activeSingleSource.id &&
+      canModerateActiveTab &&
+      (messageMenu.message.platform === "twitch" || messageMenu.message.platform === "kick")
+  );
 
   return (
     <div
@@ -1819,8 +2298,8 @@ const MainApp: React.FC = () => {
             <div className="menu-dropdown-panel">
               <div className="menu-group">
                 <strong>View</strong>
-                <button type="button" onClick={() => window.electronAPI.openViewer()}>
-                  Open Viewer
+                <button type="button" onClick={() => window.electronAPI.openOverlay()}>
+                  Open Overlay
                 </button>
                 <label className="menu-inline">
                   Replay
@@ -1925,14 +2404,18 @@ const MainApp: React.FC = () => {
       </header>
 
       <div className="account-strip">
-        <span className={settings.twitchToken || settings.twitchGuest ? "account-pill on" : "account-pill"}>
-          <PlatformIcon platform="twitch" />
-          Twitch: {settings.twitchUsername || "off"}
-        </span>
-        <span className={settings.kickAccessToken ? "account-pill on" : "account-pill"}>
-          <PlatformIcon platform="kick" />
-          Kick typing: {settings.kickUsername || "off"}
-        </span>
+        {hasPrimaryAuth ? (
+          <span className={settings.twitchToken || settings.twitchGuest ? "account-pill on" : "account-pill"}>
+            <PlatformIcon platform="twitch" />
+            Twitch: {settings.twitchUsername || "off"}
+          </span>
+        ) : null}
+        {hasPrimaryAuth ? (
+          <span className={settings.kickAccessToken ? "account-pill on" : "account-pill"}>
+            <PlatformIcon platform="kick" />
+            Kick typing: {settings.kickUsername || "off"}
+          </span>
+        ) : null}
         {youtubeAlphaEnabled ? (
           <span className="account-pill on">
             <PlatformIcon platform="youtube" />
@@ -2046,6 +2529,7 @@ const MainApp: React.FC = () => {
                     : `#${message.channel}`;
                 const channelTitle =
                   combinedChannels.length > 1 ? combinedChannels.map((channel) => `#${channel}`).join(", ") : `#${message.channel}`;
+                const roleBadges = roleBadgesForMessage(message);
                 return (
                   <div
                     key={message.id}
@@ -2065,18 +2549,29 @@ const MainApp: React.FC = () => {
                       </span>
                       <span>{new Date(message.timestamp).toLocaleTimeString()}</span>
                     </span>
-                    <button
-                      type="button"
-                      className="username-button"
-                      style={{ color: message.color }}
-                      onClick={() =>
-                        setIdentityTarget({
-                          username: message.username,
-                          displayName: message.displayName || message.username
-                        })}
-                    >
-                      {message.displayName}
-                    </button>
+                    <span className="line-author">
+                      {roleBadges.length > 0 ? (
+                        <span className="role-badges">
+                          {roleBadges.map((badge) => (
+                            <span key={`${message.id}-${badge.key}`} className={`role-badge role-${badge.key}`} title={badge.label}>
+                              {badge.icon}
+                            </span>
+                          ))}
+                        </span>
+                      ) : null}
+                      <button
+                        type="button"
+                        className="username-button"
+                        style={{ color: message.color }}
+                        onClick={() =>
+                          setIdentityTarget({
+                            username: message.username,
+                            displayName: message.displayName || message.username
+                          })}
+                      >
+                        {message.displayName}
+                      </button>
+                    </span>
                     <span className="line-message">
                       {messageChunks.map((chunk, index) =>
                         chunk.type === "text" ? (
@@ -2128,28 +2623,30 @@ const MainApp: React.FC = () => {
                 maxLength={500}
                 disabled={writableActiveTabSources.length === 0}
               />
-              <select
-                value={snippetToInsert}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  setSnippetToInsert("");
-                  if (!value) return;
-                  setComposerText((previous) => `${previous}${previous ? " " : ""}${value}`.trim());
-                }}
-                disabled={writableActiveTabSources.length === 0}
-              >
-                <option value="">Snippets</option>
-                {COMMAND_SNIPPETS.map((snippet) => (
-                  <option key={snippet} value={snippet}>
-                    {snippet}
-                  </option>
-                ))}
-              </select>
+              {canModerateActiveTab ? (
+                <select
+                  value={snippetToInsert}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setSnippetToInsert("");
+                    if (!value) return;
+                    setComposerText((previous) => `${previous}${previous ? " " : ""}${value}`.trim());
+                  }}
+                  disabled={writableActiveTabSources.length === 0}
+                >
+                  <option value="">Snippets</option>
+                  {COMMAND_SNIPPETS.map((snippet) => (
+                    <option key={snippet} value={snippet}>
+                      {snippet}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
               <button type="submit" disabled={sending || writableActiveTabSources.length === 0 || !composerText.trim()}>
                 {sending ? "Sending..." : "Send"}
               </button>
             </form>
-            {writableActiveTabSources.length > 0 ? (
+            {writableActiveTabSources.length > 0 && canModerateActiveTab ? (
               <div className="quick-mod-panel">
                 <strong>Quick Mod</strong>
                 <input
@@ -2200,20 +2697,28 @@ const MainApp: React.FC = () => {
           style={{ top: messageMenu.y, left: messageMenu.x }}
           onClick={(event) => event.stopPropagation()}
         >
-          <strong>Moderation</strong>
-          <button type="button" onClick={() => void runModeratorAction("timeout_60", messageMenu.message)}>
-            Timeout 1m
-          </button>
-          <button type="button" onClick={() => void runModeratorAction("timeout_600", messageMenu.message)}>
-            Timeout 10m
-          </button>
-          <button type="button" onClick={() => void runModeratorAction("ban", messageMenu.message)}>
-            Ban user
-          </button>
-          <button type="button" onClick={() => void runModeratorAction("unban", messageMenu.message)}>
-            Unban user
-          </button>
-          {messageMenu.message.platform === "twitch" ? (
+          {canShowModerationMenu ? <strong>Moderation</strong> : null}
+          {canShowModerationMenu ? (
+            <button type="button" onClick={() => void runModeratorAction("timeout_60", messageMenu.message)}>
+              Timeout 1m
+            </button>
+          ) : null}
+          {canShowModerationMenu ? (
+            <button type="button" onClick={() => void runModeratorAction("timeout_600", messageMenu.message)}>
+              Timeout 10m
+            </button>
+          ) : null}
+          {canShowModerationMenu ? (
+            <button type="button" onClick={() => void runModeratorAction("ban", messageMenu.message)}>
+              Ban user
+            </button>
+          ) : null}
+          {canShowModerationMenu ? (
+            <button type="button" onClick={() => void runModeratorAction("unban", messageMenu.message)}>
+              Unban user
+            </button>
+          ) : null}
+          {canShowModerationMenu && messageMenu.message.platform === "twitch" ? (
             <button type="button" onClick={() => void runModeratorAction("delete", messageMenu.message)}>
               Delete message
             </button>

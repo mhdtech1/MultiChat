@@ -76,8 +76,10 @@ const api = {
   setSettings: (updates: AppSettings): Promise<AppSettings> => ipcRenderer.invoke("settings:set", updates),
   writeLog: (message: string): Promise<void> => ipcRenderer.invoke("log:write", message),
   toggleVerbose: (enabled: boolean): Promise<void> => ipcRenderer.invoke("log:toggle", enabled),
-  openViewer: (): Promise<void> => ipcRenderer.invoke("viewer:open"),
-  closeViewer: (): Promise<void> => ipcRenderer.invoke("viewer:close"),
+  openOverlay: (): Promise<void> => ipcRenderer.invoke("overlay:open"),
+  closeOverlay: (): Promise<void> => ipcRenderer.invoke("overlay:close"),
+  setOverlayLocked: (locked: boolean): Promise<{ locked: boolean }> =>
+    ipcRenderer.invoke("overlay:setLocked", locked),
   signInTwitch: (): Promise<AppSettings> => ipcRenderer.invoke("auth:twitch:signIn"),
   signOutTwitch: (): Promise<AppSettings> => ipcRenderer.invoke("auth:twitch:signOut"),
   signInKick: (): Promise<AppSettings> => ipcRenderer.invoke("auth:kick:signIn"),
