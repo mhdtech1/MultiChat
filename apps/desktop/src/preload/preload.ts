@@ -57,6 +57,7 @@ type AppSettings = {
     sourceIds: string[];
   }>;
   sessionActiveTabId?: string;
+  setupWizardCompleted?: boolean;
 };
 
 type UpdateStatus = {

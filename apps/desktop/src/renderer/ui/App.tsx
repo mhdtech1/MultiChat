@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatAdapter, ChatAdapterStatus, ChatMessage } from "@multichat/chat-core";
 import { KickAdapter, TikTokAdapter, TwitchAdapter, YouTubeAdapter } from "@multichat/chat-core";
 
@@ -66,6 +66,7 @@ type Settings = {
     sourceIds: string[];
   }>;
   sessionActiveTabId?: string;
+  setupWizardCompleted?: boolean;
 };
 
 type ChatSource = {
@@ -191,7 +192,8 @@ const defaultSettings: Settings = {
   tabAlertRules: {},
   hideCommands: false,
   keywordFilters: [],
-  highlightKeywords: []
+  highlightKeywords: [],
+  setupWizardCompleted: false
 };
 
 const hasTikTokSession = (settings: Settings) =>
@@ -588,6 +590,7 @@ const BTTV_EMOTE_URL = (id: string) => `https://cdn.betterttv.net/emote/${id}/1x
 const SEVENTV_EMOTE_URL = (id: string) => `https://cdn.7tv.app/emote/${id}/1x.webp`;
 const KICK_EMOTE_URL = (id: string) => `https://files.kick.com/emotes/${id}/fullsize`;
 const AUTO_SCROLL_BOTTOM_THRESHOLD_PX = 36;
+const LOCKED_RENDERED_MESSAGE_LIMIT = 420;
 
 const normalizeOauthToken = (token?: string) => (token ?? "").trim().replace(/^oauth:/i, "");
 
@@ -1009,6 +1012,12 @@ const MainApp: React.FC = () => {
   const [sessionHydrated, setSessionHydrated] = useState(false);
   const [newestLocked, setNewestLocked] = useState(true);
   const [lockCutoffTimestamp, setLockCutoffTimestamp] = useState<number | null>(null);
+  const [refreshingActiveTab, setRefreshingActiveTab] = useState(false);
+  const [quickTourOpen, setQuickTourOpen] = useState(false);
+  const [setupWizardOpen, setSetupWizardOpen] = useState(false);
+  const [setupWizardStep, setSetupWizardStep] = useState(0);
+  const [tabUnreadCounts, setTabUnreadCounts] = useState<Record<string, number>>({});
+  const [tabMentionCounts, setTabMentionCounts] = useState<Record<string, number>>({});
 
   const searchRef = useRef<HTMLInputElement | null>(null);
   const messageListRef = useRef<HTMLDivElement | null>(null);
@@ -1023,6 +1032,7 @@ const MainApp: React.FC = () => {
   const sourceByIdRef = useRef<Map<string, ChatSource>>(new Map());
   const lastTabAlertAtRef = useRef<Map<string, number>>(new Map());
   const sourceStatusRef = useRef<Record<string, ChatAdapterStatus>>({});
+  const activeTabIdRef = useRef("");
 
   useEffect(() => {
     let active = true;
@@ -1113,6 +1123,50 @@ const MainApp: React.FC = () => {
 
   useEffect(() => {
     tabsRef.current = tabs;
+  }, [tabs]);
+
+  useEffect(() => {
+    activeTabIdRef.current = activeTabId;
+  }, [activeTabId]);
+
+  useEffect(() => {
+    if (!activeTabId) return;
+    setTabUnreadCounts((previous) => {
+      if (!(activeTabId in previous)) return previous;
+      const next = { ...previous };
+      delete next[activeTabId];
+      return next;
+    });
+    setTabMentionCounts((previous) => {
+      if (!(activeTabId in previous)) return previous;
+      const next = { ...previous };
+      delete next[activeTabId];
+      return next;
+    });
+  }, [activeTabId]);
+
+  useEffect(() => {
+    const validTabIds = new Set(tabs.map((tab) => tab.id));
+    setTabUnreadCounts((previous) => {
+      const next: Record<string, number> = {};
+      for (const [tabId, count] of Object.entries(previous)) {
+        if (validTabIds.has(tabId) && count > 0) {
+          next[tabId] = count;
+        }
+      }
+      if (Object.keys(next).length === Object.keys(previous).length) return previous;
+      return next;
+    });
+    setTabMentionCounts((previous) => {
+      const next: Record<string, number> = {};
+      for (const [tabId, count] of Object.entries(previous)) {
+        if (validTabIds.has(tabId) && count > 0) {
+          next[tabId] = count;
+        }
+      }
+      if (Object.keys(next).length === Object.keys(previous).length) return previous;
+      return next;
+    });
   }, [tabs]);
 
   useEffect(() => {
@@ -1220,6 +1274,22 @@ const MainApp: React.FC = () => {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey)) return;
+      if (event.key !== "Tab") return;
+      if (tabs.length < 2) return;
+      event.preventDefault();
+      const currentIndex = tabs.findIndex((tab) => tab.id === activeTabIdRef.current);
+      const baseIndex = currentIndex >= 0 ? currentIndex : 0;
+      const delta = event.shiftKey ? -1 : 1;
+      const nextIndex = (baseIndex + delta + tabs.length) % tabs.length;
+      setActiveTabId(tabs[nextIndex].id);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [tabs]);
 
   useEffect(() => {
     return () => {
@@ -1341,16 +1411,16 @@ const MainApp: React.FC = () => {
       }),
     [authHealth, canModerateSource, connectionHealthBySource, settings.kickAccessToken, settings.twitchToken, sources, statusBySource]
   );
+  const deferredSearch = useDeferredValue(search);
+  const normalizedSearch = deferredSearch.trim().toLowerCase();
 
   const activeMessages = useMemo(() => {
     if (!activeTab) return [];
     const merged = activeTab.sourceIds.flatMap((sourceId) => messagesBySource[sourceId] ?? []);
-    const filtered = merged.filter((message) =>
-      search ? message.message.toLowerCase().includes(search.toLowerCase()) : true
-    );
+    const filtered = merged.filter((message) => (normalizedSearch ? message.message.toLowerCase().includes(normalizedSearch) : true));
     const sorted = filtered.sort((a, b) => messageTimestamp(a) - messageTimestamp(b));
     return collapseFanoutLocalEchoes(sorted);
-  }, [activeTab, messagesBySource, search]);
+  }, [activeTab, messagesBySource, normalizedSearch]);
 
   const replayFilteredMessages = useMemo(() => {
     if (replayWindow <= 0) return activeMessages;
@@ -1367,6 +1437,13 @@ const MainApp: React.FC = () => {
     if (newestLocked) return 0;
     return Math.max(0, replayFilteredMessages.length - visibleMessages.length);
   }, [newestLocked, replayFilteredMessages.length, visibleMessages.length]);
+
+  const renderedMessages = useMemo(() => {
+    if (!newestLocked) return visibleMessages;
+    const limit = settings.performanceMode ? Math.max(180, Math.floor(LOCKED_RENDERED_MESSAGE_LIMIT * 0.6)) : LOCKED_RENDERED_MESSAGE_LIMIT;
+    if (visibleMessages.length <= limit) return visibleMessages;
+    return visibleMessages.slice(-limit);
+  }, [newestLocked, settings.performanceMode, visibleMessages]);
 
   const chatHealth = useMemo(() => {
     const now = Date.now();
@@ -1647,6 +1724,20 @@ const MainApp: React.FC = () => {
       });
 
       const sourceTabs = tabsRef.current.filter((tab) => tab.sourceIds.includes(source.id));
+      const backgroundTabIds = Array.from(
+        new Set(sourceTabs.map((tab) => tab.id).filter((tabId) => tabId && tabId !== activeTabIdRef.current))
+      );
+      if (backgroundTabIds.length > 0) {
+        setTabUnreadCounts((previous) => {
+          const next = { ...previous };
+          for (const tabId of backgroundTabIds) {
+            const prior = next[tabId] ?? 0;
+            next[tabId] = Math.min(999, prior + 1);
+          }
+          return next;
+        });
+      }
+
       if (isMentionForPlatformUser(message, currentSettings)) {
         const mentionAlertKey = `mention:${message.platform}:${message.channel}:${normalizeUserKey(message.username)}:${message.message
           .trim()
@@ -1660,6 +1751,12 @@ const MainApp: React.FC = () => {
           );
         }
         const mentionTabId = sourceTabs[0]?.id ?? null;
+        if (mentionTabId && mentionTabId !== activeTabIdRef.current) {
+          setTabMentionCounts((previous) => ({
+            ...previous,
+            [mentionTabId]: Math.min(999, (previous[mentionTabId] ?? 0) + 1)
+          }));
+        }
         const mentionId = `${message.id}:${message.platform}:${message.channel}:${message.timestamp}`;
         setMentionInbox((previous) => {
           if (previous.some((entry) => entry.id === mentionId)) {
@@ -1929,6 +2026,49 @@ const MainApp: React.FC = () => {
       setActiveTabId(intoTabId);
     }
     setTabMenu(null);
+  };
+
+  const refreshActiveTab = async () => {
+    if (!activeTab || activeTabSources.length === 0 || refreshingActiveTab) return;
+    setRefreshingActiveTab(true);
+    setAuthMessage(`Refreshing ${activeTabSources.length} source${activeTabSources.length === 1 ? "" : "s"} in active tab...`);
+    try {
+      for (const source of activeTabSources) {
+        const adapter = adaptersRef.current.get(source.id);
+        if (adapter) {
+          try {
+            await adapter.disconnect();
+          } catch {
+            // no-op
+          } finally {
+            adaptersRef.current.delete(source.id);
+          }
+        }
+
+        sourceStatusRef.current[source.id] = "connecting";
+        setStatusBySource((previous) => ({
+          ...previous,
+          [source.id]: "connecting"
+        }));
+        setConnectionHealthBySource((previous) => ({
+          ...previous,
+          [source.id]: {
+            lastStatus: "connecting",
+            lastStatusAt: Date.now(),
+            lastConnectedAt: previous[source.id]?.lastConnectedAt,
+            reconnectReason: "Manual tab refresh requested.",
+            lastError: undefined
+          }
+        }));
+
+        await ensureAdapterConnected(source, settings);
+      }
+      setAuthMessage(`Refreshed ${activeTabSources.length} source${activeTabSources.length === 1 ? "" : "s"} in active tab.`);
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRefreshingActiveTab(false);
+    }
   };
 
   const checkForUpdatesNow = async () => {
@@ -2351,6 +2491,36 @@ const MainApp: React.FC = () => {
   }, [hasPrimaryAuth, readOnlyGuideMode]);
 
   useEffect(() => {
+    if (!sessionHydrated) return;
+    if (!hasPrimaryAuth) return;
+    if (settings.setupWizardCompleted) return;
+    setSetupWizardOpen(true);
+  }, [hasPrimaryAuth, sessionHydrated, settings.setupWizardCompleted]);
+
+  const completeSetupWizard = async () => {
+    try {
+      await persistSettings({ setupWizardCompleted: true });
+      setSetupWizardOpen(false);
+      setSetupWizardStep(0);
+      setQuickTourOpen(true);
+      setAuthMessage("Setup complete. Quick tour opened.");
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const skipSetupWizard = async () => {
+    try {
+      await persistSettings({ setupWizardCompleted: true });
+      setSetupWizardOpen(false);
+      setSetupWizardStep(0);
+      setAuthMessage("Setup wizard dismissed. You can reopen the quick tour from Menu.");
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  useEffect(() => {
     if (!sessionHydrated || sources.length === 0) return;
     for (const source of sources) {
       if (source.platform === "twitch" && !hasAuthForPlatform("twitch", settings)) continue;
@@ -2560,9 +2730,20 @@ const MainApp: React.FC = () => {
       }}
     >
       <header className="topbar">
-        <div className="brand-block">
-          <h1>MultiChat</h1>
-          <p>Unified chat desk</p>
+        <div className="top-left">
+          <button
+            type="button"
+            className="tab-refresh-button"
+            onClick={() => void refreshActiveTab()}
+            disabled={!activeTab || refreshingActiveTab}
+            title={activeTab ? "Refresh current tab connections" : "Open a tab first"}
+          >
+            {refreshingActiveTab ? "Refreshing..." : "Refresh Tab"}
+          </button>
+          <div className="brand-block">
+            <h1>MultiChat</h1>
+            <p>Unified chat desk</p>
+          </div>
         </div>
         <form
           className="channel-form"
@@ -2600,6 +2781,18 @@ const MainApp: React.FC = () => {
                 <strong>View</strong>
                 <button type="button" onClick={() => window.electronAPI.openOverlay()}>
                   Open Overlay
+                </button>
+                <button type="button" onClick={() => setQuickTourOpen(true)}>
+                  Open Quick Tour
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSetupWizardStep(0);
+                    setSetupWizardOpen(true);
+                  }}
+                >
+                  Reopen Setup Wizard
                 </button>
                 <label className="menu-inline">
                   Replay
@@ -2835,6 +3028,8 @@ const MainApp: React.FC = () => {
           const tabSources = tab.sourceIds.map((sourceId) => sourceById.get(sourceId)).filter(Boolean) as ChatSource[];
           const firstSource = tabSources[0];
           const label = tabLabel(tab, sourceById);
+          const unreadCount = tabUnreadCounts[tab.id] ?? 0;
+          const mentionCount = tabMentionCounts[tab.id] ?? 0;
           return (
             <div
               key={tab.id}
@@ -2847,6 +3042,20 @@ const MainApp: React.FC = () => {
               <button type="button" className="tab-select" onClick={() => setActiveTabId(tab.id)}>
                 {firstSource ? <PlatformIcon platform={firstSource.platform} /> : null}
                 <span>{label}</span>
+                {!active && (mentionCount > 0 || unreadCount > 0) ? (
+                  <span className="tab-badges">
+                    {mentionCount > 0 ? (
+                      <span className="tab-badge mention" title={`${mentionCount} mention${mentionCount === 1 ? "" : "s"}`}>
+                        @{mentionCount > 99 ? "99+" : mentionCount}
+                      </span>
+                    ) : null}
+                    {unreadCount > 0 ? (
+                      <span className="tab-badge unread" title={`${unreadCount} unread message${unreadCount === 1 ? "" : "s"}`}>
+                        {unreadCount > 999 ? "999+" : unreadCount}
+                      </span>
+                    ) : null}
+                  </span>
+                ) : null}
               </button>
               <button
                 type="button"
@@ -2913,7 +3122,7 @@ const MainApp: React.FC = () => {
                 setLockCutoffTimestamp(cutoffMessage ? messageTimestamp(cutoffMessage) : Date.now());
               }}
             >
-              {visibleMessages.map((message) => {
+              {renderedMessages.map((message) => {
                 const highlighted = settings.highlightKeywords?.some((word) =>
                   message.message.toLowerCase().includes(word.toLowerCase())
                 );
@@ -2982,7 +3191,6 @@ const MainApp: React.FC = () => {
                             src={chunk.url}
                             alt={chunk.name}
                             title={chunk.name}
-                            loading="lazy"
                           />
                         )
                       )}
@@ -3200,6 +3408,125 @@ const MainApp: React.FC = () => {
                   </div>
                 ))
               )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {setupWizardOpen ? (
+        <div className="guide-overlay" onClick={(event) => event.stopPropagation()}>
+          <div className="guide-modal" role="dialog" aria-modal="true" aria-label="Setup Wizard">
+            <div className="guide-header">
+              <div>
+                <strong>Welcome to MultiChat</strong>
+                <span>Step {setupWizardStep + 1} of 3</span>
+              </div>
+            </div>
+            <div className="guide-body">
+              {setupWizardStep === 0 ? (
+                <div className="guide-section">
+                  <h3>Connect an account</h3>
+                  <p>Sign into Twitch or Kick to unlock typing, moderation tools, and full chat controls.</p>
+                  <div className="guide-actions">
+                    <button type="button" onClick={() => void signInTwitch()} disabled={authBusy !== null || Boolean(settings.twitchToken)}>
+                      {settings.twitchToken ? "Twitch connected" : authBusy === "twitch" ? "Signing in Twitch..." : "Connect Twitch"}
+                    </button>
+                    <button type="button" onClick={() => void signInKick()} disabled={authBusy !== null || Boolean(settings.kickAccessToken)}>
+                      {settings.kickAccessToken ? "Kick connected" : authBusy === "kick" ? "Signing in Kick..." : "Connect Kick"}
+                    </button>
+                  </div>
+                  <p className="guide-note">Tip: You can connect both at the same time.</p>
+                </div>
+              ) : null}
+              {setupWizardStep === 1 ? (
+                <div className="guide-section">
+                  <h3>Add your first channel tab</h3>
+                  <p>Use the channel bar at the top to type a channel username and create a tab.</p>
+                  <p className="guide-note">Smart tabs prevent duplicates. Right click a tab to merge it with another tab.</p>
+                  <p className="guide-note">Current tabs: {tabs.length}</p>
+                </div>
+              ) : null}
+              {setupWizardStep === 2 ? (
+                <div className="guide-section">
+                  <h3>Know the essentials</h3>
+                  <ul>
+                    <li>Use <strong>Refresh Tab</strong> in the top-left to reconnect only the current tab.</li>
+                    <li>Tabs show unread and mention badges while they are in the background.</li>
+                    <li>Press <strong>Ctrl/Cmd + Tab</strong> to cycle tabs quickly.</li>
+                    <li>Open <strong>Menu → Open Quick Tour</strong> any time.</li>
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+            <div className="guide-footer">
+              <button type="button" className="ghost" onClick={() => void skipSetupWizard()}>
+                Skip for now
+              </button>
+              {setupWizardStep > 0 ? (
+                <button type="button" className="ghost" onClick={() => setSetupWizardStep((previous) => Math.max(0, previous - 1))}>
+                  Back
+                </button>
+              ) : null}
+              {setupWizardStep < 2 ? (
+                <button
+                  type="button"
+                  onClick={() => setSetupWizardStep((previous) => Math.min(2, previous + 1))}
+                  disabled={(setupWizardStep === 0 && !hasPrimaryAuth) || (setupWizardStep === 1 && tabs.length === 0)}
+                >
+                  Next
+                </button>
+              ) : (
+                <button type="button" onClick={() => void completeSetupWizard()}>
+                  Finish setup
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {quickTourOpen ? (
+        <div className="guide-overlay" onClick={() => setQuickTourOpen(false)}>
+          <div className="guide-modal quick-tour" role="dialog" aria-modal="true" aria-label="Quick Tour" onClick={(event) => event.stopPropagation()}>
+            <div className="guide-header">
+              <div>
+                <strong>Quick Tour</strong>
+                <span>1 minute</span>
+              </div>
+              <button type="button" className="ghost" onClick={() => setQuickTourOpen(false)}>
+                Close
+              </button>
+            </div>
+            <div className="guide-body">
+              <div className="guide-section">
+                <h3>Tabs</h3>
+                <ul>
+                  <li>Create a channel tab from the top bar.</li>
+                  <li>Right click a tab to merge tabs.</li>
+                  <li>Unread and mention badges appear on inactive tabs.</li>
+                </ul>
+              </div>
+              <div className="guide-section">
+                <h3>Messages</h3>
+                <ul>
+                  <li>Search only filters the active tab.</li>
+                  <li>If you scroll up, auto-scroll pauses until you use Go to newest message.</li>
+                </ul>
+              </div>
+              <div className="guide-section">
+                <h3>Moderation</h3>
+                <ul>
+                  <li>Moderation and snippets appear only in single-channel tabs where you can moderate.</li>
+                  <li>Right click messages for moderation and user log actions.</li>
+                </ul>
+              </div>
+              <div className="guide-section">
+                <h3>Stability</h3>
+                <ul>
+                  <li>Use Refresh Tab to reconnect only the active tab.</li>
+                  <li>Use Menu for account health, updates, and filters.</li>
+                </ul>
+              </div>
             </div>
           </div>
         </div>

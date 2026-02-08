@@ -84,6 +84,7 @@ type AppSettings = {
     sourceIds: string[];
   }>;
   sessionActiveTabId?: string;
+  setupWizardCompleted?: boolean;
 };
 
 type UpdateChannel = "stable" | "beta";
@@ -2270,7 +2271,8 @@ app.whenReady().then(() => {
     tiktokAlphaEnabled: TIKTOK_ALPHA_ENABLED,
     tiktokSessionId: "",
     tiktokTtTargetIdc: "",
-    tiktokUsername: ""
+    tiktokUsername: "",
+    setupWizardCompleted: false
   });
 
   const managedTwitchClientId = (process.env.TWITCH_CLIENT_ID ?? TWITCH_MANAGED_CLIENT_ID).trim();
