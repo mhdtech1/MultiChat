@@ -1779,6 +1779,7 @@ let store!: JsonSettingsStore;
 let updaterInitialized = false;
 const tiktokConnections = new Map<string, TikTokConnectionRecord>();
 const youtubeWebChatSessions = new Map<string, YouTubeWebChatSession>();
+let pendingAutoInstallTimer: ReturnType<typeof setTimeout> | null = null;
 
 const normalizeReleaseNotes = (value: unknown): string => {
   if (!value) return "";
@@ -1851,6 +1852,26 @@ const updateStatusToRenderer = () => {
   if (mainWindow) {
     mainWindow.webContents.send("updates:status", updateStatus);
   }
+};
+
+const clearPendingAutoInstallTimer = () => {
+  if (!pendingAutoInstallTimer) return;
+  clearTimeout(pendingAutoInstallTimer);
+  pendingAutoInstallTimer = null;
+};
+
+const scheduleAutoInstallAfterDownload = (delayMs = 1800) => {
+  clearPendingAutoInstallTimer();
+  pendingAutoInstallTimer = setTimeout(() => {
+    pendingAutoInstallTimer = null;
+    try {
+      setUpdateStatus("downloaded", "Installing update and restarting...");
+      autoUpdater.quitAndInstall(false, true);
+    } catch (error) {
+      const text = error instanceof Error ? error.message : String(error);
+      setUpdateStatus("error", `Update install failed: ${text}`);
+    }
+  }, delayMs);
 };
 
 const setUpdateStatus = (state: UpdateStatus["state"], message: string, extras: Partial<UpdateStatus> = {}) => {
@@ -2130,13 +2151,15 @@ const setupAutoUpdater = () => {
   autoUpdater.on("update-downloaded", (info) => {
     const availableVersion = typeof info.version === "string" ? info.version : undefined;
     const infoRecord = info as unknown as Record<string, unknown>;
-    setUpdateStatus("downloaded", `Update ${availableVersion ?? "new version"} downloaded. It will install when the app restarts.`, {
+    setUpdateStatus("downloaded", `Update ${availableVersion ?? "new version"} downloaded. Restarting to apply update...`, {
       availableVersion,
       releaseDate: normalizeIsoDate(infoRecord.releaseDate),
       releaseNotes: normalizeReleaseNotes(infoRecord.releaseNotes)
     });
+    scheduleAutoInstallAfterDownload();
   });
   autoUpdater.on("error", (error) => {
+    clearPendingAutoInstallTimer();
     const text = error instanceof Error ? error.message : String(error);
     setUpdateStatus("error", formatUpdaterErrorMessage(text));
   });
@@ -3063,6 +3086,7 @@ app.whenReady().then(() => {
       setUpdateStatus("not-available", DEV_UPDATE_MESSAGE);
       return;
     }
+    clearPendingAutoInstallTimer();
     autoUpdater.quitAndInstall();
   });
   ipcMain.handle("updates:getStatus", () => updateStatus);
@@ -3081,6 +3105,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
+  clearPendingAutoInstallTimer();
   void disconnectAllTikTokConnections();
 });
 

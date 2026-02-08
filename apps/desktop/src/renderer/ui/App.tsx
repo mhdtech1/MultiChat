@@ -1310,6 +1310,10 @@ const MainApp: React.FC = () => {
     return next;
   }, [hasKickAuth, hasPrimaryAuth, hasTwitchAuth, readOnlyGuideMode, readOnlyPlatforms, tiktokAlphaEnabled, youtubeAlphaEnabled]);
   const mentionInboxCount = mentionInbox.length;
+  const updateLockActive = updateStatus.state === "downloading" || updateStatus.state === "downloaded";
+  const updateLockTitle =
+    updateStatus.state === "downloading" ? "Updating MultiChat..." : "Applying Update...";
+  const updateLockMessage = updateStatus.message || "Please wait while the update completes.";
   const connectionHealthRows = useMemo(
     () =>
       sources.map((source) => {
@@ -2474,39 +2478,63 @@ const MainApp: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="login-gate">
-        <div className="login-card">
-          <h1>MultiChat</h1>
-          <p>Loading your local profile...</p>
+      <>
+        <div className="login-gate">
+          <div className="login-card">
+            <h1>MultiChat</h1>
+            <p>Loading your local profile...</p>
+          </div>
         </div>
-      </div>
+        {updateLockActive ? (
+          <div className="update-lock-screen">
+            <div className="update-lock-card">
+              <div className="update-lock-spinner" aria-hidden="true" />
+              <h2>{updateLockTitle}</h2>
+              <p>{updateLockMessage}</p>
+              <p>Please keep the app open. Controls are temporarily disabled.</p>
+            </div>
+          </div>
+        ) : null}
+      </>
     );
   }
 
   if (!hasPrimaryAuth && !readOnlyGuideMode) {
     return (
-      <div className="login-gate">
-        <div className="login-card">
-          <h1>MultiChat</h1>
-          <p>Sign in to Twitch or Kick to unlock full app features.</p>
-          <div className="login-buttons">
-            <button type="button" onClick={() => void signInTwitch()} disabled={authBusy !== null}>
-              {authBusy === "twitch" ? "Signing in Twitch..." : "Sign in Twitch"}
-            </button>
-            <button type="button" onClick={() => void signInKick()} disabled={authBusy !== null}>
-              {authBusy === "kick" ? "Signing in Kick..." : "Sign in Kick"}
-            </button>
-          </div>
-          {readOnlyPlatforms.length > 0 ? (
+      <>
+        <div className="login-gate">
+          <div className="login-card">
+            <h1>MultiChat</h1>
+            <p>Sign in to Twitch or Kick to unlock full app features.</p>
             <div className="login-buttons">
-              <button type="button" onClick={() => void enterReadOnlyGuide()} disabled={authBusy !== null}>
-                Continue with YouTube/TikTok guide
+              <button type="button" onClick={() => void signInTwitch()} disabled={authBusy !== null}>
+                {authBusy === "twitch" ? "Signing in Twitch..." : "Sign in Twitch"}
+              </button>
+              <button type="button" onClick={() => void signInKick()} disabled={authBusy !== null}>
+                {authBusy === "kick" ? "Signing in Kick..." : "Sign in Kick"}
               </button>
             </div>
-          ) : null}
-          {authMessage ? <p className="login-message">{authMessage}</p> : null}
+            {readOnlyPlatforms.length > 0 ? (
+              <div className="login-buttons">
+                <button type="button" onClick={() => void enterReadOnlyGuide()} disabled={authBusy !== null}>
+                  Continue with YouTube/TikTok guide
+                </button>
+              </div>
+            ) : null}
+            {authMessage ? <p className="login-message">{authMessage}</p> : null}
+          </div>
         </div>
-      </div>
+        {updateLockActive ? (
+          <div className="update-lock-screen">
+            <div className="update-lock-card">
+              <div className="update-lock-spinner" aria-hidden="true" />
+              <h2>{updateLockTitle}</h2>
+              <p>{updateLockMessage}</p>
+              <p>Please keep the app open. Controls are temporarily disabled.</p>
+            </div>
+          </div>
+        ) : null}
+      </>
     );
   }
 
@@ -3178,6 +3206,16 @@ const MainApp: React.FC = () => {
       ) : null}
 
       {authMessage ? <p className="floating-status">{authMessage}</p> : null}
+      {updateLockActive ? (
+        <div className="update-lock-screen">
+          <div className="update-lock-card">
+            <div className="update-lock-spinner" aria-hidden="true" />
+            <h2>{updateLockTitle}</h2>
+            <p>{updateLockMessage}</p>
+            <p>Please keep the app open. Controls are temporarily disabled.</p>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 };
