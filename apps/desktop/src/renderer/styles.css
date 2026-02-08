@@ -212,6 +212,16 @@ select {
   gap: 6px;
 }
 
+.menu-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
 .menu-group strong {
   font-size: 11px;
   color: var(--text-dim);
@@ -241,6 +251,91 @@ select {
   color: var(--text-main);
   border-radius: 8px;
   padding: 8px 10px;
+}
+
+.menu-muted {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.menu-error {
+  color: var(--accent-warm);
+  font-size: 11px;
+}
+
+.menu-health-list {
+  display: grid;
+  gap: 8px;
+}
+
+.menu-health-card {
+  border: 1px solid rgba(38, 66, 79, 0.85);
+  border-radius: 8px;
+  background: rgba(21, 37, 45, 0.85);
+  padding: 8px;
+  display: grid;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-main);
+}
+
+.menu-health-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: #cbfff0;
+}
+
+.menu-connection-list {
+  margin-top: 6px;
+  display: grid;
+  gap: 8px;
+}
+
+.menu-connection-row {
+  border: 1px solid rgba(38, 66, 79, 0.85);
+  border-radius: 8px;
+  padding: 8px;
+  background: rgba(14, 26, 32, 0.85);
+  display: grid;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--text-main);
+}
+
+.menu-mention-list {
+  display: grid;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.menu-mention-item {
+  border: 1px solid rgba(38, 66, 79, 0.85);
+  background: #152a33;
+  color: var(--text-main);
+  border-radius: 8px;
+  padding: 8px;
+  cursor: pointer;
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  font-size: 11px;
+}
+
+.release-notes-preview {
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  border: 1px solid rgba(38, 66, 79, 0.85);
+  border-radius: 8px;
+  padding: 8px;
+  background: rgba(10, 20, 26, 0.85);
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: pre-wrap;
 }
 
 .menu-submenu {

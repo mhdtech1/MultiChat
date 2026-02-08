@@ -33,6 +33,7 @@ type AppSettings = {
   smartFilterSpam?: boolean;
   smartFilterScam?: boolean;
   confirmSendAll?: boolean;
+  updateChannel?: "stable" | "beta";
   tabAlertRules?: Record<string, {
     keyword?: string;
     sound?: boolean;
@@ -61,6 +62,29 @@ type AppSettings = {
 type UpdateStatus = {
   state: "idle" | "checking" | "available" | "not-available" | "downloading" | "downloaded" | "error";
   message: string;
+  channel: "stable" | "beta";
+  currentVersion: string;
+  availableVersion?: string;
+  releaseDate?: string;
+  releaseNotes?: string;
+};
+
+type AuthPermissionSnapshot = {
+  platform: "twitch" | "kick";
+  signedIn: boolean;
+  username: string;
+  canSend: boolean;
+  canModerate: boolean;
+  tokenExpiry: number | null;
+  lastCheckedAt: number;
+  error?: string;
+};
+
+type AuthHealthSnapshot = {
+  twitch: AuthPermissionSnapshot;
+  kick: AuthPermissionSnapshot;
+  youtubeTokenExpiry: number | null;
+  updateChannel: "stable" | "beta";
 };
 
 type TikTokRendererEvent = {
@@ -89,6 +113,8 @@ const api = {
   signOutYouTube: (): Promise<AppSettings> => ipcRenderer.invoke("auth:youtube:signOut"),
   signInTikTok: (): Promise<AppSettings> => ipcRenderer.invoke("auth:tiktok:signIn"),
   signOutTikTok: (): Promise<AppSettings> => ipcRenderer.invoke("auth:tiktok:signOut"),
+  getAuthHealth: (): Promise<AuthHealthSnapshot> => ipcRenderer.invoke("auth:getHealth"),
+  testAuthPermissions: (): Promise<AuthHealthSnapshot> => ipcRenderer.invoke("auth:testPermissions"),
   resolveKickChatroom: (channel: string): Promise<{ chatroomId: number }> =>
     ipcRenderer.invoke("kick:resolveChatroom", channel),
   resolveYouTubeLiveChat: (channel: string): Promise<{ liveChatId: string; channelId: string; channelTitle: string; videoId: string }> =>
@@ -114,6 +140,7 @@ const api = {
   },
   checkForUpdates: (): Promise<UpdateStatus> => ipcRenderer.invoke("updates:check"),
   downloadUpdate: (): Promise<void> => ipcRenderer.invoke("updates:download"),
+  setUpdateChannel: (channel: "stable" | "beta"): Promise<UpdateStatus> => ipcRenderer.invoke("updates:setChannel", channel),
   installUpdate: (): Promise<void> => ipcRenderer.invoke("updates:install"),
   getUpdateStatus: (): Promise<UpdateStatus> => ipcRenderer.invoke("updates:getStatus"),
   onUpdateStatus: (callback: (status: UpdateStatus) => void): (() => void) => {

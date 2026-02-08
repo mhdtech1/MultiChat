@@ -43,6 +43,7 @@ type Settings = {
   smartFilterSpam?: boolean;
   smartFilterScam?: boolean;
   confirmSendAll?: boolean;
+  updateChannel?: "stable" | "beta";
   tabAlertRules?: Record<string, {
     keyword?: string;
     sound?: boolean;
@@ -108,6 +109,53 @@ type RoleBadge = {
   icon: string;
 };
 
+type UpdateStatusSnapshot = {
+  state: "idle" | "checking" | "available" | "not-available" | "downloading" | "downloaded" | "error";
+  message: string;
+  channel: "stable" | "beta";
+  currentVersion: string;
+  availableVersion?: string;
+  releaseDate?: string;
+  releaseNotes?: string;
+};
+
+type AuthPermissionSnapshot = {
+  platform: "twitch" | "kick";
+  signedIn: boolean;
+  username: string;
+  canSend: boolean;
+  canModerate: boolean;
+  tokenExpiry: number | null;
+  lastCheckedAt: number;
+  error?: string;
+};
+
+type AuthHealthSnapshot = {
+  twitch: AuthPermissionSnapshot;
+  kick: AuthPermissionSnapshot;
+  youtubeTokenExpiry: number | null;
+  updateChannel: "stable" | "beta";
+};
+
+type MentionInboxEntry = {
+  id: string;
+  sourceId: string;
+  tabId: string | null;
+  platform: Platform;
+  channel: string;
+  displayName: string;
+  message: string;
+  timestamp: string;
+};
+
+type ConnectionHealthState = {
+  lastStatus: ChatAdapterStatus;
+  lastStatusAt: number;
+  lastConnectedAt?: number;
+  reconnectReason?: string;
+  lastError?: string;
+};
+
 const defaultSettings: Settings = {
   twitchToken: "",
   twitchUsername: "",
@@ -139,6 +187,7 @@ const defaultSettings: Settings = {
   smartFilterSpam: true,
   smartFilterScam: true,
   confirmSendAll: true,
+  updateChannel: "stable",
   tabAlertRules: {},
   hideCommands: false,
   keywordFilters: [],
@@ -160,17 +209,42 @@ const COMMAND_SNIPPETS = [
   "/clear"
 ] as const;
 
-const isTwitchMentionForUser = (message: ChatMessage, twitchUsername?: string) => {
-  if (message.platform !== "twitch") return false;
-  const username = (twitchUsername ?? "").trim().replace(/^@+/, "");
-  if (!username) return false;
-  if (normalizeUserKey(message.username) === normalizeUserKey(username)) return false;
+const messageMentionsUser = (message: ChatMessage, username?: string) => {
+  const normalizedUsername = (username ?? "").trim().replace(/^@+/, "");
+  if (!normalizedUsername) return false;
+  if (normalizeUserKey(message.username) === normalizeUserKey(normalizedUsername)) return false;
   const text = message.message ?? "";
   if (!text.trim()) return false;
 
-  const escaped = escapeRegExp(username);
+  const escaped = escapeRegExp(normalizedUsername);
   const mentionPattern = new RegExp(`(^|\\W)@?${escaped}(\\W|$)`, "i");
   return mentionPattern.test(text);
+};
+
+const isMentionForPlatformUser = (message: ChatMessage, settings: Settings) => {
+  if (message.platform === "twitch") {
+    return messageMentionsUser(message, settings.twitchUsername);
+  }
+  if (message.platform === "kick") {
+    return messageMentionsUser(message, settings.kickUsername);
+  }
+  return false;
+};
+
+const formatOptionalDateTime = (value?: string) => {
+  if (!value) return "n/a";
+  const asDate = new Date(value);
+  if (Number.isNaN(asDate.getTime())) return "n/a";
+  return asDate.toLocaleString();
+};
+
+const formatOptionalExpiry = (value: number | null | undefined) => {
+  if (!value) return "unknown";
+  const asDate = new Date(value);
+  if (Number.isNaN(asDate.getTime())) return "unknown";
+  const minutes = Math.round((value - Date.now()) / 60_000);
+  if (minutes <= 0) return `${asDate.toLocaleString()} (expired)`;
+  return `${asDate.toLocaleString()} (${minutes}m left)`;
 };
 
 const createId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -896,6 +970,16 @@ const MainApp: React.FC = () => {
   const [authBusy, setAuthBusy] = useState<Platform | null>(null);
   const [authMessage, setAuthMessage] = useState("");
   const [readOnlyGuideMode, setReadOnlyGuideMode] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatusSnapshot>({
+    state: "idle",
+    message: "",
+    channel: settings.updateChannel === "beta" ? "beta" : "stable",
+    currentVersion: "unknown"
+  });
+  const [authHealth, setAuthHealth] = useState<AuthHealthSnapshot | null>(null);
+  const [authHealthBusy, setAuthHealthBusy] = useState(false);
+  const [mentionInbox, setMentionInbox] = useState<MentionInboxEntry[]>([]);
+  const [connectionHealthBySource, setConnectionHealthBySource] = useState<Record<string, ConnectionHealthState>>({});
 
   const [platformInput, setPlatformInput] = useState<Platform>("twitch");
   const [channelInput, setChannelInput] = useState("");
@@ -938,6 +1022,7 @@ const MainApp: React.FC = () => {
   const tabsRef = useRef<ChatTab[]>([]);
   const sourceByIdRef = useRef<Map<string, ChatSource>>(new Map());
   const lastTabAlertAtRef = useRef<Map<string, number>>(new Map());
+  const sourceStatusRef = useRef<Record<string, ChatAdapterStatus>>({});
 
   useEffect(() => {
     let active = true;
@@ -1066,6 +1151,22 @@ const MainApp: React.FC = () => {
 
   useEffect(() => {
     const validSourceIds = new Set(sources.map((source) => source.id));
+    setConnectionHealthBySource((previous) => {
+      const next: Record<string, ConnectionHealthState> = {};
+      for (const [sourceId, health] of Object.entries(previous)) {
+        if (validSourceIds.has(sourceId)) {
+          next[sourceId] = health;
+        }
+      }
+      if (Object.keys(next).length === Object.keys(previous).length) {
+        return previous;
+      }
+      return next;
+    });
+  }, [sources]);
+
+  useEffect(() => {
+    const validSourceIds = new Set(sources.map((source) => source.id));
     setModeratorBySource((previous) => {
       const next: Record<string, boolean> = {};
       for (const [sourceId, canModerate] of Object.entries(previous)) {
@@ -1171,9 +1272,6 @@ const MainApp: React.FC = () => {
     if (moderatorBySource[source.id] === true) {
       return true;
     }
-    if (source.platform === "kick") {
-      return Boolean(settings.kickAccessToken);
-    }
     return false;
   };
   const canModerateActiveTab = !activeTabIsMerged && canModerateSource(activeSingleSource);
@@ -1211,6 +1309,34 @@ const MainApp: React.FC = () => {
     }
     return next;
   }, [hasKickAuth, hasPrimaryAuth, hasTwitchAuth, readOnlyGuideMode, readOnlyPlatforms, tiktokAlphaEnabled, youtubeAlphaEnabled]);
+  const mentionInboxCount = mentionInbox.length;
+  const connectionHealthRows = useMemo(
+    () =>
+      sources.map((source) => {
+        const authExpiry =
+          source.platform === "twitch"
+            ? authHealth?.twitch.tokenExpiry ?? null
+            : source.platform === "kick"
+              ? authHealth?.kick.tokenExpiry ?? null
+              : source.platform === "youtube"
+                ? authHealth?.youtubeTokenExpiry ?? null
+                : null;
+        return {
+          source,
+          status: statusBySource[source.id] ?? "disconnected",
+          health: connectionHealthBySource[source.id],
+          tokenExpiry: authExpiry,
+          canSend:
+            source.platform === "twitch"
+              ? Boolean(settings.twitchToken)
+              : source.platform === "kick"
+                ? Boolean(settings.kickAccessToken)
+                : false,
+          canModerate: canModerateSource(source)
+        };
+      }),
+    [authHealth, canModerateSource, connectionHealthBySource, settings.kickAccessToken, settings.twitchToken, sources, statusBySource]
+  );
 
   const activeMessages = useMemo(() => {
     if (!activeTab) return [];
@@ -1412,7 +1538,28 @@ const MainApp: React.FC = () => {
     }
 
     adapter.onStatus((status) => {
+      const now = Date.now();
+      const previousStatus = sourceStatusRef.current[source.id];
+      sourceStatusRef.current[source.id] = status;
       setStatusBySource((prev) => ({ ...prev, [source.id]: status }));
+      setConnectionHealthBySource((previous) => {
+        const current = previous[source.id];
+        const reconnectReason =
+          status === "connecting" && previousStatus === "connected"
+            ? "Connection dropped; adapter started reconnect backoff."
+            : current?.reconnectReason;
+        const lastError = status === "error" ? current?.lastError ?? "Connection entered an error state." : current?.lastError;
+        return {
+          ...previous,
+          [source.id]: {
+            lastStatus: status,
+            lastStatusAt: now,
+            lastConnectedAt: status === "connected" ? now : current?.lastConnectedAt,
+            reconnectReason,
+            lastError
+          }
+        };
+      });
     });
 
     adapter.onMessage((message) => {
@@ -1495,19 +1642,40 @@ const MainApp: React.FC = () => {
         return { ...prev, [source.id]: updated };
       });
 
-      if (isTwitchMentionForUser(message, currentSettings.twitchUsername)) {
+      const sourceTabs = tabsRef.current.filter((tab) => tab.sourceIds.includes(source.id));
+      if (isMentionForPlatformUser(message, currentSettings)) {
+        const mentionAlertKey = `mention:${message.platform}:${message.channel}:${normalizeUserKey(message.username)}:${message.message
+          .trim()
+          .toLowerCase()}`;
         if (now - lastMentionAlertAtRef.current > 1000) {
           lastMentionAlertAtRef.current = now;
           triggerAttention(
-            `Twitch mention in #${message.channel}`,
+            `${message.platform.toUpperCase()} mention in #${message.channel}`,
             `${message.displayName}: ${message.message}`,
-            `mention:${message.channel}`
+            mentionAlertKey
           );
         }
+        const mentionTabId = sourceTabs[0]?.id ?? null;
+        const mentionId = `${message.id}:${message.platform}:${message.channel}:${message.timestamp}`;
+        setMentionInbox((previous) => {
+          if (previous.some((entry) => entry.id === mentionId)) {
+            return previous;
+          }
+          const next: MentionInboxEntry = {
+            id: mentionId,
+            sourceId: source.id,
+            tabId: mentionTabId,
+            platform: message.platform,
+            channel: message.channel,
+            displayName: message.displayName,
+            message: message.message,
+            timestamp: message.timestamp
+          };
+          return [next, ...previous].slice(0, 250);
+        });
       }
 
       const tabRules = currentSettings.tabAlertRules ?? {};
-      const sourceTabs = tabsRef.current.filter((tab) => tab.sourceIds.includes(source.id));
       for (const tab of sourceTabs) {
         const rule = tabRules[tab.id];
         const keyword = (rule?.keyword ?? "").trim();
@@ -1572,6 +1740,17 @@ const MainApp: React.FC = () => {
     } catch (error) {
       setStatusBySource((prev) => ({ ...prev, [source.id]: "error" }));
       const text = error instanceof Error ? error.message : String(error);
+      sourceStatusRef.current[source.id] = "error";
+      setConnectionHealthBySource((previous) => ({
+        ...previous,
+        [source.id]: {
+          lastStatus: "error",
+          lastStatusAt: Date.now(),
+          lastConnectedAt: previous[source.id]?.lastConnectedAt,
+          reconnectReason: previous[source.id]?.reconnectReason,
+          lastError: text
+        }
+      }));
       setMessagesBySource((prev) => {
         const systemMessage: ChatMessage = {
           id: `system-${source.id}-${Date.now()}`,
@@ -1619,6 +1798,23 @@ const MainApp: React.FC = () => {
         setAuthMessage(error instanceof Error ? error.message : String(error));
         return;
       }
+    }
+
+    const existingStandaloneTab = tabs.find((tab) => {
+      if (tab.sourceIds.length !== 1) return false;
+      const tabSource = sourceById.get(tab.sourceIds[0]);
+      if (!tabSource) return false;
+      if (tabSource.key === key) return true;
+      if (tabSource.platform !== platformInput) return false;
+      if (platformInput !== "youtube") {
+        return normalizeChannel(tabSource.channel, tabSource.platform) === channel;
+      }
+      return Boolean(liveChatId && tabSource.liveChatId && tabSource.liveChatId === liveChatId);
+    });
+    if (existingStandaloneTab) {
+      setActiveTabId(existingStandaloneTab.id);
+      setChannelInput("");
+      return;
     }
 
     const existingSource = sources.find((source) => source.key === key);
@@ -1684,6 +1880,17 @@ const MainApp: React.FC = () => {
       });
       return next;
     });
+    setConnectionHealthBySource((prev) => {
+      const next = { ...prev };
+      orphaned.forEach((source) => {
+        delete next[source.id];
+      });
+      return next;
+    });
+    orphaned.forEach((source) => {
+      delete sourceStatusRef.current[source.id];
+    });
+    setMentionInbox((previous) => previous.filter((entry) => !orphanedIds.has(entry.sourceId)));
 
     for (const source of orphaned) {
       const adapter = adaptersRef.current.get(source.id);
@@ -1723,6 +1930,7 @@ const MainApp: React.FC = () => {
   const checkForUpdatesNow = async () => {
     try {
       const status = await window.electronAPI.checkForUpdates();
+      setUpdateStatus(status);
       if (status.message) {
         setAuthMessage(status.message);
       } else {
@@ -1731,6 +1939,44 @@ const MainApp: React.FC = () => {
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : String(error));
     }
+  };
+
+  const refreshAuthHealth = async (forceTest = false) => {
+    try {
+      setAuthHealthBusy(true);
+      const snapshot = forceTest ? await window.electronAPI.testAuthPermissions() : await window.electronAPI.getAuthHealth();
+      setAuthHealth(snapshot);
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setAuthHealthBusy(false);
+    }
+  };
+
+  const setUpdateChannelPreference = async (channel: "stable" | "beta") => {
+    try {
+      const status = await window.electronAPI.setUpdateChannel(channel);
+      setUpdateStatus(status);
+      setSettings((previous) => ({
+        ...previous,
+        updateChannel: channel
+      }));
+      setAuthMessage(`Update channel set to ${channel}.`);
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const clearMentionInbox = () => {
+    setMentionInbox([]);
+  };
+
+  const openMention = (entry: MentionInboxEntry) => {
+    const tabId = entry.tabId ?? tabs.find((tab) => tab.sourceIds.includes(entry.sourceId))?.id ?? "";
+    if (tabId) {
+      setActiveTabId(tabId);
+    }
+    setMentionInbox((previous) => previous.filter((item) => item.id !== entry.id));
   };
 
   const openUserLogsForMessage = (message: ChatMessage) => {
@@ -2003,6 +2249,7 @@ const MainApp: React.FC = () => {
       setSettings({ ...defaultSettings, ...next });
       const mode = next.twitchGuest ? "guest mode" : "oauth";
       setAuthMessage(`Signed in to Twitch as ${next.twitchUsername ?? "unknown user"} (${mode}).`);
+      void refreshAuthHealth(false);
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : String(error));
     } finally {
@@ -2018,6 +2265,7 @@ const MainApp: React.FC = () => {
       setSettings({ ...defaultSettings, ...next });
       const mode = next.kickGuest ? "guest mode" : "oauth";
       setAuthMessage(`Signed in to Kick as ${next.kickUsername ?? "unknown user"} (${mode}).`);
+      void refreshAuthHealth(false);
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : String(error));
     } finally {
@@ -2028,11 +2276,13 @@ const MainApp: React.FC = () => {
   const signOutTwitch = async () => {
     const next = await window.electronAPI.signOutTwitch();
     setSettings({ ...defaultSettings, ...next });
+    void refreshAuthHealth(false);
   };
 
   const signOutKick = async () => {
     const next = await window.electronAPI.signOutKick();
     setSettings({ ...defaultSettings, ...next });
+    void refreshAuthHealth(false);
   };
 
   const enterReadOnlyGuide = async () => {
@@ -2186,10 +2436,32 @@ const MainApp: React.FC = () => {
 
   useEffect(() => {
     return window.electronAPI.onUpdateStatus((status) => {
+      setUpdateStatus(status);
       if (!status.message || status.state === "idle") return;
       setAuthMessage(status.message);
     });
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    void window.electronAPI
+      .getUpdateStatus()
+      .then((status) => {
+        if (!active) return;
+        setUpdateStatus(status);
+      })
+      .catch(() => {
+        // no-op
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!sessionHydrated) return;
+    void refreshAuthHealth(false);
+  }, [sessionHydrated, settings.kickAccessToken, settings.kickUsername, settings.twitchToken, settings.twitchUsername]);
 
   useEffect(() => {
     if (!("Notification" in window)) return;
@@ -2247,7 +2519,7 @@ const MainApp: React.FC = () => {
       !activeTabIsMerged &&
       activeSingleSource &&
       messageMenuSource.id === activeSingleSource.id &&
-      canModerateActiveTab &&
+      canModerateSource(messageMenuSource) &&
       (messageMenu.message.platform === "twitch" || messageMenu.message.platform === "kick")
   );
 
@@ -2339,6 +2611,87 @@ const MainApp: React.FC = () => {
                 </details>
               </div>
               <div className="menu-group">
+                <strong>Auth Manager</strong>
+                <div className="menu-row">
+                  <button type="button" onClick={() => void refreshAuthHealth(false)} disabled={authHealthBusy}>
+                    Refresh health
+                  </button>
+                  <button type="button" onClick={() => void refreshAuthHealth(true)} disabled={authHealthBusy}>
+                    Test permissions
+                  </button>
+                </div>
+                <div className="menu-health-list">
+                  <div className="menu-health-card">
+                    <span className="menu-health-title">Twitch</span>
+                    <span>Signed in: {authHealth?.twitch.signedIn ? "yes" : "no"}</span>
+                    <span>User: {authHealth?.twitch.username || settings.twitchUsername || "n/a"}</span>
+                    <span>Can send: {authHealth?.twitch.canSend ? "yes" : "no"}</span>
+                    <span>Can mod (active tab): {canModerateActiveTab && activeSingleSource?.platform === "twitch" ? "yes" : "no"}</span>
+                    <span>Token expiry: {formatOptionalExpiry(authHealth?.twitch.tokenExpiry)}</span>
+                    {authHealth?.twitch.error ? <span className="menu-error">Error: {authHealth.twitch.error}</span> : null}
+                  </div>
+                  <div className="menu-health-card">
+                    <span className="menu-health-title">Kick</span>
+                    <span>Signed in: {authHealth?.kick.signedIn ? "yes" : "no"}</span>
+                    <span>User: {authHealth?.kick.username || settings.kickUsername || "n/a"}</span>
+                    <span>Can send: {authHealth?.kick.canSend ? "yes" : "no"}</span>
+                    <span>Can mod (active tab): {canModerateActiveTab && activeSingleSource?.platform === "kick" ? "yes" : "no"}</span>
+                    <span>Token expiry: {formatOptionalExpiry(authHealth?.kick.tokenExpiry)}</span>
+                    {authHealth?.kick.error ? <span className="menu-error">Error: {authHealth.kick.error}</span> : null}
+                  </div>
+                </div>
+              </div>
+              <div className="menu-group">
+                <strong>Connection Health</strong>
+                <details className="menu-submenu" open>
+                  <summary>Open sources ({connectionHealthRows.length})</summary>
+                  <div className="menu-connection-list">
+                    {connectionHealthRows.length === 0 ? (
+                      <span className="menu-muted">No sources connected yet.</span>
+                    ) : (
+                      connectionHealthRows.map((row) => (
+                        <div key={row.source.id} className="menu-connection-row">
+                          <span className="menu-health-title">
+                            {row.source.platform}/{row.source.channel}
+                          </span>
+                          <span>Status: {row.status}</span>
+                          <span>Can send: {row.canSend ? "yes" : "no"}</span>
+                          <span>Can mod: {row.canModerate ? "yes" : "no"}</span>
+                          <span>Token expiry: {formatOptionalExpiry(row.tokenExpiry)}</span>
+                          <span>Last status change: {row.health?.lastStatusAt ? new Date(row.health.lastStatusAt).toLocaleTimeString() : "n/a"}</span>
+                          {row.health?.reconnectReason ? <span>Reconnect reason: {row.health.reconnectReason}</span> : null}
+                          {row.health?.lastError ? <span className="menu-error">Last error: {row.health.lastError}</span> : null}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </details>
+              </div>
+              <div className="menu-group">
+                <strong>Mention Inbox</strong>
+                <div className="menu-row">
+                  <span>{mentionInboxCount} unread mentions</span>
+                  <button type="button" onClick={clearMentionInbox} disabled={mentionInboxCount === 0}>
+                    Clear
+                  </button>
+                </div>
+                <div className="menu-mention-list">
+                  {mentionInboxCount === 0 ? (
+                    <span className="menu-muted">No mentions yet.</span>
+                  ) : (
+                    mentionInbox.slice(0, 12).map((entry) => (
+                      <button key={entry.id} type="button" className="menu-mention-item" onClick={() => openMention(entry)}>
+                        <span>
+                          [{platformIconGlyph(entry.platform)}] #{entry.channel} · {entry.displayName}
+                        </span>
+                        <span>{entry.message.slice(0, 120)}</span>
+                        <span>{new Date(entry.timestamp).toLocaleTimeString()}</span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+              <div className="menu-group">
                 <strong>Filters</strong>
                 <label className="menu-check">
                   <input
@@ -2385,6 +2738,26 @@ const MainApp: React.FC = () => {
                 </button>
               </div>
               <div className="menu-group">
+                <strong>Release Reliability</strong>
+                <label className="menu-inline">
+                  Update channel
+                  <select
+                    value={(settings.updateChannel ?? authHealth?.updateChannel ?? updateStatus.channel ?? "stable") === "beta" ? "beta" : "stable"}
+                    onChange={(event) => void setUpdateChannelPreference(event.target.value as "stable" | "beta")}
+                  >
+                    <option value="stable">Stable</option>
+                    <option value="beta">Beta</option>
+                  </select>
+                </label>
+                <span>Installed: v{updateStatus.currentVersion || "unknown"}</span>
+                <span>Available: {updateStatus.availableVersion ? `v${updateStatus.availableVersion}` : "n/a"}</span>
+                <span>Release date: {formatOptionalDateTime(updateStatus.releaseDate)}</span>
+                <button type="button" onClick={() => void checkForUpdatesNow()}>
+                  Check for Updates
+                </button>
+                {updateStatus.releaseNotes ? <pre className="release-notes-preview">{updateStatus.releaseNotes}</pre> : null}
+              </div>
+              <div className="menu-group">
                 <strong>System</strong>
                 <label className="menu-check">
                   <input
@@ -2394,9 +2767,6 @@ const MainApp: React.FC = () => {
                   />
                   Confirm send-to-all
                 </label>
-                <button type="button" onClick={() => void checkForUpdatesNow()}>
-                  Check for Updates
-                </button>
               </div>
             </div>
           </details>
@@ -2428,6 +2798,7 @@ const MainApp: React.FC = () => {
             TikTok: read-only
           </span>
         ) : null}
+        {mentionInboxCount > 0 ? <span className="account-pill on">Mentions: {mentionInboxCount}</span> : null}
       </div>
 
       <nav className="tabbar">

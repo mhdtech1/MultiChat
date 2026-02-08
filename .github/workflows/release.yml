@@ -15,6 +15,10 @@ jobs:
     runs-on: windows-latest
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      CSC_LINK: ${{ secrets.CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+      WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -56,6 +60,11 @@ jobs:
     runs-on: macos-latest
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      CSC_LINK: ${{ secrets.CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -110,4 +119,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: release-assets/**/*
+          prerelease: ${{ contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}
           generate_release_notes: true
