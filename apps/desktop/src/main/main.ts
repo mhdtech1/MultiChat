@@ -1300,13 +1300,39 @@ const showHelpGuide = async () => {
     title: "MultiChat Help Guide",
     message: "How to use MultiChat",
     detail: [
-      "1. Sign in with Twitch and/or Kick from the login screen.",
-      "2. Open channel tabs by typing a channel username and pressing Enter.",
-      "3. Use right-click on a tab to merge it into another tab when needed.",
-      "4. Use the composer dropdown to send to one chat or all chats in the active tab.",
-      "5. Right-click messages for moderator actions (timeout, ban, unban, delete on Twitch).",
-      "6. Use Overlay mode for stream-safe chat display (lock to pin, unlock to move/close).",
-      "7. Right-click a Twitch/Kick message and use View User Logs for in-app, session-only message history."
+      "1. Sign in with Twitch or Kick to unlock full app features and chat sending.",
+      "2. You can still open YouTube, TikTok, and Kick chats in read-only mode without login.",
+      "3. Add a channel with the Platform + Username fields. Each channel opens in its own tab.",
+      "4. Right-click any tab to merge chats only when you explicitly want a combined tab.",
+      "5. The send dropdown is tab-aware: send to one chat, or [ALL] writable chats in the active tab.",
+      "6. Scroll lock: if you scroll up, live autoscroll pauses. Use 'Go to newest message' to resume.",
+      "7. Right-click messages for moderation actions (shown only when you are mod/broadcaster on single-source tabs).",
+      "8. Right-click a Twitch/Kick user and choose 'View User Logs' to see session-only history (not saved to disk).",
+      "9. Overlay mode can be locked/unlocked for safe placement while streaming.",
+      "10. Use Help > Check for Updates to manually verify updates anytime."
+    ].join("\n")
+  };
+
+  if (mainWindow) {
+    await dialog.showMessageBox(mainWindow, options);
+    return;
+  }
+  await dialog.showMessageBox(options);
+};
+
+const showAboutApp = async () => {
+  const options: MessageBoxOptions = {
+    type: "info",
+    buttons: ["OK"],
+    defaultId: 0,
+    title: "About MultiChat",
+    message: `MultiChat v${app.getVersion()}`,
+    detail: [
+      `Version: ${app.getVersion()}`,
+      `Platform: ${process.platform} (${process.arch})`,
+      `Electron: ${process.versions.electron}`,
+      `Chromium: ${process.versions.chrome}`,
+      `Node.js: ${process.versions.node}`
     ].join("\n")
   };
 
@@ -1339,6 +1365,39 @@ const checkForUpdatesFromMenu = async () => {
 
 const setupAppMenu = () => {
   const isMac = process.platform === "darwin";
+  const helpSubmenu: MenuItemConstructorOptions[] = [
+    ...(!isMac
+      ? [
+          {
+            label: "About MultiChat",
+            click: () => {
+              void showAboutApp();
+            }
+          } as MenuItemConstructorOptions,
+          { type: "separator" } as MenuItemConstructorOptions
+        ]
+      : []),
+    {
+      label: "Help Guide",
+      click: () => {
+        void showHelpGuide();
+      }
+    },
+    {
+      label: "Check for Updates",
+      click: () => {
+        void checkForUpdatesFromMenu();
+      }
+    },
+    { type: "separator" },
+    {
+      label: "MultiChat Releases",
+      click: () => {
+        void shell.openExternal("https://github.com/mhdtech1/MultiChat/releases");
+      }
+    }
+  ];
+
   const template: MenuItemConstructorOptions[] = [
     ...(isMac
       ? [
@@ -1397,27 +1456,7 @@ const setupAppMenu = () => {
     },
     {
       label: "Help",
-      submenu: [
-        {
-          label: "Help Guide",
-          click: () => {
-            void showHelpGuide();
-          }
-        },
-        {
-          label: "Check for Updates",
-          click: () => {
-            void checkForUpdatesFromMenu();
-          }
-        },
-        { type: "separator" },
-        {
-          label: "MultiChat Releases",
-          click: () => {
-            void shell.openExternal("https://github.com/mhdtech1/MultiChat/releases");
-          }
-        }
-      ]
+      submenu: helpSubmenu
     }
   ];
 
