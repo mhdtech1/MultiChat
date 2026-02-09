@@ -12,6 +12,7 @@ type Platform = "twitch" | "kick" | "youtube" | "tiktok";
 const SEND_TARGET_TAB_ALL = "__all_in_tab__";
 
 type Settings = {
+  uiMode?: "simple" | "advanced";
   twitchToken?: string;
   twitchUsername?: string;
   twitchGuest?: boolean;
@@ -178,6 +179,7 @@ type ConnectionHealthState = {
 };
 
 const defaultSettings: Settings = {
+  uiMode: "advanced",
   twitchToken: "",
   twitchUsername: "",
   twitchGuest: false,
@@ -1076,12 +1078,18 @@ const MainApp: React.FC = () => {
   const lastMentionAlertAtRef = useRef(0);
   const spamFilterRef = useRef<Map<string, number>>(new Map());
   const tabsRef = useRef<ChatTab[]>([]);
+  const tabIdsBySourceIdRef = useRef<Record<string, string[]>>({});
   const sourceByIdRef = useRef<Map<string, ChatSource>>(new Map());
   const lastTabAlertAtRef = useRef<Map<string, number>>(new Map());
   const sourceStatusRef = useRef<Record<string, ChatAdapterStatus>>({});
   const activeTabIdRef = useRef("");
   const openingSourceKeysRef = useRef<Set<string>>(new Set());
   const lastAdaptiveToggleAtRef = useRef(0);
+  const lastHealthPublishAtBySourceRef = useRef<Record<string, number>>({});
+  const mentionInboxCount = mentionInbox.length;
+  const isSimpleMode = settings.uiMode === "simple";
+  const isAdvancedMode = !isSimpleMode;
+  const effectivePerformanceMode = settings.performanceMode === true || adaptivePerformanceMode;
 
   useEffect(() => {
     let active = true;
@@ -1174,6 +1182,17 @@ const MainApp: React.FC = () => {
 
   useEffect(() => {
     tabsRef.current = tabs;
+    const next: Record<string, string[]> = {};
+    for (const tab of tabs) {
+      for (const sourceId of tab.sourceIds) {
+        if (!next[sourceId]) {
+          next[sourceId] = [tab.id];
+        } else {
+          next[sourceId].push(tab.id);
+        }
+      }
+    }
+    tabIdsBySourceIdRef.current = next;
   }, [tabs]);
 
   useEffect(() => {
@@ -1222,7 +1241,7 @@ const MainApp: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false;
-    if (settings.performanceMode) {
+    if (effectivePerformanceMode) {
       setGlobalEmoteMap({});
       return;
     }
@@ -1236,7 +1255,7 @@ const MainApp: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [settings.performanceMode]);
+  }, [effectivePerformanceMode]);
 
   useEffect(() => {
     const validSourceIds = new Set(sources.map((source) => source.id));
@@ -1287,8 +1306,19 @@ const MainApp: React.FC = () => {
   }, [sources]);
 
   useEffect(() => {
+    const validSourceIds = new Set(sources.map((source) => source.id));
+    const next: Record<string, number> = {};
+    for (const sourceId of Object.keys(lastHealthPublishAtBySourceRef.current)) {
+      if (validSourceIds.has(sourceId)) {
+        next[sourceId] = lastHealthPublishAtBySourceRef.current[sourceId];
+      }
+    }
+    lastHealthPublishAtBySourceRef.current = next;
+  }, [sources]);
+
+  useEffect(() => {
     let cancelled = false;
-    if (settings.performanceMode) return;
+    if (effectivePerformanceMode) return;
     const twitchSources = sources.filter((source) => source.platform === "twitch");
     for (const source of twitchSources) {
       if (channelEmoteMapBySourceId[source.id]) continue;
@@ -1312,7 +1342,7 @@ const MainApp: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [channelEmoteMapBySourceId, settings.performanceMode, settings.twitchClientId, settings.twitchToken, sources]);
+  }, [channelEmoteMapBySourceId, effectivePerformanceMode, settings.twitchClientId, settings.twitchToken, sources]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -1433,8 +1463,6 @@ const MainApp: React.FC = () => {
     }
     return next;
   }, [hasKickAuth, hasPrimaryAuth, hasTwitchAuth, readOnlyGuideMode, readOnlyPlatforms, tiktokAlphaEnabled, youtubeAlphaEnabled]);
-  const mentionInboxCount = mentionInbox.length;
-  const effectivePerformanceMode = settings.performanceMode === true || adaptivePerformanceMode;
   const layoutPresetOptions = [
     { id: "stream", label: "Stream" },
     { id: "mod", label: "Mod" },
@@ -1476,6 +1504,13 @@ const MainApp: React.FC = () => {
 
   const activeMessages = useMemo(() => {
     if (!activeTab) return [];
+    if (activeTab.sourceIds.length === 1) {
+      const single = messagesBySource[activeTab.sourceIds[0]] ?? [];
+      const filtered = normalizedSearch
+        ? single.filter((message) => message.message.toLowerCase().includes(normalizedSearch))
+        : single;
+      return collapseFanoutLocalEchoes(filtered);
+    }
     const merged = activeTab.sourceIds.flatMap((sourceId) => messagesBySource[sourceId] ?? []);
     const filtered = merged.filter((message) => (normalizedSearch ? message.message.toLowerCase().includes(normalizedSearch) : true));
     const sorted = filtered.sort((a, b) => messageTimestamp(a) - messageTimestamp(b));
@@ -1808,16 +1843,20 @@ const MainApp: React.FC = () => {
         return;
       }
 
-      setConnectionHealthBySource((previous) => ({
-        ...previous,
-        [source.id]: {
-          ...(previous[source.id] ?? {
-            lastStatus: sourceStatusRef.current[source.id] ?? "connecting",
-            lastStatusAt: now
-          }),
-          lastMessageAt: now
-        }
-      }));
+      const lastHealthPublishAt = lastHealthPublishAtBySourceRef.current[source.id] ?? 0;
+      if (now - lastHealthPublishAt >= 2000) {
+        lastHealthPublishAtBySourceRef.current[source.id] = now;
+        setConnectionHealthBySource((previous) => ({
+          ...previous,
+          [source.id]: {
+            ...(previous[source.id] ?? {
+              lastStatus: sourceStatusRef.current[source.id] ?? "connecting",
+              lastStatusAt: now
+            }),
+            lastMessageAt: now
+          }
+        }));
+      }
 
       setMessagesBySource((prev) => {
         const maxHistory = currentSettings.performanceMode ? 300 : 800;
@@ -1845,10 +1884,8 @@ const MainApp: React.FC = () => {
         return { ...prev, [source.id]: updated };
       });
 
-      const sourceTabs = tabsRef.current.filter((tab) => tab.sourceIds.includes(source.id));
-      const backgroundTabIds = Array.from(
-        new Set(sourceTabs.map((tab) => tab.id).filter((tabId) => tabId && tabId !== activeTabIdRef.current))
-      );
+      const sourceTabIds = tabIdsBySourceIdRef.current[source.id] ?? [];
+      const backgroundTabIds = sourceTabIds.filter((tabId) => tabId && tabId !== activeTabIdRef.current);
       if (backgroundTabIds.length > 0) {
         setTabUnreadCounts((previous) => {
           const next = { ...previous };
@@ -1864,10 +1901,10 @@ const MainApp: React.FC = () => {
         const mentionAlertKey = `mention:${message.platform}:${message.channel}:${normalizeUserKey(message.username)}:${message.message
           .trim()
           .toLowerCase()}`;
-        const mentionTargetTabs = sourceTabs.filter((tab) => tab.id !== activeTabIdRef.current);
-        const mentionAllows = mentionTargetTabs.reduce(
-          (acc, tab) => {
-            const rule = (currentSettings.tabAlertRules ?? {})[tab.id];
+        const mentionTargetTabIds = sourceTabIds.filter((tabId) => tabId !== activeTabIdRef.current);
+        const mentionAllows = mentionTargetTabIds.reduce(
+          (acc, tabId) => {
+            const rule = (currentSettings.tabAlertRules ?? {})[tabId];
             return {
               sound: acc.sound || rule?.mentionSound !== false,
               notify: acc.notify || rule?.mentionNotify !== false
@@ -1881,11 +1918,11 @@ const MainApp: React.FC = () => {
             `${message.platform.toUpperCase()} mention in #${message.channel}`,
             `${message.displayName}: ${message.message}`,
             mentionAlertKey,
-            mentionTargetTabs.length > 0 ? mentionAllows.sound : true,
-            mentionTargetTabs.length > 0 ? mentionAllows.notify : true
+            mentionTargetTabIds.length > 0 ? mentionAllows.sound : true,
+            mentionTargetTabIds.length > 0 ? mentionAllows.notify : true
           );
         }
-        const mentionTabId = sourceTabs[0]?.id ?? null;
+        const mentionTabId = sourceTabIds[0] ?? null;
         if (mentionTabId && mentionTabId !== activeTabIdRef.current) {
           setTabMentionCounts((previous) => ({
             ...previous,
@@ -1912,15 +1949,15 @@ const MainApp: React.FC = () => {
       }
 
       const tabRules = currentSettings.tabAlertRules ?? {};
-      for (const tab of sourceTabs) {
-        const rule = tabRules[tab.id];
+      for (const tabId of sourceTabIds) {
+        const rule = tabRules[tabId];
         const keyword = (rule?.keyword ?? "").trim();
         if (!keyword) continue;
         if (!message.message.toLowerCase().includes(keyword.toLowerCase())) continue;
         triggerAttention(
           `Tab alert in ${source.platform}/${source.channel}`,
           `${message.displayName}: ${message.message}`,
-          `tab:${tab.id}:${keyword.toLowerCase()}`,
+          `tab:${tabId}:${keyword.toLowerCase()}`,
           rule?.sound !== false,
           rule?.notify !== false
         );
@@ -3200,6 +3237,22 @@ const MainApp: React.FC = () => {
             <summary>Menu</summary>
             <div className="menu-dropdown-panel">
               <div className="menu-group">
+                <strong>Experience</strong>
+                <label className="menu-inline">
+                  Mode
+                  <select
+                    value={isSimpleMode ? "simple" : "advanced"}
+                    onChange={(event) => void persistSettings({ uiMode: event.target.value as "simple" | "advanced" })}
+                  >
+                    <option value="simple">Simple</option>
+                    <option value="advanced">Advanced</option>
+                  </select>
+                </label>
+                <span className="menu-muted">
+                  {isSimpleMode ? "Simple mode: core streamer tools only." : "Advanced mode: full controls and diagnostics."}
+                </span>
+              </div>
+              <div className="menu-group">
                 <strong>View</strong>
                 <button type="button" onClick={() => window.electronAPI.openOverlay()}>
                   Open Overlay
@@ -3216,15 +3269,17 @@ const MainApp: React.FC = () => {
                 >
                   Reopen Setup Wizard
                 </button>
-                <label className="menu-inline">
-                  Replay
-                  <select value={replayWindow} onChange={(event) => setReplayWindow(Number(event.target.value) as ReplayWindow)}>
-                    <option value={0}>All</option>
-                    <option value={5}>5 min</option>
-                    <option value={10}>10 min</option>
-                    <option value={30}>30 min</option>
-                  </select>
-                </label>
+                {isAdvancedMode ? (
+                  <label className="menu-inline">
+                    Replay
+                    <select value={replayWindow} onChange={(event) => setReplayWindow(Number(event.target.value) as ReplayWindow)}>
+                      <option value={0}>All</option>
+                      <option value={5}>5 min</option>
+                      <option value={10}>10 min</option>
+                      <option value={30}>30 min</option>
+                    </select>
+                  </label>
+                ) : null}
               </div>
               <div className="menu-group">
                 <strong>Accounts</strong>
@@ -3253,7 +3308,8 @@ const MainApp: React.FC = () => {
                   )}
                 </details>
               </div>
-              <div className="menu-group">
+              {isAdvancedMode ? (
+                <div className="menu-group">
                 <strong>Auth Manager</strong>
                 <div className="menu-row">
                   <button type="button" onClick={() => void refreshAuthHealth(false)} disabled={authHealthBusy}>
@@ -3283,8 +3339,10 @@ const MainApp: React.FC = () => {
                     {authHealth?.kick.error ? <span className="menu-error">Error: {authHealth.kick.error}</span> : null}
                   </div>
                 </div>
-              </div>
-              <div className="menu-group">
+                </div>
+              ) : null}
+              {isAdvancedMode ? (
+                <div className="menu-group">
                 <strong>Connection Health</strong>
                 <details className="menu-submenu" open>
                   <summary>Open sources ({connectionHealthRows.length})</summary>
@@ -3309,7 +3367,8 @@ const MainApp: React.FC = () => {
                     )}
                   </div>
                 </details>
-              </div>
+                </div>
+              ) : null}
               <div className="menu-group">
                 <strong>Mention Inbox</strong>
                 <div className="menu-row">
@@ -3334,7 +3393,8 @@ const MainApp: React.FC = () => {
                   )}
                 </div>
               </div>
-              <div className="menu-group">
+              {isAdvancedMode ? (
+                <div className="menu-group">
                 <strong>Filters</strong>
                 <label className="menu-inline">
                   Profile
@@ -3378,8 +3438,22 @@ const MainApp: React.FC = () => {
                   />
                   Performance mode {adaptivePerformanceMode ? "(adaptive override active)" : ""}
                 </label>
-              </div>
-              <div className="menu-group">
+                </div>
+              ) : (
+                <div className="menu-group">
+                  <strong>Performance</strong>
+                  <label className="menu-check">
+                    <input
+                      type="checkbox"
+                      checked={effectivePerformanceMode}
+                      onChange={(event) => void persistSettings({ performanceMode: event.target.checked })}
+                    />
+                    Performance mode
+                  </label>
+                </div>
+              )}
+              {isAdvancedMode ? (
+                <div className="menu-group">
                 <strong>Current Tab Alerts</strong>
                 <input
                   value={tabAlertKeywordInput}
@@ -3405,8 +3479,10 @@ const MainApp: React.FC = () => {
                 <button type="button" onClick={() => void saveCurrentTabAlertRule()} disabled={!activeTabId}>
                   Save tab alert
                 </button>
-              </div>
-              <div className="menu-group">
+                </div>
+              ) : null}
+              {isAdvancedMode ? (
+                <div className="menu-group">
                 <strong>Layouts</strong>
                 <label className="menu-inline">
                   Preset
@@ -3426,8 +3502,10 @@ const MainApp: React.FC = () => {
                     Load preset
                   </button>
                 </div>
-              </div>
-              <div className="menu-group">
+                </div>
+              ) : null}
+              {isAdvancedMode ? (
+                <div className="menu-group">
                 <strong>Session</strong>
                 <div className="menu-row">
                   <button type="button" onClick={exportSessionSnapshot}>
@@ -3451,8 +3529,10 @@ const MainApp: React.FC = () => {
                     event.currentTarget.value = "";
                   }}
                 />
-              </div>
-              <div className="menu-group">
+                </div>
+              ) : null}
+              {isAdvancedMode ? (
+                <div className="menu-group">
                 <strong>Mod Action History</strong>
                 <div className="menu-mention-list">
                   {moderationHistory.length === 0 ? (
@@ -3466,26 +3546,29 @@ const MainApp: React.FC = () => {
                     ))
                   )}
                 </div>
-              </div>
+                </div>
+              ) : null}
               <div className="menu-group">
                 <strong>Release Reliability</strong>
-                <label className="menu-inline">
-                  Update channel
-                  <select
-                    value={(settings.updateChannel ?? authHealth?.updateChannel ?? updateStatus.channel ?? "stable") === "beta" ? "beta" : "stable"}
-                    onChange={(event) => void setUpdateChannelPreference(event.target.value as "stable" | "beta")}
-                  >
-                    <option value="stable">Stable</option>
-                    <option value="beta">Beta</option>
-                  </select>
-                </label>
+                {isAdvancedMode ? (
+                  <label className="menu-inline">
+                    Update channel
+                    <select
+                      value={(settings.updateChannel ?? authHealth?.updateChannel ?? updateStatus.channel ?? "stable") === "beta" ? "beta" : "stable"}
+                      onChange={(event) => void setUpdateChannelPreference(event.target.value as "stable" | "beta")}
+                    >
+                      <option value="stable">Stable</option>
+                      <option value="beta">Beta</option>
+                    </select>
+                  </label>
+                ) : null}
                 <span>Installed: v{updateStatus.currentVersion || "unknown"}</span>
                 <span>Available: {updateStatus.availableVersion ? `v${updateStatus.availableVersion}` : "n/a"}</span>
                 <span>Release date: {formatOptionalDateTime(updateStatus.releaseDate)}</span>
                 <button type="button" onClick={() => void checkForUpdatesNow()}>
                   Check for Updates
                 </button>
-                {updateStatus.releaseNotes ? <pre className="release-notes-preview">{updateStatus.releaseNotes}</pre> : null}
+                {isAdvancedMode && updateStatus.releaseNotes ? <pre className="release-notes-preview">{updateStatus.releaseNotes}</pre> : null}
               </div>
               <div className="menu-group">
                 <strong>System</strong>
@@ -3759,7 +3842,7 @@ const MainApp: React.FC = () => {
                 maxLength={500}
                 disabled={writableActiveTabSources.length === 0}
               />
-              {canModerateActiveTab ? (
+              {isAdvancedMode && canModerateActiveTab ? (
                 <select
                   value={snippetToInsert}
                   onChange={(event) => {
@@ -3782,7 +3865,7 @@ const MainApp: React.FC = () => {
                 {sending ? "Sending..." : "Send"}
               </button>
             </form>
-            {writableActiveTabSources.length > 0 && canModerateActiveTab ? (
+            {isAdvancedMode && writableActiveTabSources.length > 0 && canModerateActiveTab ? (
               <div className="quick-mod-panel">
                 <strong>Quick Mod</strong>
                 <input
