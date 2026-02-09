@@ -1035,6 +1035,7 @@ const MainApp: React.FC = () => {
   const [tabMentionCounts, setTabMentionCounts] = useState<Record<string, number>>({});
 
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const channelInputRef = useRef<HTMLInputElement | null>(null);
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const adaptersRef = useRef<Map<string, ChatAdapter>>(new Map());
   const lastMessageByUser = useRef<Map<string, number>>(new Map());
@@ -1048,6 +1049,7 @@ const MainApp: React.FC = () => {
   const lastTabAlertAtRef = useRef<Map<string, number>>(new Map());
   const sourceStatusRef = useRef<Record<string, ChatAdapterStatus>>({});
   const activeTabIdRef = useRef("");
+  const openingSourceKeysRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     let active = true;
@@ -1365,6 +1367,9 @@ const MainApp: React.FC = () => {
   const hasTwitchAuth = Boolean(settings.twitchToken || settings.twitchGuest);
   const hasKickAuth = Boolean(settings.kickAccessToken);
   const hasPrimaryAuth = hasTwitchAuth || hasKickAuth;
+  const setupPrimaryConnected = Boolean(settings.twitchToken || settings.kickAccessToken);
+  const setupFirstTabReady = tabs.length > 0;
+  const setupCanFinish = setupPrimaryConnected && setupFirstTabReady;
   const readOnlyPlatforms = useMemo(() => {
     const next: Platform[] = [];
     if (youtubeAlphaEnabled) {
@@ -1885,28 +1890,30 @@ const MainApp: React.FC = () => {
     }
   };
 
-  const addChannelTab = async () => {
-    const channel = normalizeChannel(channelInput, platformInput);
+  const addChannelTab = async (overrides?: { platform?: Platform; channel?: string }) => {
+    const selectedPlatform = overrides?.platform ?? platformInput;
+    const selectedChannelInput = overrides?.channel ?? channelInput;
+    const channel = normalizeChannel(selectedChannelInput, selectedPlatform);
     if (!channel) return;
 
-    if (platformInput === "twitch" && !hasAuthForPlatform("twitch", settings)) {
+    if (selectedPlatform === "twitch" && !hasAuthForPlatform("twitch", settings)) {
       setAuthMessage(`Sign in to twitch before opening twitch/${channel}.`);
       return;
     }
-    if (platformInput === "kick" && !hasAuthForPlatform("kick", settings)) {
+    if (selectedPlatform === "kick" && !hasAuthForPlatform("kick", settings)) {
       setAuthMessage(`Sign in to kick before opening kick/${channel}.`);
       return;
     }
 
-    let key = `${platformInput}:${channel}`;
+    let key = `${selectedPlatform}:${channel}`;
     let liveChatId: string | undefined;
     let youtubeChannelId: string | undefined;
     let youtubeVideoId: string | undefined;
 
-    if (platformInput === "youtube") {
+    if (selectedPlatform === "youtube") {
       try {
         const resolved = await window.electronAPI.resolveYouTubeLiveChat(channel);
-        key = `${platformInput}:${resolved.channelId}:${resolved.liveChatId}`;
+        key = `${selectedPlatform}:${resolved.channelId}:${resolved.liveChatId}`;
         liveChatId = resolved.liveChatId;
         youtubeChannelId = resolved.channelId;
         youtubeVideoId = resolved.videoId;
@@ -1916,13 +1923,17 @@ const MainApp: React.FC = () => {
       }
     }
 
+    if (openingSourceKeysRef.current.has(key)) {
+      return;
+    }
+
     const existingStandaloneTab = tabs.find((tab) => {
       if (tab.sourceIds.length !== 1) return false;
       const tabSource = sourceById.get(tab.sourceIds[0]);
       if (!tabSource) return false;
       if (tabSource.key === key) return true;
-      if (tabSource.platform !== platformInput) return false;
-      if (platformInput !== "youtube") {
+      if (tabSource.platform !== selectedPlatform) return false;
+      if (selectedPlatform !== "youtube") {
         return normalizeChannel(tabSource.channel, tabSource.platform) === channel;
       }
       return Boolean(liveChatId && tabSource.liveChatId && tabSource.liveChatId === liveChatId);
@@ -1946,18 +1957,13 @@ const MainApp: React.FC = () => {
 
     const source = existingSource ?? {
       id: createId(),
-      platform: platformInput,
+      platform: selectedPlatform,
       channel,
       key,
       liveChatId,
       youtubeChannelId,
       youtubeVideoId
     };
-
-    if (!existingSource) {
-      setSources((prev) => [...prev, source]);
-      await ensureAdapterConnected(source, settings);
-    }
 
     const tab: ChatTab = {
       id: createId(),
@@ -1967,6 +1973,38 @@ const MainApp: React.FC = () => {
     setTabs((prev) => [...prev, tab]);
     setActiveTabId(tab.id);
     setChannelInput("");
+    setAuthMessage("");
+
+    const shouldConnectNow = !adaptersRef.current.has(source.id);
+    if (!existingSource) {
+      setSources((prev) => [...prev, source]);
+    }
+    if (!shouldConnectNow) {
+      return;
+    }
+
+    openingSourceKeysRef.current.add(key);
+    setStatusBySource((previous) => ({
+      ...previous,
+      [source.id]: "connecting"
+    }));
+    void ensureAdapterConnected(source, settings)
+      .catch((error) => {
+        const text = error instanceof Error ? error.message : String(error);
+        setAuthMessage(`Failed to connect ${source.platform}/${source.channel}: ${text}`);
+      })
+      .finally(() => {
+        openingSourceKeysRef.current.delete(key);
+      });
+  };
+
+  const openOwnChannelTab = async (platform: "twitch" | "kick") => {
+    const username = (platform === "twitch" ? settings.twitchUsername : settings.kickUsername) ?? "";
+    const normalized = normalizeChannel(username, platform);
+    if (!normalized) return;
+    setPlatformInput(platform);
+    setChannelInput(normalized);
+    await addChannelTab({ platform, channel: normalized });
   };
 
   const closeTab = async (tabId: string) => {
@@ -2802,6 +2840,7 @@ const MainApp: React.FC = () => {
             ))}
           </select>
           <input
+            ref={channelInputRef}
             value={channelInput}
             onChange={(event) => setChannelInput(event.target.value)}
             placeholder="Type channel username and press Enter"
@@ -3472,20 +3511,41 @@ const MainApp: React.FC = () => {
                       {settings.kickAccessToken ? "Kick connected" : authBusy === "kick" ? "Signing in Kick..." : "Connect Kick"}
                     </button>
                   </div>
-                  <p className="guide-note">Tip: You can connect both at the same time.</p>
+                  <p className="guide-note">Status: {setupPrimaryConnected ? "Connected" : "Waiting for Twitch or Kick sign-in"}</p>
                 </div>
               ) : null}
               {setupWizardStep === 1 ? (
                 <div className="guide-section">
                   <h3>Add your first channel tab</h3>
                   <p>Use the channel bar at the top to type a channel username and create a tab.</p>
+                  <div className="guide-actions">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        window.setTimeout(() => channelInputRef.current?.focus(), 0);
+                      }}
+                    >
+                      Focus Channel Bar
+                    </button>
+                    <button type="button" onClick={() => void openOwnChannelTab("twitch")} disabled={!settings.twitchUsername}>
+                      Open My Twitch Tab
+                    </button>
+                    <button type="button" onClick={() => void openOwnChannelTab("kick")} disabled={!settings.kickUsername}>
+                      Open My Kick Tab
+                    </button>
+                  </div>
                   <p className="guide-note">Smart tabs prevent duplicates. Right click a tab to merge it with another tab.</p>
-                  <p className="guide-note">Current tabs: {tabs.length}</p>
+                  <p className="guide-note">Status: {setupFirstTabReady ? `First tab opened (${tabs.length} total)` : "Open at least one tab"}</p>
                 </div>
               ) : null}
               {setupWizardStep === 2 ? (
                 <div className="guide-section">
                   <h3>Know the essentials</h3>
+                  <ul>
+                    <li>{setupPrimaryConnected ? "Done" : "Pending"}: Login to Twitch or Kick.</li>
+                    <li>{setupFirstTabReady ? "Done" : "Pending"}: Open your first channel tab.</li>
+                  </ul>
+                  <p className="guide-note">Finish unlocks after both tasks are complete.</p>
                   <ul>
                     <li>Use <strong>Refresh Tab</strong> in the top-left to reconnect only the current tab.</li>
                     <li>Tabs show unread and mention badges while they are in the background.</li>
@@ -3508,12 +3568,12 @@ const MainApp: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setSetupWizardStep((previous) => Math.min(2, previous + 1))}
-                  disabled={(setupWizardStep === 0 && !hasPrimaryAuth) || (setupWizardStep === 1 && tabs.length === 0)}
+                  disabled={(setupWizardStep === 0 && !setupPrimaryConnected) || (setupWizardStep === 1 && !setupFirstTabReady)}
                 >
                   Next
                 </button>
               ) : (
-                <button type="button" onClick={() => void completeSetupWizard()}>
+                <button type="button" onClick={() => void completeSetupWizard()} disabled={!setupCanFinish}>
                   Finish setup
                 </button>
               )}
