@@ -2735,14 +2735,14 @@ const MainApp: React.FC = () => {
       canModerateSource(messageMenuSource) &&
       (messageMenu.message.platform === "twitch" || messageMenu.message.platform === "kick")
   );
-  const tabMenuStyle = useMemo(() => {
+  const tabMenuStyle = (() => {
     if (!tabMenu) return undefined;
     const estimatedRows = Math.max(2, tabs.length + 1);
     const estimatedHeight = Math.min(640, 24 + estimatedRows * 38);
     const { x, y } = clampContextMenuPosition(tabMenu.x, tabMenu.y, 280, estimatedHeight);
     return { top: y, left: x };
-  }, [tabMenu, tabs.length]);
-  const messageMenuStyle = useMemo(() => {
+  })();
+  const messageMenuStyle = (() => {
     if (!messageMenu) return undefined;
     const modActionCount = canShowModerationMenu ? (messageMenu.message.platform === "twitch" ? 5 : 4) : 0;
     const userLogCount =
@@ -2756,7 +2756,7 @@ const MainApp: React.FC = () => {
     const estimatedHeight = Math.min(680, 26 + Math.max(4, rowCount) * 38);
     const { x, y } = clampContextMenuPosition(messageMenu.x, messageMenu.y, 300, estimatedHeight);
     return { top: y, left: x };
-  }, [canShowModerationMenu, messageMenu]);
+  })();
 
   return (
     <div

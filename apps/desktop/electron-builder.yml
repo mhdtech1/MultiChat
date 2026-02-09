@@ -93,9 +93,10 @@ win:
         - x64
   artifactName: ${productName}-win.${ext}
 nsis:
-  oneClick: false
-  allowToChangeInstallationDirectory: true
-  allowElevation: true
+  oneClick: true
+  perMachine: false
+  allowToChangeInstallationDirectory: false
+  allowElevation: false
   include: public/installer.nsh
 publish:
   provider: github
