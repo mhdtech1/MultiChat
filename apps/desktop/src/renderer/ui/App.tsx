@@ -48,6 +48,8 @@ type Settings = {
     keyword?: string;
     sound?: boolean;
     notify?: boolean;
+    mentionSound?: boolean;
+    mentionNotify?: boolean;
   }>;
   hideCommands?: boolean;
   keywordFilters?: string[];
@@ -66,6 +68,23 @@ type Settings = {
     sourceIds: string[];
   }>;
   sessionActiveTabId?: string;
+  savedLayouts?: Record<string, {
+    name: string;
+    sources: Array<{
+      id: string;
+      platform: Platform;
+      channel: string;
+      key: string;
+      liveChatId?: string;
+      youtubeChannelId?: string;
+      youtubeVideoId?: string;
+    }>;
+    tabs: Array<{
+      id: string;
+      sourceIds: string[];
+    }>;
+    activeTabId?: string;
+  }>;
   setupWizardCompleted?: boolean;
 };
 
@@ -152,6 +171,7 @@ type MentionInboxEntry = {
 type ConnectionHealthState = {
   lastStatus: ChatAdapterStatus;
   lastStatusAt: number;
+  lastMessageAt?: number;
   lastConnectedAt?: number;
   reconnectReason?: string;
   lastError?: string;
@@ -190,6 +210,7 @@ const defaultSettings: Settings = {
   confirmSendAll: true,
   updateChannel: "stable",
   tabAlertRules: {},
+  savedLayouts: {},
   hideCommands: false,
   keywordFilters: [],
   highlightKeywords: [],
@@ -1011,6 +1032,8 @@ const MainApp: React.FC = () => {
   const [tabAlertKeywordInput, setTabAlertKeywordInput] = useState("");
   const [tabAlertSound, setTabAlertSound] = useState(true);
   const [tabAlertNotify, setTabAlertNotify] = useState(true);
+  const [tabMentionSound, setTabMentionSound] = useState(true);
+  const [tabMentionNotify, setTabMentionNotify] = useState(true);
   const [snippetToInsert, setSnippetToInsert] = useState("");
 
   const [sources, setSources] = useState<ChatSource[]>([]);
@@ -1033,9 +1056,17 @@ const MainApp: React.FC = () => {
   const [setupWizardStep, setSetupWizardStep] = useState(0);
   const [tabUnreadCounts, setTabUnreadCounts] = useState<Record<string, number>>({});
   const [tabMentionCounts, setTabMentionCounts] = useState<Record<string, number>>({});
+  const [lastReadAtByTab, setLastReadAtByTab] = useState<Record<string, number>>({});
+  const [moderationHistory, setModerationHistory] = useState<
+    Array<{ id: string; at: number; action: string; target: string; source: string; ok: boolean }>
+  >([]);
+  const [layoutPresetName, setLayoutPresetName] = useState("stream");
+  const [filterProfile, setFilterProfile] = useState<"custom" | "clean" | "mod" | "no-filter">("custom");
+  const [adaptivePerformanceMode, setAdaptivePerformanceMode] = useState(false);
 
   const searchRef = useRef<HTMLInputElement | null>(null);
   const channelInputRef = useRef<HTMLInputElement | null>(null);
+  const importSessionInputRef = useRef<HTMLInputElement | null>(null);
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const adaptersRef = useRef<Map<string, ChatAdapter>>(new Map());
   const lastMessageByUser = useRef<Map<string, number>>(new Map());
@@ -1050,6 +1081,7 @@ const MainApp: React.FC = () => {
   const sourceStatusRef = useRef<Record<string, ChatAdapterStatus>>({});
   const activeTabIdRef = useRef("");
   const openingSourceKeysRef = useRef<Set<string>>(new Set());
+  const lastAdaptiveToggleAtRef = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -1074,6 +1106,8 @@ const MainApp: React.FC = () => {
         setTabAlertKeywordInput((nextSettings.tabAlertRules?.[saved.sessionActiveTabId ?? ""]?.keyword ?? "").trim());
         setTabAlertSound(nextSettings.tabAlertRules?.[saved.sessionActiveTabId ?? ""]?.sound !== false);
         setTabAlertNotify(nextSettings.tabAlertRules?.[saved.sessionActiveTabId ?? ""]?.notify !== false);
+        setTabMentionSound(nextSettings.tabAlertRules?.[saved.sessionActiveTabId ?? ""]?.mentionSound !== false);
+        setTabMentionNotify(nextSettings.tabAlertRules?.[saved.sessionActiveTabId ?? ""]?.mentionNotify !== false);
 
         const restoredSources = sanitizeSessionSources(saved.sessionSources).filter((source) => {
           if (source.platform === "youtube" && !nextSettings.youtubeAlphaEnabled) return false;
@@ -1400,6 +1434,12 @@ const MainApp: React.FC = () => {
     return next;
   }, [hasKickAuth, hasPrimaryAuth, hasTwitchAuth, readOnlyGuideMode, readOnlyPlatforms, tiktokAlphaEnabled, youtubeAlphaEnabled]);
   const mentionInboxCount = mentionInbox.length;
+  const effectivePerformanceMode = settings.performanceMode === true || adaptivePerformanceMode;
+  const layoutPresetOptions = [
+    { id: "stream", label: "Stream" },
+    { id: "mod", label: "Mod" },
+    { id: "collab", label: "Collab" }
+  ] as const;
   const updateLockActive = updateStatus.state === "downloading" || updateStatus.state === "downloaded";
   const updateLockTitle =
     updateStatus.state === "downloading" ? "Updating MultiChat..." : "Applying Update...";
@@ -1460,10 +1500,10 @@ const MainApp: React.FC = () => {
 
   const renderedMessages = useMemo(() => {
     if (!newestLocked) return visibleMessages;
-    const limit = settings.performanceMode ? Math.max(180, Math.floor(LOCKED_RENDERED_MESSAGE_LIMIT * 0.6)) : LOCKED_RENDERED_MESSAGE_LIMIT;
+    const limit = effectivePerformanceMode ? Math.max(180, Math.floor(LOCKED_RENDERED_MESSAGE_LIMIT * 0.6)) : LOCKED_RENDERED_MESSAGE_LIMIT;
     if (visibleMessages.length <= limit) return visibleMessages;
     return visibleMessages.slice(-limit);
-  }, [newestLocked, settings.performanceMode, visibleMessages]);
+  }, [effectivePerformanceMode, newestLocked, visibleMessages]);
 
   const chatHealth = useMemo(() => {
     const now = Date.now();
@@ -1477,6 +1517,13 @@ const MainApp: React.FC = () => {
     ).size;
     return { messagesPerMinute, uniqueChatters };
   }, [replayFilteredMessages]);
+
+  const activeTabLastReadAt = activeTabId ? lastReadAtByTab[activeTabId] ?? 0 : 0;
+  const firstUnreadTimestamp = useMemo(() => {
+    if (!activeTab || !activeTabLastReadAt) return 0;
+    const firstUnread = replayFilteredMessages.find((message) => messageTimestamp(message) > activeTabLastReadAt);
+    return firstUnread ? messageTimestamp(firstUnread) : 0;
+  }, [activeTab, activeTabLastReadAt, replayFilteredMessages]);
 
   const userLogMessages = useMemo(() => {
     if (!userLogTarget) return [];
@@ -1499,6 +1546,34 @@ const MainApp: React.FC = () => {
       .slice(0, 200);
   }, [identityTarget, messagesBySource, sources]);
 
+  const identityStats = useMemo(() => {
+    if (!identityTarget) {
+      return {
+        total: 0,
+        inLastMinute: 0,
+        inLastFiveMinutes: 0,
+        mentionCount: 0
+      };
+    }
+    const now = Date.now();
+    const oneMinute = now - 60_000;
+    const fiveMinutes = now - 5 * 60_000;
+    const mentionNeedle = `@${normalizeUserKey(identityTarget.username)}`;
+    const total = identityMessages.length;
+    let inLastMinute = 0;
+    let inLastFiveMinutes = 0;
+    let mentionCount = 0;
+    for (const message of identityMessages) {
+      const ts = messageTimestamp(message);
+      if (ts >= oneMinute) inLastMinute += 1;
+      if (ts >= fiveMinutes) inLastFiveMinutes += 1;
+      if ((message.message ?? "").toLowerCase().includes(mentionNeedle)) {
+        mentionCount += 1;
+      }
+    }
+    return { total, inLastMinute, inLastFiveMinutes, mentionCount };
+  }, [identityMessages, identityTarget]);
+
   useEffect(() => {
     const list = messageListRef.current;
     if (!list) return;
@@ -1508,6 +1583,21 @@ const MainApp: React.FC = () => {
     });
     return () => window.cancelAnimationFrame(raf);
   }, [activeMessages, newestLocked]);
+
+  useEffect(() => {
+    const now = Date.now();
+    if (chatHealth.messagesPerMinute >= 360 && !adaptivePerformanceMode && now - lastAdaptiveToggleAtRef.current > 30_000) {
+      lastAdaptiveToggleAtRef.current = now;
+      setAdaptivePerformanceMode(true);
+      setAuthMessage("Adaptive performance mode enabled for high traffic.");
+      return;
+    }
+    if (chatHealth.messagesPerMinute <= 160 && adaptivePerformanceMode && now - lastAdaptiveToggleAtRef.current > 30_000) {
+      lastAdaptiveToggleAtRef.current = now;
+      setAdaptivePerformanceMode(false);
+      setAuthMessage("Adaptive performance mode disabled.");
+    }
+  }, [adaptivePerformanceMode, chatHealth.messagesPerMinute]);
 
   const composerPlaceholder =
     writableActiveTabSources.length === 0
@@ -1655,6 +1745,7 @@ const MainApp: React.FC = () => {
           [source.id]: {
             lastStatus: status,
             lastStatusAt: now,
+            lastMessageAt: current?.lastMessageAt,
             lastConnectedAt: status === "connected" ? now : current?.lastConnectedAt,
             reconnectReason,
             lastError
@@ -1717,6 +1808,17 @@ const MainApp: React.FC = () => {
         return;
       }
 
+      setConnectionHealthBySource((previous) => ({
+        ...previous,
+        [source.id]: {
+          ...(previous[source.id] ?? {
+            lastStatus: sourceStatusRef.current[source.id] ?? "connecting",
+            lastStatusAt: now
+          }),
+          lastMessageAt: now
+        }
+      }));
+
       setMessagesBySource((prev) => {
         const maxHistory = currentSettings.performanceMode ? 300 : 800;
         const existing = prev[source.id] ?? [];
@@ -1762,12 +1864,25 @@ const MainApp: React.FC = () => {
         const mentionAlertKey = `mention:${message.platform}:${message.channel}:${normalizeUserKey(message.username)}:${message.message
           .trim()
           .toLowerCase()}`;
+        const mentionTargetTabs = sourceTabs.filter((tab) => tab.id !== activeTabIdRef.current);
+        const mentionAllows = mentionTargetTabs.reduce(
+          (acc, tab) => {
+            const rule = (currentSettings.tabAlertRules ?? {})[tab.id];
+            return {
+              sound: acc.sound || rule?.mentionSound !== false,
+              notify: acc.notify || rule?.mentionNotify !== false
+            };
+          },
+          { sound: false, notify: false }
+        );
         if (now - lastMentionAlertAtRef.current > 1000) {
           lastMentionAlertAtRef.current = now;
           triggerAttention(
             `${message.platform.toUpperCase()} mention in #${message.channel}`,
             `${message.displayName}: ${message.message}`,
-            mentionAlertKey
+            mentionAlertKey,
+            mentionTargetTabs.length > 0 ? mentionAllows.sound : true,
+            mentionTargetTabs.length > 0 ? mentionAllows.notify : true
           );
         }
         const mentionTabId = sourceTabs[0]?.id ?? null;
@@ -2081,6 +2196,159 @@ const MainApp: React.FC = () => {
     setTabMenu(null);
   };
 
+  const splitMergedTab = (tabId: string) => {
+    const target = tabs.find((tab) => tab.id === tabId);
+    if (!target || target.sourceIds.length <= 1) return;
+    const replacementTabs: ChatTab[] = target.sourceIds.map((sourceId) => ({
+      id: createId(),
+      sourceIds: [sourceId]
+    }));
+    const nextTabs: ChatTab[] = [];
+    for (const tab of tabs) {
+      if (tab.id === tabId) {
+        nextTabs.push(...replacementTabs);
+      } else {
+        nextTabs.push(tab);
+      }
+    }
+    setTabs(nextTabs);
+    setActiveTabId(replacementTabs[0]?.id ?? "");
+    setTabMenu(null);
+    setAuthMessage(`Split ${target.sourceIds.length} chats into separate tabs.`);
+  };
+
+  const saveLayoutPreset = async (presetId: string) => {
+    if (!tabs.length || !sources.length) {
+      setAuthMessage("Open at least one tab before saving a layout.");
+      return;
+    }
+    const nextLayouts = {
+      ...(settings.savedLayouts ?? {}),
+      [presetId]: {
+        name: presetId,
+        sources: sources.map((source) => ({ ...source })),
+        tabs: tabs.map((tab) => ({ id: tab.id, sourceIds: [...tab.sourceIds] })),
+        activeTabId
+      }
+    };
+    await persistSettings({ savedLayouts: nextLayouts });
+    setAuthMessage(`Saved layout preset: ${presetId}.`);
+  };
+
+  const loadLayoutPreset = async (presetId: string) => {
+    const layout = settings.savedLayouts?.[presetId];
+    if (!layout) {
+      setAuthMessage(`No saved layout found for ${presetId}.`);
+      return;
+    }
+    const restoredSources = sanitizeSessionSources(layout.sources);
+    const restoredSourceIds = new Set(restoredSources.map((source) => source.id));
+    const restoredTabs = sanitizeSessionTabs(layout.tabs, restoredSourceIds);
+    if (restoredSources.length === 0 || restoredTabs.length === 0) {
+      setAuthMessage(`Saved layout ${presetId} is empty or invalid.`);
+      return;
+    }
+    setSources(restoredSources);
+    setTabs(restoredTabs);
+    setActiveTabId(restoredTabs.some((tab) => tab.id === layout.activeTabId) ? layout.activeTabId ?? restoredTabs[0].id : restoredTabs[0].id);
+    for (const source of restoredSources) {
+      if (source.platform === "twitch" && !hasAuthForPlatform("twitch", settings)) continue;
+      if (source.platform === "kick" && !hasAuthForPlatform("kick", settings)) continue;
+      void ensureAdapterConnected(source, settings);
+    }
+    setAuthMessage(`Loaded layout preset: ${presetId}.`);
+  };
+
+  const applyFilterProfile = async (profile: "clean" | "mod" | "no-filter" | "custom") => {
+    setFilterProfile(profile);
+    if (profile === "custom") return;
+    if (profile === "clean") {
+      await persistSettings({
+        smartFilterSpam: true,
+        smartFilterScam: true,
+        hideCommands: true
+      });
+      setAuthMessage("Applied filter profile: clean.");
+      return;
+    }
+    if (profile === "mod") {
+      await persistSettings({
+        smartFilterSpam: false,
+        smartFilterScam: true,
+        hideCommands: false
+      });
+      setAuthMessage("Applied filter profile: mod.");
+      return;
+    }
+    await persistSettings({
+      smartFilterSpam: false,
+      smartFilterScam: false,
+      hideCommands: false
+    });
+    setAuthMessage("Applied filter profile: no filter.");
+  };
+
+  const exportSessionSnapshot = () => {
+    const snapshot = {
+      exportedAt: new Date().toISOString(),
+      sources: sources.map((source) => ({ ...source })),
+      tabs: tabs.map((tab) => ({ id: tab.id, sourceIds: [...tab.sourceIds] })),
+      activeTabId,
+      settings: {
+        tabAlertRules: settings.tabAlertRules ?? {},
+        keywordFilters: settings.keywordFilters ?? [],
+        highlightKeywords: settings.highlightKeywords ?? [],
+        smartFilterSpam: settings.smartFilterSpam !== false,
+        smartFilterScam: settings.smartFilterScam !== false,
+        hideCommands: settings.hideCommands === true
+      }
+    };
+    const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `multichat-session-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setAuthMessage("Exported session snapshot.");
+  };
+
+  const importSessionSnapshot = async (file: File) => {
+    const raw = await file.text();
+    const parsed = JSON.parse(raw) as {
+      sources?: Settings["sessionSources"];
+      tabs?: Settings["sessionTabs"];
+      activeTabId?: string;
+      settings?: Partial<Settings>;
+    };
+    const restoredSources = sanitizeSessionSources(parsed.sources);
+    const restoredSourceIds = new Set(restoredSources.map((source) => source.id));
+    const restoredTabs = sanitizeSessionTabs(parsed.tabs, restoredSourceIds);
+    if (restoredSources.length === 0 || restoredTabs.length === 0) {
+      setAuthMessage("Import failed: invalid snapshot.");
+      return;
+    }
+    setSources(restoredSources);
+    setTabs(restoredTabs);
+    setActiveTabId(typeof parsed.activeTabId === "string" && restoredTabs.some((tab) => tab.id === parsed.activeTabId) ? parsed.activeTabId : restoredTabs[0].id);
+    if (parsed.settings) {
+      await persistSettings({
+        tabAlertRules: parsed.settings.tabAlertRules ?? settings.tabAlertRules,
+        keywordFilters: parsed.settings.keywordFilters ?? settings.keywordFilters,
+        highlightKeywords: parsed.settings.highlightKeywords ?? settings.highlightKeywords,
+        smartFilterSpam: parsed.settings.smartFilterSpam ?? settings.smartFilterSpam,
+        smartFilterScam: parsed.settings.smartFilterScam ?? settings.smartFilterScam,
+        hideCommands: parsed.settings.hideCommands ?? settings.hideCommands
+      });
+    }
+    for (const source of restoredSources) {
+      if (source.platform === "twitch" && !hasAuthForPlatform("twitch", settings)) continue;
+      if (source.platform === "kick" && !hasAuthForPlatform("kick", settings)) continue;
+      void ensureAdapterConnected(source, settings);
+    }
+    setAuthMessage("Imported session snapshot.");
+  };
+
   const refreshActiveTab = async () => {
     if (!activeTab || activeTabSources.length === 0 || refreshingActiveTab) return;
     setRefreshingActiveTab(true);
@@ -2172,6 +2440,13 @@ const MainApp: React.FC = () => {
     const tabId = entry.tabId ?? tabs.find((tab) => tab.sourceIds.includes(entry.sourceId))?.id ?? "";
     if (tabId) {
       setActiveTabId(tabId);
+      const ts = new Date(entry.timestamp).getTime();
+      if (Number.isFinite(ts)) {
+        setLastReadAtByTab((previous) => ({
+          ...previous,
+          [tabId]: Math.max(previous[tabId] ?? 0, ts)
+        }));
+      }
     }
     setMentionInbox((previous) => previous.filter((item) => item.id !== entry.id));
   };
@@ -2264,6 +2539,17 @@ const MainApp: React.FC = () => {
 
     try {
       await adapter.sendMessage(command);
+      setModerationHistory((previous) => [
+        {
+          id: createId(),
+          at: Date.now(),
+          action,
+          target: message.displayName || username,
+          source: `${source.platform}/${source.channel}`,
+          ok: true
+        },
+        ...previous
+      ].slice(0, 120));
       setMessageMenu(null);
       if (action === "ban") {
         appendModeratorSystemMessage(`${message.displayName || username} was banned.`);
@@ -2277,6 +2563,17 @@ const MainApp: React.FC = () => {
       }
       setAuthMessage(`Moderator action sent in ${source.platform}/${source.channel}.`);
     } catch (error) {
+      setModerationHistory((previous) => [
+        {
+          id: createId(),
+          at: Date.now(),
+          action,
+          target: message.displayName || username,
+          source: `${source.platform}/${source.channel}`,
+          ok: false
+        },
+        ...previous
+      ].slice(0, 120));
       setAuthMessage(error instanceof Error ? error.message : String(error));
     }
   };
@@ -2425,17 +2722,52 @@ const MainApp: React.FC = () => {
       })
     );
     const ok = results.filter(Boolean).length;
+    setModerationHistory((previous) => [
+      {
+        id: createId(),
+        at: Date.now(),
+        action,
+        target: username,
+        source: targetIds
+          .map((sourceId) => {
+            const source = sourceById.get(sourceId);
+            return source ? `${source.platform}/${source.channel}` : sourceId;
+          })
+          .join(", "),
+        ok: ok > 0
+      },
+      ...previous
+    ].slice(0, 120));
     setAuthMessage(ok > 0 ? `Quick mod sent to ${ok}/${targetIds.length} chats.` : "Quick mod failed.");
   };
 
   const jumpToNewest = () => {
     setNewestLocked(true);
     setLockCutoffTimestamp(null);
+    if (activeTabId && replayFilteredMessages.length > 0) {
+      const latestTs = messageTimestamp(replayFilteredMessages[replayFilteredMessages.length - 1]);
+      if (latestTs > 0) {
+        setLastReadAtByTab((previous) => ({
+          ...previous,
+          [activeTabId]: latestTs
+        }));
+      }
+    }
     const list = messageListRef.current;
     if (!list) return;
     window.requestAnimationFrame(() => {
       list.scrollTop = list.scrollHeight;
     });
+  };
+
+  const jumpToFirstUnread = () => {
+    if (!firstUnreadTimestamp) return;
+    const list = messageListRef.current;
+    if (!list) return;
+    const marker = list.querySelector("[data-unread-marker='1']") as HTMLElement | null;
+    if (marker) {
+      marker.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
   };
 
   const signInTwitch = async () => {
@@ -2593,6 +2925,8 @@ const MainApp: React.FC = () => {
     setTabAlertKeywordInput((rule?.keyword ?? "").trim());
     setTabAlertSound(rule?.sound !== false);
     setTabAlertNotify(rule?.notify !== false);
+    setTabMentionSound(rule?.mentionSound !== false);
+    setTabMentionNotify(rule?.mentionNotify !== false);
   }, [activeTabId, settings.tabAlertRules]);
 
   const persistSettings = async (updates: Partial<Settings>) => {
@@ -2607,7 +2941,9 @@ const MainApp: React.FC = () => {
       [activeTabId]: {
         keyword: tabAlertKeywordInput.trim(),
         sound: tabAlertSound,
-        notify: tabAlertNotify
+        notify: tabAlertNotify,
+        mentionSound: tabMentionSound,
+        mentionNotify: tabMentionNotify
       }
     };
     await persistSettings({ tabAlertRules: nextRules });
@@ -2634,6 +2970,16 @@ const MainApp: React.FC = () => {
   useEffect(() => {
     setNewestLocked(true);
     setLockCutoffTimestamp(null);
+    if (!activeTabId) return;
+    setLastReadAtByTab((previous) => {
+      if (previous[activeTabId]) return previous;
+      const latest = replayFilteredMessages[replayFilteredMessages.length - 1];
+      const latestTs = latest ? messageTimestamp(latest) : Date.now();
+      return {
+        ...previous,
+        [activeTabId]: latestTs
+      };
+    });
   }, [activeTabId]);
 
   useEffect(() => {
@@ -2990,11 +3336,26 @@ const MainApp: React.FC = () => {
               </div>
               <div className="menu-group">
                 <strong>Filters</strong>
+                <label className="menu-inline">
+                  Profile
+                  <select
+                    value={filterProfile}
+                    onChange={(event) => void applyFilterProfile(event.target.value as "clean" | "mod" | "no-filter" | "custom")}
+                  >
+                    <option value="custom">Custom</option>
+                    <option value="clean">Clean</option>
+                    <option value="mod">Mod</option>
+                    <option value="no-filter">No filter</option>
+                  </select>
+                </label>
                 <label className="menu-check">
                   <input
                     type="checkbox"
                     checked={settings.smartFilterSpam !== false}
-                    onChange={(event) => void persistSettings({ smartFilterSpam: event.target.checked })}
+                    onChange={(event) => {
+                      setFilterProfile("custom");
+                      void persistSettings({ smartFilterSpam: event.target.checked });
+                    }}
                   />
                   Smart spam filter
                 </label>
@@ -3002,17 +3363,20 @@ const MainApp: React.FC = () => {
                   <input
                     type="checkbox"
                     checked={settings.smartFilterScam !== false}
-                    onChange={(event) => void persistSettings({ smartFilterScam: event.target.checked })}
+                    onChange={(event) => {
+                      setFilterProfile("custom");
+                      void persistSettings({ smartFilterScam: event.target.checked });
+                    }}
                   />
                   Scam phrase filter
                 </label>
                 <label className="menu-check">
                   <input
                     type="checkbox"
-                    checked={settings.performanceMode === true}
+                    checked={effectivePerformanceMode}
                     onChange={(event) => void persistSettings({ performanceMode: event.target.checked })}
                   />
-                  Performance mode
+                  Performance mode {adaptivePerformanceMode ? "(adaptive override active)" : ""}
                 </label>
               </div>
               <div className="menu-group">
@@ -3030,9 +3394,78 @@ const MainApp: React.FC = () => {
                   <input type="checkbox" checked={tabAlertNotify} onChange={(event) => setTabAlertNotify(event.target.checked)} />
                   Desktop notification
                 </label>
+                <label className="menu-check">
+                  <input type="checkbox" checked={tabMentionSound} onChange={(event) => setTabMentionSound(event.target.checked)} />
+                  Mention sound
+                </label>
+                <label className="menu-check">
+                  <input type="checkbox" checked={tabMentionNotify} onChange={(event) => setTabMentionNotify(event.target.checked)} />
+                  Mention notification
+                </label>
                 <button type="button" onClick={() => void saveCurrentTabAlertRule()} disabled={!activeTabId}>
                   Save tab alert
                 </button>
+              </div>
+              <div className="menu-group">
+                <strong>Layouts</strong>
+                <label className="menu-inline">
+                  Preset
+                  <select value={layoutPresetName} onChange={(event) => setLayoutPresetName(event.target.value)}>
+                    {layoutPresetOptions.map((preset) => (
+                      <option key={preset.id} value={preset.id}>
+                        {preset.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="menu-row">
+                  <button type="button" onClick={() => void saveLayoutPreset(layoutPresetName)}>
+                    Save preset
+                  </button>
+                  <button type="button" onClick={() => void loadLayoutPreset(layoutPresetName)}>
+                    Load preset
+                  </button>
+                </div>
+              </div>
+              <div className="menu-group">
+                <strong>Session</strong>
+                <div className="menu-row">
+                  <button type="button" onClick={exportSessionSnapshot}>
+                    Export session
+                  </button>
+                  <button type="button" onClick={() => importSessionInputRef.current?.click()}>
+                    Import session
+                  </button>
+                </div>
+                <input
+                  ref={importSessionInputRef}
+                  type="file"
+                  accept="application/json"
+                  style={{ display: "none" }}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (!file) return;
+                    void importSessionSnapshot(file).catch((error) => {
+                      setAuthMessage(error instanceof Error ? error.message : String(error));
+                    });
+                    event.currentTarget.value = "";
+                  }}
+                />
+              </div>
+              <div className="menu-group">
+                <strong>Mod Action History</strong>
+                <div className="menu-mention-list">
+                  {moderationHistory.length === 0 ? (
+                    <span className="menu-muted">No moderator actions yet.</span>
+                  ) : (
+                    moderationHistory.slice(0, 12).map((entry) => (
+                      <span key={entry.id} className="menu-muted">
+                        {new Date(entry.at).toLocaleTimeString()} · {entry.ok ? "OK" : "FAIL"} · {entry.action} · {entry.target} ·{" "}
+                        {entry.source}
+                      </span>
+                    ))
+                  )}
+                </div>
               </div>
               <div className="menu-group">
                 <strong>Release Reliability</strong>
@@ -3163,6 +3596,12 @@ const MainApp: React.FC = () => {
               : `${visibleMessages.length} messages (${pendingNewestCount} new paused) · ${chatHealth.messagesPerMinute}/min · ${chatHealth.uniqueChatters} chatters`
             : "Open a channel tab to start"}
         </span>
+        {firstUnreadTimestamp > 0 ? (
+          <button type="button" className="ghost" onClick={jumpToFirstUnread}>
+            First unread
+          </button>
+        ) : null}
+        {adaptivePerformanceMode ? <span className="account-pill on">Adaptive perf on</span> : null}
       </section>
 
       <main className="chat-main">
@@ -3178,10 +3617,15 @@ const MainApp: React.FC = () => {
                 const source = sourceById.get(sourceId);
                 if (!source) return null;
                 const status = statusBySource[source.id] ?? "connecting";
+                const health = connectionHealthBySource[source.id];
+                const staleSeconds = health?.lastMessageAt ? Math.max(0, Math.floor((Date.now() - health.lastMessageAt) / 1000)) : null;
                 return (
                   <span key={source.id} className={`source-chip ${status}`}>
                     <PlatformIcon platform={source.platform} />
-                    <span>{source.platform}/{source.channel} ({status})</span>
+                    <span>
+                      {source.platform}/{source.channel} ({status}
+                      {staleSeconds !== null && staleSeconds > 30 ? ` · lag ${staleSeconds}s` : ""})
+                    </span>
                   </span>
                 );
               })}
@@ -3198,13 +3642,16 @@ const MainApp: React.FC = () => {
                 setLockCutoffTimestamp(cutoffMessage ? messageTimestamp(cutoffMessage) : Date.now());
               }}
             >
-              {renderedMessages.map((message) => {
+              {renderedMessages.map((message, index) => {
                 const highlighted = settings.highlightKeywords?.some((word) =>
                   message.message.toLowerCase().includes(word.toLowerCase())
                 );
+                const ts = messageTimestamp(message);
+                const prevTs = index > 0 ? messageTimestamp(renderedMessages[index - 1]) : 0;
+                const showUnreadMarker = firstUnreadTimestamp > 0 && ts >= firstUnreadTimestamp && (index === 0 || prevTs < firstUnreadTimestamp);
                 const source = sourceByPlatformChannel.get(`${message.platform}:${message.channel}`);
                 const sourceEmoteMap = source ? channelEmoteMapBySourceId[source.id] : undefined;
-                const resolveEmote = (token: string) => sourceEmoteMap?.[token] ?? globalEmoteMap[token];
+                const resolveEmote = (token: string) => (effectivePerformanceMode ? undefined : sourceEmoteMap?.[token] ?? globalEmoteMap[token]);
                 const messageChunks = buildMessageChunks(message, resolveEmote);
                 const combinedChannels = readCombinedChannels(message);
                 const channelLabel =
@@ -3215,14 +3662,19 @@ const MainApp: React.FC = () => {
                   combinedChannels.length > 1 ? combinedChannels.map((channel) => `#${channel}`).join(", ") : `#${message.channel}`;
                 const roleBadges = roleBadgesForMessage(message);
                 return (
-                  <div
-                    key={message.id}
-                    className={highlighted ? "chat-line highlight" : "chat-line"}
-                    onContextMenu={(event) => {
-                      event.preventDefault();
-                      setMessageMenu({ x: event.clientX, y: event.clientY, message });
-                    }}
-                  >
+                  <React.Fragment key={message.id}>
+                    {showUnreadMarker ? (
+                      <div className="chat-unread-marker" data-unread-marker="1">
+                        New messages
+                      </div>
+                    ) : null}
+                    <div
+                      className={highlighted ? "chat-line highlight" : "chat-line"}
+                      onContextMenu={(event) => {
+                        event.preventDefault();
+                        setMessageMenu({ x: event.clientX, y: event.clientY, message });
+                      }}
+                    >
                     <span className="line-meta">
                       <span className={`platform ${message.platform}`}>
                         <PlatformIcon platform={message.platform} />
@@ -3271,7 +3723,8 @@ const MainApp: React.FC = () => {
                         )
                       )}
                     </span>
-                  </div>
+                    </div>
+                  </React.Fragment>
                 );
               })}
             </div>
@@ -3368,6 +3821,11 @@ const MainApp: React.FC = () => {
               </button>
             ))}
           {tabs.filter((tab) => tab.id !== tabMenu.tabId).length === 0 ? <span>No merge targets</span> : null}
+          {(tabs.find((tab) => tab.id === tabMenu.tabId)?.sourceIds.length ?? 0) > 1 ? (
+            <button type="button" onClick={() => splitMergedTab(tabMenu.tabId)}>
+              Split into single tabs
+            </button>
+          ) : null}
           <button type="button" onClick={() => setTabMenu(null)}>
             Close
           </button>
@@ -3471,6 +3929,10 @@ const MainApp: React.FC = () => {
               </button>
             </div>
             <p className="user-logs-note">Recent messages across all platforms in this session.</p>
+            <p className="user-logs-note">
+              Total: {identityStats.total} · 1m: {identityStats.inLastMinute} · 5m: {identityStats.inLastFiveMinutes} · Mentions:{" "}
+              {identityStats.mentionCount}
+            </p>
             <div className="user-logs-list">
               {identityMessages.length === 0 ? (
                 <p className="user-logs-empty">No cross-platform history for this user yet.</p>
