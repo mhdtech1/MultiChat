@@ -1781,6 +1781,8 @@ let updaterInitialized = false;
 const tiktokConnections = new Map<string, TikTokConnectionRecord>();
 const youtubeWebChatSessions = new Map<string, YouTubeWebChatSession>();
 let pendingAutoInstallTimer: ReturnType<typeof setTimeout> | null = null;
+let updateInstallTriggered = false;
+const isWindows = process.platform === "win32";
 
 const normalizeReleaseNotes = (value: unknown): string => {
   if (!value) return "";
@@ -1861,17 +1863,29 @@ const clearPendingAutoInstallTimer = () => {
   pendingAutoInstallTimer = null;
 };
 
+const installDownloadedUpdateNow = () => {
+  if (updateInstallTriggered) return;
+  updateInstallTriggered = true;
+  clearPendingAutoInstallTimer();
+  try {
+    setUpdateStatus("downloaded", "Installing update and restarting...");
+    if (isWindows) {
+      autoUpdater.quitAndInstall(true, true);
+      return;
+    }
+    autoUpdater.quitAndInstall(false, true);
+  } catch (error) {
+    updateInstallTriggered = false;
+    const text = error instanceof Error ? error.message : String(error);
+    setUpdateStatus("error", `Update install failed: ${text}`);
+  }
+};
+
 const scheduleAutoInstallAfterDownload = (delayMs = 1800) => {
   clearPendingAutoInstallTimer();
   pendingAutoInstallTimer = setTimeout(() => {
     pendingAutoInstallTimer = null;
-    try {
-      setUpdateStatus("downloaded", "Installing update and restarting...");
-      autoUpdater.quitAndInstall(false, true);
-    } catch (error) {
-      const text = error instanceof Error ? error.message : String(error);
-      setUpdateStatus("error", `Update install failed: ${text}`);
-    }
+    installDownloadedUpdateNow();
   }, delayMs);
 };
 
@@ -1920,6 +1934,7 @@ const requestUpdateCheck = async () => {
     setUpdateStatus("not-available", DEV_UPDATE_MESSAGE);
     return updateStatus;
   }
+  updateInstallTriggered = false;
   try {
     setUpdateStatus("checking", "Checking for updates...");
     await autoUpdater.checkForUpdates();
@@ -2121,6 +2136,14 @@ const setupAutoUpdater = () => {
 
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
+  if (isWindows) {
+    const windowsUpdater = autoUpdater as unknown as {
+      autoRunAppAfterInstall?: boolean;
+      disableWebInstaller?: boolean;
+    };
+    windowsUpdater.autoRunAppAfterInstall = true;
+    windowsUpdater.disableWebInstaller = true;
+  }
 
   autoUpdater.on("checking-for-update", () => {
     setUpdateStatus("checking", "Checking for updates...", {
@@ -2130,6 +2153,7 @@ const setupAutoUpdater = () => {
     });
   });
   autoUpdater.on("update-available", (info) => {
+    updateInstallTriggered = false;
     const availableVersion = typeof info.version === "string" ? info.version : undefined;
     const infoRecord = info as unknown as Record<string, unknown>;
     setUpdateStatus("available", `Update ${availableVersion ?? "new version"} available. Downloading in background...`, {
@@ -2139,6 +2163,7 @@ const setupAutoUpdater = () => {
     });
   });
   autoUpdater.on("update-not-available", () => {
+    updateInstallTriggered = false;
     setUpdateStatus("not-available", "You are on the latest version.", {
       availableVersion: undefined,
       releaseDate: undefined,
@@ -2161,6 +2186,7 @@ const setupAutoUpdater = () => {
   });
   autoUpdater.on("error", (error) => {
     clearPendingAutoInstallTimer();
+    updateInstallTriggered = false;
     const text = error instanceof Error ? error.message : String(error);
     setUpdateStatus("error", formatUpdaterErrorMessage(text));
   });
@@ -3088,8 +3114,7 @@ app.whenReady().then(() => {
       setUpdateStatus("not-available", DEV_UPDATE_MESSAGE);
       return;
     }
-    clearPendingAutoInstallTimer();
-    autoUpdater.quitAndInstall();
+    installDownloadedUpdateNow();
   });
   ipcMain.handle("updates:getStatus", () => updateStatus);
 

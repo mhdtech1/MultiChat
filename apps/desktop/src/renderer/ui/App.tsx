@@ -591,6 +591,21 @@ const SEVENTV_EMOTE_URL = (id: string) => `https://cdn.7tv.app/emote/${id}/1x.we
 const KICK_EMOTE_URL = (id: string) => `https://files.kick.com/emotes/${id}/fullsize`;
 const AUTO_SCROLL_BOTTOM_THRESHOLD_PX = 36;
 const LOCKED_RENDERED_MESSAGE_LIMIT = 420;
+const CONTEXT_MENU_EDGE_GAP_PX = 12;
+const CONTEXT_MENU_DEFAULT_WIDTH_PX = 250;
+const CONTEXT_MENU_DEFAULT_HEIGHT_PX = 360;
+
+const clampContextMenuPosition = (x: number, y: number, menuWidth = CONTEXT_MENU_DEFAULT_WIDTH_PX, menuHeight = CONTEXT_MENU_DEFAULT_HEIGHT_PX) => {
+  if (typeof window === "undefined") return { x, y };
+  const viewportWidth = Math.max(window.innerWidth, menuWidth + CONTEXT_MENU_EDGE_GAP_PX * 2);
+  const viewportHeight = Math.max(window.innerHeight, menuHeight + CONTEXT_MENU_EDGE_GAP_PX * 2);
+  const maxX = viewportWidth - menuWidth - CONTEXT_MENU_EDGE_GAP_PX;
+  const maxY = viewportHeight - menuHeight - CONTEXT_MENU_EDGE_GAP_PX;
+  return {
+    x: Math.min(Math.max(x, CONTEXT_MENU_EDGE_GAP_PX), maxX),
+    y: Math.min(Math.max(y, CONTEXT_MENU_EDGE_GAP_PX), maxY)
+  };
+};
 
 const normalizeOauthToken = (token?: string) => (token ?? "").trim().replace(/^oauth:/i, "");
 
@@ -2720,6 +2735,28 @@ const MainApp: React.FC = () => {
       canModerateSource(messageMenuSource) &&
       (messageMenu.message.platform === "twitch" || messageMenu.message.platform === "kick")
   );
+  const tabMenuStyle = useMemo(() => {
+    if (!tabMenu) return undefined;
+    const estimatedRows = Math.max(2, tabs.length + 1);
+    const estimatedHeight = Math.min(640, 24 + estimatedRows * 38);
+    const { x, y } = clampContextMenuPosition(tabMenu.x, tabMenu.y, 280, estimatedHeight);
+    return { top: y, left: x };
+  }, [tabMenu, tabs.length]);
+  const messageMenuStyle = useMemo(() => {
+    if (!messageMenu) return undefined;
+    const modActionCount = canShowModerationMenu ? (messageMenu.message.platform === "twitch" ? 5 : 4) : 0;
+    const userLogCount =
+      (messageMenu.message.platform === "twitch" || messageMenu.message.platform === "kick") &&
+      normalizeUserKey(messageMenu.message.username) !== "system"
+        ? 1
+        : 0;
+    const copyCount = 3;
+    const sectionCount = (modActionCount > 0 ? 1 : 0) + 1;
+    const rowCount = modActionCount + userLogCount + copyCount + sectionCount;
+    const estimatedHeight = Math.min(680, 26 + Math.max(4, rowCount) * 38);
+    const { x, y } = clampContextMenuPosition(messageMenu.x, messageMenu.y, 300, estimatedHeight);
+    return { top: y, left: x };
+  }, [canShowModerationMenu, messageMenu]);
 
   return (
     <div
@@ -3282,7 +3319,7 @@ const MainApp: React.FC = () => {
       </main>
 
       {tabMenu ? (
-        <div className="context-menu" style={{ top: tabMenu.y, left: tabMenu.x }} onClick={(event) => event.stopPropagation()}>
+        <div className="context-menu" style={tabMenuStyle} onClick={(event) => event.stopPropagation()}>
           <strong>Merge This Tab Into</strong>
           {tabs
             .filter((tab) => tab.id !== tabMenu.tabId)
@@ -3301,7 +3338,7 @@ const MainApp: React.FC = () => {
       {messageMenu ? (
         <div
           className="context-menu"
-          style={{ top: messageMenu.y, left: messageMenu.x }}
+          style={messageMenuStyle}
           onClick={(event) => event.stopPropagation()}
         >
           {canShowModerationMenu ? <strong>Moderation</strong> : null}

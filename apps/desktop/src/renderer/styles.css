@@ -284,10 +284,11 @@ select {
   border-radius: 10px;
   background: rgba(17, 29, 35, 0.98);
   box-shadow: 0 16px 45px var(--shadow);
-  max-height: min(78vh, 760px);
+  max-height: min(calc(100vh - 112px), 760px);
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
 }
 
 .menu-group {
@@ -377,6 +378,7 @@ select {
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
 }
 
 .menu-connection-row {
@@ -396,6 +398,9 @@ select {
   max-height: 220px;
   overflow-y: auto;
   padding-right: 2px;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
 }
 
 .menu-mention-item {
@@ -423,6 +428,9 @@ select {
   font-size: 11px;
   line-height: 1.35;
   white-space: pre-wrap;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
 }
 
 .menu-submenu {
@@ -434,10 +442,11 @@ select {
 }
 
 .menu-submenu[open] {
-  max-height: min(48vh, 420px);
+  max-height: min(calc(100vh - 180px), 420px);
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
 }
 
 .menu-submenu > summary {
@@ -943,10 +952,11 @@ select {
   border: 1px solid var(--border-soft);
   background: rgba(17, 29, 35, 0.96);
   box-shadow: 0 16px 45px var(--shadow);
-  max-height: min(74vh, 640px);
+  max-height: min(calc(100vh - 24px), 640px);
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
 }
 
 .context-menu strong {
@@ -1027,6 +1037,9 @@ select {
   padding: 10px 14px;
   display: grid;
   gap: 8px;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
 }
 
 .user-logs-empty {
@@ -1125,6 +1138,9 @@ select {
   padding: 14px;
   display: grid;
   gap: 12px;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
 }
 
 .guide-section {
