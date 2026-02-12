@@ -1,8 +1,53 @@
 :root {
   color-scheme: dark;
+  --bg-main: #000000;
+  --bg-panel: #050505;
+  --bg-panel-alt: #0a0a0a;
+  --bg-soft: rgba(0, 0, 0, 0.94);
+  --bg-pill: #0d0d0d;
+  --border-soft: #1f1f1f;
+  --text-main: #f2f4f7;
+  --text-dim: #a6adb7;
+  --accent: #16c79a;
+  --accent-warm: #ff8e54;
+  --danger: #ff6f61;
+  --shadow: rgba(0, 0, 0, 0.6);
+  --surface-gradient: linear-gradient(180deg, #050505, #000000);
+  --panel-gradient: linear-gradient(180deg, #080808, #030303);
+  --btn-solid-bg: #141414;
+  --btn-solid-bg-hover: #1c1c1c;
+  --btn-emphasis-bg: linear-gradient(180deg, #1a1a1a, #0f0f0f);
+  --btn-emphasis-bg-hover: linear-gradient(180deg, #212121, #151515);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg-main: #eef3f8;
+  --bg-panel: #ffffff;
+  --bg-panel-alt: #f5f9fd;
+  --bg-soft: rgba(240, 246, 252, 0.94);
+  --bg-pill: #edf4fa;
+  --border-soft: #c5d6e4;
+  --text-main: #102131;
+  --text-dim: #5a7184;
+  --accent: #0ea37b;
+  --accent-warm: #db6f3f;
+  --danger: #d74d43;
+  --shadow: rgba(17, 34, 51, 0.14);
+  --surface-gradient: linear-gradient(180deg, rgba(248, 252, 255, 0.98), rgba(241, 247, 252, 0.96));
+  --panel-gradient: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 250, 253, 0.96));
+  --btn-solid-bg: #f4f8fc;
+  --btn-solid-bg-hover: #e9f1f8;
+  --btn-emphasis-bg: linear-gradient(180deg, #ffffff, #edf3f9);
+  --btn-emphasis-bg-hover: linear-gradient(180deg, #f7fbff, #e7eff7);
+}
+
+:root[data-theme="classic"] {
+  color-scheme: dark;
   --bg-main: #0a1115;
   --bg-panel: #111d23;
   --bg-panel-alt: #15252d;
+  --bg-soft: rgba(13, 26, 32, 0.88);
   --bg-pill: #1c323d;
   --border-soft: #26424f;
   --text-main: #e8f3f9;
@@ -11,6 +56,12 @@
   --accent-warm: #ff8e54;
   --danger: #ff6f61;
   --shadow: rgba(0, 0, 0, 0.35);
+  --surface-gradient: linear-gradient(180deg, rgba(15, 30, 37, 0.94), rgba(13, 25, 30, 0.92));
+  --panel-gradient: linear-gradient(180deg, rgba(17, 29, 35, 0.9), rgba(12, 22, 26, 0.88));
+  --btn-solid-bg: #172831;
+  --btn-solid-bg-hover: #203744;
+  --btn-emphasis-bg: linear-gradient(180deg, #21404f, #18303b);
+  --btn-emphasis-bg-hover: linear-gradient(180deg, #295165, #1d3d4d);
 }
 
 * {
@@ -33,6 +84,7 @@ body {
     radial-gradient(circle at 0% 100%, rgba(255, 142, 84, 0.12), transparent 45%),
     var(--bg-main);
   color: var(--text-main);
+  transition: background 160ms ease, color 160ms ease;
 }
 
 button,
@@ -77,7 +129,7 @@ select {
 
 .login-buttons button {
   border: 1px solid var(--border-soft);
-  background: linear-gradient(180deg, #1f3b49, #17303a);
+  background: var(--btn-emphasis-bg);
   color: var(--text-main);
   border-radius: 10px;
   padding: 10px 14px;
@@ -169,7 +221,8 @@ select {
   gap: 16px;
   padding: 14px 16px;
   border-bottom: 1px solid var(--border-soft);
-  background: linear-gradient(180deg, rgba(15, 30, 37, 0.94), rgba(13, 25, 30, 0.92));
+  background: var(--surface-gradient);
+  backdrop-filter: blur(6px);
 }
 
 .top-left {
@@ -181,7 +234,7 @@ select {
 
 .tab-refresh-button {
   border: 1px solid var(--border-soft);
-  background: linear-gradient(180deg, #21404f, #18303b);
+  background: var(--btn-emphasis-bg);
   color: var(--text-main);
   border-radius: 9px;
   padding: 9px 12px;
@@ -196,6 +249,7 @@ select {
 
 .tab-refresh-button:not(:disabled):hover {
   border-color: var(--accent);
+  background: var(--btn-emphasis-bg-hover);
 }
 
 .brand-block h1 {
@@ -226,7 +280,7 @@ select {
   border: 1px solid var(--border-soft);
   background: var(--bg-panel);
   color: var(--text-main);
-  border-radius: 9px;
+  border-radius: 10px;
   padding: 10px 12px;
 }
 
@@ -240,6 +294,7 @@ select {
 .tab-close:hover,
 .ghost:hover {
   border-color: var(--accent);
+  background: var(--btn-solid-bg-hover);
 }
 
 .top-actions {
@@ -255,7 +310,7 @@ select {
 .menu-dropdown > summary {
   list-style: none;
   border: 1px solid var(--border-soft);
-  background: var(--bg-panel);
+  background: var(--btn-solid-bg);
   color: var(--text-main);
   border-radius: 9px;
   padding: 10px 12px;
@@ -281,8 +336,8 @@ select {
   gap: 10px;
   padding: 10px;
   border: 1px solid var(--border-soft);
-  border-radius: 10px;
-  background: rgba(17, 29, 35, 0.98);
+  border-radius: 12px;
+  background: var(--bg-soft);
   box-shadow: 0 16px 45px var(--shadow);
   max-height: min(calc(100vh - 112px), 760px);
   overflow-y: auto;
@@ -315,7 +370,7 @@ select {
 
 .menu-group button {
   border: 1px solid var(--border-soft);
-  background: #18303a;
+  background: var(--btn-solid-bg);
   color: var(--text-main);
   border-radius: 8px;
   padding: 8px 10px;
@@ -326,6 +381,15 @@ select {
 .menu-group button:disabled {
   opacity: 0.65;
   cursor: not-allowed;
+}
+
+.menu-group button:not(:disabled):hover,
+.context-menu button:hover,
+.guide-actions button:not(:disabled):hover,
+.guide-footer button:not(:disabled):hover,
+.login-buttons button:not(:disabled):hover {
+  border-color: var(--accent);
+  background: var(--btn-solid-bg-hover);
 }
 
 .menu-group input,
@@ -482,7 +546,7 @@ select {
   gap: 8px;
   padding: 10px 16px;
   border-bottom: 1px solid var(--border-soft);
-  background: rgba(13, 26, 32, 0.82);
+  background: var(--bg-soft);
 }
 
 .account-pill {
@@ -507,7 +571,7 @@ select {
   border-radius: 8px;
   cursor: pointer;
   font-size: 12px;
-  background: #172831;
+  background: var(--bg-panel-alt);
 }
 
 .tiktok-api-key {
@@ -532,7 +596,7 @@ select {
   overflow-x: auto;
   padding: 10px 16px;
   border-bottom: 1px solid var(--border-soft);
-  background: rgba(12, 22, 28, 0.88);
+  background: var(--bg-soft);
 }
 
 .tab {
@@ -542,6 +606,7 @@ select {
   border-radius: 10px;
   overflow: hidden;
   min-width: 0;
+  background: var(--bg-panel-alt);
 }
 
 .tab.active {
@@ -609,7 +674,7 @@ select {
   gap: 10px;
   padding: 10px 16px;
   border-bottom: 1px solid var(--border-soft);
-  background: rgba(13, 24, 30, 0.76);
+  background: var(--bg-soft);
 }
 
 .toolbar span {
@@ -631,6 +696,33 @@ select {
   gap: 8px;
   flex-wrap: wrap;
   margin: 12px 0;
+}
+
+.quick-actions-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+
+.quick-actions-row strong {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.quick-action-button {
+  border: 1px solid var(--border-soft);
+  background: var(--btn-solid-bg);
+  color: var(--text-main);
+  border-radius: 8px;
+  padding: 7px 11px;
+  cursor: pointer;
+}
+
+.quick-action-button:hover {
+  border-color: var(--accent);
+  background: var(--btn-solid-bg-hover);
 }
 
 .source-chip {
@@ -672,7 +764,7 @@ select {
   scrollbar-gutter: stable;
   border: 1px solid var(--border-soft);
   border-radius: 14px;
-  background: linear-gradient(180deg, rgba(17, 29, 35, 0.9), rgba(12, 22, 26, 0.88));
+  background: var(--panel-gradient);
   padding: 12px;
 }
 
@@ -746,7 +838,7 @@ select {
 
 .chat-line {
   padding: 8px 4px;
-  border-bottom: 1px solid rgba(37, 65, 78, 0.45);
+  border-bottom: 1px solid var(--border-soft);
   display: grid;
   gap: 4px;
 }
@@ -984,7 +1076,7 @@ select {
 
 .context-menu button {
   border: 1px solid var(--border-soft);
-  background: #18303a;
+  background: var(--btn-solid-bg);
   color: var(--text-main);
   border-radius: 8px;
   padding: 8px;
@@ -1201,7 +1293,7 @@ select {
 
 .guide-actions button {
   border: 1px solid var(--border-soft);
-  background: #18303a;
+  background: var(--btn-solid-bg);
   color: var(--text-main);
   border-radius: 8px;
   padding: 8px 10px;
@@ -1224,7 +1316,7 @@ select {
 
 .guide-footer button {
   border: 1px solid var(--border-soft);
-  background: #18303a;
+  background: var(--btn-solid-bg);
   color: var(--text-main);
   border-radius: 8px;
   padding: 8px 12px;
@@ -1306,6 +1398,78 @@ select {
 .overlay-message {
   padding: 8px 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+:root[data-theme="light"] .login-card {
+  background: linear-gradient(165deg, #ffffff, #eef5fb);
+}
+
+:root[data-theme="light"] .update-lock-screen,
+:root[data-theme="light"] .user-logs-overlay,
+:root[data-theme="light"] .guide-overlay {
+  background: rgba(230, 238, 246, 0.82);
+}
+
+:root[data-theme="light"] .update-lock-card,
+:root[data-theme="light"] .user-logs-modal,
+:root[data-theme="light"] .guide-modal {
+  background: linear-gradient(180deg, #ffffff, #f5f9fd);
+}
+
+:root[data-theme="light"] .context-menu,
+:root[data-theme="light"] .floating-status {
+  background: #ffffff;
+}
+
+:root[data-theme="light"] .menu-health-card,
+:root[data-theme="light"] .menu-connection-row,
+:root[data-theme="light"] .menu-mention-item,
+:root[data-theme="light"] .release-notes-preview,
+:root[data-theme="light"] .user-log-line,
+:root[data-theme="light"] .guide-section {
+  background: #f7fbff;
+  border-color: var(--border-soft);
+}
+
+:root[data-theme="light"] .tab-badge.unread {
+  border-color: #8ca2b4;
+  background: rgba(140, 162, 180, 0.2);
+  color: #12324b;
+}
+
+:root[data-theme="light"] .tab-badge.mention {
+  border-color: #0e8d6b;
+  background: rgba(14, 141, 107, 0.18);
+  color: #0b6b53;
+}
+
+:root[data-theme="light"] .source-chip.connected {
+  border-color: #26a07f;
+  color: #156a54;
+}
+
+:root[data-theme="light"] .source-chip.connecting {
+  border-color: #b58a2e;
+  color: #73550f;
+}
+
+:root[data-theme="light"] .source-chip.error {
+  border-color: #ca5f55;
+  color: #923831;
+}
+
+:root[data-theme="light"] .source-chip.disconnected {
+  border-color: #9aa9b6;
+  color: #4d6274;
+}
+
+:root[data-theme="light"] .menu-health-title,
+:root[data-theme="light"] .account-pill.on {
+  color: #0b6b53;
+}
+
+:root[data-theme="light"] .role-badge {
+  background: rgba(16, 33, 49, 0.06);
 }
 
 @media (max-width: 900px) {

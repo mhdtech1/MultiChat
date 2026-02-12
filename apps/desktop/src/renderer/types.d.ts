@@ -1,4 +1,5 @@
 type AppSettings = {
+  theme?: "dark" | "light" | "classic";
   twitchToken?: string;
   twitchUsername?: string;
   twitchGuest?: boolean;

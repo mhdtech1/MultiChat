@@ -28,6 +28,7 @@ const { TikTokLiveConnection, WebcastEvent, ControlEvent } = tikTokLiveConnector
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 type AppSettings = {
+  theme?: "dark" | "light" | "classic";
   twitchToken?: string;
   twitchUsername?: string;
   twitchGuest?: boolean;
@@ -812,6 +813,26 @@ const normalizeYouTubeInput = (input: string) => {
   const trimmed = input.trim();
   if (!trimmed) return "";
 
+  try {
+    const parsed = new URL(trimmed);
+    const host = parsed.hostname.toLowerCase();
+    if (host === "youtu.be") {
+      return parsed.pathname.replace(/^\/+/, "").split("/")[0] ?? "";
+    }
+    if (host.includes("youtube.com")) {
+      const watchId = parsed.searchParams.get("v")?.trim() ?? "";
+      if (watchId) return watchId;
+      const parts = parsed.pathname.split("/").filter(Boolean);
+      if (parts[0] === "channel" && parts[1]) return parts[1].replace(/^@/, "");
+      if (parts[0] === "c" && parts[1]) return parts[1].replace(/^@/, "");
+      if (parts[0] === "user" && parts[1]) return parts[1].replace(/^@/, "");
+      if (parts[0]?.startsWith("@")) return parts[0].slice(1);
+      if ((parts[0] === "shorts" || parts[0] === "live") && parts[1]) return parts[1];
+    }
+  } catch {
+    // Not a URL; fall back to plain-channel parsing.
+  }
+
   const normalized = trimmed.replace(/^https?:\/\/(www\.)?youtube\.com\//i, "");
   const compact = normalized.split(/[?#]/)[0];
 
@@ -850,6 +871,9 @@ const extractYouTubeVideoId = (input: string): string => {
       }
       const pathParts = url.pathname.split("/").filter(Boolean);
       if (pathParts[0] === "shorts" && pathParts[1] && YOUTUBE_VIDEO_ID_REGEX.test(pathParts[1])) {
+        return pathParts[1];
+      }
+      if (pathParts[0] === "live" && pathParts[1] && YOUTUBE_VIDEO_ID_REGEX.test(pathParts[1])) {
         return pathParts[1];
       }
     }
@@ -1563,6 +1587,12 @@ const parseYouTubeChannelFromInput = async (rawInput: string): Promise<{ channel
 };
 
 const resolveYouTubeLiveChat = async (rawInput: string) => {
+  const directVideoId = extractYouTubeVideoId(rawInput);
+  if (directVideoId) {
+    // Direct video links/IDs are most reliable via web fallback and avoid channel lookup mismatches.
+    return resolveYouTubeLiveChatViaWeb(rawInput);
+  }
+
   const hasOAuthSession = Boolean((store.get("youtubeAccessToken")?.trim() ?? "") || (store.get("youtubeRefreshToken")?.trim() ?? ""));
   const hasApiKey = Boolean(getYouTubePublicApiKey());
   const canUseDataApi = hasOAuthSession || hasApiKey;
@@ -2274,6 +2304,7 @@ const createOverlayWindow = () => {
 
 app.whenReady().then(() => {
   store = new JsonSettingsStore({
+    theme: "dark",
     columns: 2,
     verboseLogs: false,
     performanceMode: false,

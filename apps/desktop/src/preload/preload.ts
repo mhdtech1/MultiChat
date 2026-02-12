@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require("electron") as typeof import("electron");
 
 type AppSettings = {
+  theme?: "dark" | "light" | "classic";
   twitchToken?: string;
   twitchUsername?: string;
   twitchGuest?: boolean;

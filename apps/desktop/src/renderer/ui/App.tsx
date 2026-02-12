@@ -13,6 +13,31 @@ const SEND_TARGET_TAB_ALL = "__all_in_tab__";
 
 type Settings = {
   uiMode?: "simple" | "advanced";
+  theme?: "dark" | "light" | "classic";
+  chatDeckMode?: boolean;
+  dockedPanels?: {
+    mentions?: boolean;
+    modHistory?: boolean;
+    userCard?: boolean;
+    globalTimeline?: boolean;
+  };
+  tabGroups?: Record<string, string>;
+  mutedGroups?: string[];
+  deckWidths?: Record<string, number>;
+  streamDelayMode?: boolean;
+  streamDelaySeconds?: number;
+  spoilerBlurDelayed?: boolean;
+  globalSearchMode?: boolean;
+  notificationScene?: "live" | "chatting" | "offline";
+  accountProfiles?: Array<{
+    id: string;
+    name: string;
+    twitchToken?: string;
+    twitchUsername?: string;
+    kickAccessToken?: string;
+    kickRefreshToken?: string;
+    kickUsername?: string;
+  }>;
   twitchToken?: string;
   twitchUsername?: string;
   twitchGuest?: boolean;
@@ -180,6 +205,23 @@ type ConnectionHealthState = {
 
 const defaultSettings: Settings = {
   uiMode: "advanced",
+  theme: "dark",
+  chatDeckMode: false,
+  dockedPanels: {
+    mentions: false,
+    modHistory: false,
+    userCard: false,
+    globalTimeline: false
+  },
+  tabGroups: {},
+  mutedGroups: [],
+  deckWidths: {},
+  streamDelayMode: false,
+  streamDelaySeconds: 0,
+  spoilerBlurDelayed: false,
+  globalSearchMode: false,
+  notificationScene: "live",
+  accountProfiles: [],
   twitchToken: "",
   twitchUsername: "",
   twitchGuest: false,
@@ -1065,6 +1107,10 @@ const MainApp: React.FC = () => {
   const [layoutPresetName, setLayoutPresetName] = useState("stream");
   const [filterProfile, setFilterProfile] = useState<"custom" | "clean" | "mod" | "no-filter">("custom");
   const [adaptivePerformanceMode, setAdaptivePerformanceMode] = useState(false);
+  const [tabGroupDraft, setTabGroupDraft] = useState("");
+  const [newAccountProfileName, setNewAccountProfileName] = useState("");
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [deckComposerByTabId, setDeckComposerByTabId] = useState<Record<string, string>>({});
 
   const searchRef = useRef<HTMLInputElement | null>(null);
   const channelInputRef = useRef<HTMLInputElement | null>(null);
@@ -1089,7 +1135,51 @@ const MainApp: React.FC = () => {
   const mentionInboxCount = mentionInbox.length;
   const isSimpleMode = settings.uiMode === "simple";
   const isAdvancedMode = !isSimpleMode;
+  const theme = settings.theme === "light" ? "light" : settings.theme === "classic" ? "classic" : "dark";
+  const chatDeckMode = false;
   const effectivePerformanceMode = settings.performanceMode === true || adaptivePerformanceMode;
+  const mutedGroups = settings.mutedGroups ?? [];
+  const tabGroups = settings.tabGroups ?? {};
+  const activeTabGroup = activeTabId ? tabGroups[activeTabId] ?? "" : "";
+  const streamDelayMode = settings.streamDelayMode === true;
+  const streamDelaySeconds = Math.max(0, Math.min(180, Number(settings.streamDelaySeconds ?? 0) || 0));
+  const spoilerBlurDelayed = settings.spoilerBlurDelayed === true;
+  const globalSearchMode = settings.globalSearchMode === true;
+  const notificationScene = settings.notificationScene ?? "live";
+  const sceneOverrides =
+    notificationScene === "offline"
+      ? { sound: false, notify: false }
+      : notificationScene === "chatting"
+        ? { sound: false, notify: true }
+        : { sound: true, notify: true };
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.setAttribute("data-theme", theme);
+    root.style.setProperty("color-scheme", theme === "light" ? "light" : "dark");
+  }, [theme]);
+
+  const sourceExternalLink = (source: ChatSource): string => {
+    if (source.platform === "twitch") return `https://www.twitch.tv/${source.channel}`;
+    if (source.platform === "kick") return `https://kick.com/${source.channel}`;
+    if (source.platform === "youtube") {
+      if (source.youtubeVideoId) return `https://www.youtube.com/watch?v=${source.youtubeVideoId}`;
+      if (source.channel.startsWith("UC")) return `https://www.youtube.com/channel/${source.channel}/live`;
+      return `https://www.youtube.com/@${source.channel}/live`;
+    }
+    return `https://www.tiktok.com/@${source.channel}/live`;
+  };
+
+  const copyActiveTabLinks = async () => {
+    if (!activeTab) return;
+    const links = activeTab.sourceIds
+      .map((sourceId) => sourceById.get(sourceId))
+      .filter(Boolean)
+      .map((source) => sourceExternalLink(source as ChatSource));
+    if (links.length === 0) return;
+    await navigator.clipboard.writeText(links.join("\n"));
+    setAuthMessage(links.length === 1 ? "Channel link copied." : `Copied ${links.length} channel links.`);
+  };
 
   useEffect(() => {
     let active = true;
@@ -1232,6 +1322,20 @@ const MainApp: React.FC = () => {
       for (const [tabId, count] of Object.entries(previous)) {
         if (validTabIds.has(tabId) && count > 0) {
           next[tabId] = count;
+        }
+      }
+      if (Object.keys(next).length === Object.keys(previous).length) return previous;
+      return next;
+    });
+  }, [tabs]);
+
+  useEffect(() => {
+    const validTabIds = new Set(tabs.map((tab) => tab.id));
+    setDeckComposerByTabId((previous) => {
+      const next: Record<string, string> = {};
+      for (const [tabId, value] of Object.entries(previous)) {
+        if (validTabIds.has(tabId)) {
+          next[tabId] = value;
         }
       }
       if (Object.keys(next).length === Object.keys(previous).length) return previous;
@@ -1523,15 +1627,21 @@ const MainApp: React.FC = () => {
     return activeMessages.filter((message) => messageTimestamp(message) >= cutoff);
   }, [activeMessages, replayWindow]);
 
+  const delayedReplayMessages = useMemo(() => {
+    if (!streamDelayMode || streamDelaySeconds <= 0) return replayFilteredMessages;
+    const cutoff = Date.now() - streamDelaySeconds * 1000;
+    return replayFilteredMessages.filter((message) => messageTimestamp(message) <= cutoff);
+  }, [replayFilteredMessages, streamDelayMode, streamDelaySeconds]);
+
   const visibleMessages = useMemo(() => {
-    if (newestLocked || lockCutoffTimestamp === null) return replayFilteredMessages;
-    return replayFilteredMessages.filter((message) => messageTimestamp(message) <= lockCutoffTimestamp);
-  }, [replayFilteredMessages, lockCutoffTimestamp, newestLocked]);
+    if (newestLocked || lockCutoffTimestamp === null) return delayedReplayMessages;
+    return delayedReplayMessages.filter((message) => messageTimestamp(message) <= lockCutoffTimestamp);
+  }, [delayedReplayMessages, lockCutoffTimestamp, newestLocked]);
 
   const pendingNewestCount = useMemo(() => {
     if (newestLocked) return 0;
-    return Math.max(0, replayFilteredMessages.length - visibleMessages.length);
-  }, [newestLocked, replayFilteredMessages.length, visibleMessages.length]);
+    return Math.max(0, delayedReplayMessages.length - visibleMessages.length);
+  }, [delayedReplayMessages.length, newestLocked, visibleMessages.length]);
 
   const renderedMessages = useMemo(() => {
     if (!newestLocked) return visibleMessages;
@@ -1544,14 +1654,38 @@ const MainApp: React.FC = () => {
     const now = Date.now();
     const oneMinute = now - 60_000;
     const fiveMinutes = now - 5 * 60_000;
-    const messagesPerMinute = replayFilteredMessages.filter((message) => messageTimestamp(message) >= oneMinute).length;
+    const messagesPerMinute = delayedReplayMessages.filter((message) => messageTimestamp(message) >= oneMinute).length;
     const uniqueChatters = new Set(
-      replayFilteredMessages
+      delayedReplayMessages
         .filter((message) => messageTimestamp(message) >= fiveMinutes)
         .map((message) => normalizeUserKey(message.username))
     ).size;
     return { messagesPerMinute, uniqueChatters };
-  }, [replayFilteredMessages]);
+  }, [delayedReplayMessages]);
+
+  const globalSearchResults = useMemo(() => {
+    if (!globalSearchMode || !normalizedSearch) return [];
+    const all = sources.flatMap((source) => messagesBySource[source.id] ?? []);
+    return all
+      .filter((message) => message.message.toLowerCase().includes(normalizedSearch))
+      .sort((a, b) => messageTimestamp(b) - messageTimestamp(a))
+      .slice(0, 250);
+  }, [globalSearchMode, messagesBySource, normalizedSearch, sources]);
+
+  const deckMessagesByTabId = useMemo(() => {
+    const next: Record<string, ChatMessage[]> = {};
+    for (const tab of tabs) {
+      const merged = tab.sourceIds.flatMap((sourceId) => messagesBySource[sourceId] ?? []);
+      const sorted = merged.sort((a, b) => messageTimestamp(a) - messageTimestamp(b));
+      const delayed = streamDelayMode && streamDelaySeconds > 0
+        ? sorted.filter((message) => messageTimestamp(message) <= Date.now() - streamDelaySeconds * 1000)
+        : sorted;
+      next[tab.id] = normalizedSearch
+        ? delayed.filter((message) => message.message.toLowerCase().includes(normalizedSearch))
+        : delayed;
+    }
+    return next;
+  }, [messagesBySource, normalizedSearch, streamDelayMode, streamDelaySeconds, tabs]);
 
   const activeTabLastReadAt = activeTabId ? lastReadAtByTab[activeTabId] ?? 0 : 0;
   const firstUnreadTimestamp = useMemo(() => {
@@ -1640,6 +1774,22 @@ const MainApp: React.FC = () => {
       : sendTargetId === SEND_TARGET_TAB_ALL && writableActiveTabSources.length > 1
         ? `Type a message to all ${writableActiveTabSources.length} chats in this tab`
         : "Type a message";
+
+  const commandSuggestions = useMemo(() => {
+    const text = composerText.trim();
+    if (!text.startsWith("/")) return [];
+    const pool = Array.from(
+      new Set([
+        "/timeout {user} 60",
+        "/timeout {user} 600",
+        "/ban {user}",
+        "/unban {user}",
+        "/delete {messageId}",
+        ...COMMAND_SNIPPETS
+      ])
+    );
+    return pool.filter((entry) => entry.toLowerCase().includes(text.toLowerCase())).slice(0, 10);
+  }, [composerText]);
 
   const triggerAttention = (title: string, body: string, alertKey: string, allowSound = true, allowNotify = true) => {
     const now = Date.now();
@@ -1885,7 +2035,12 @@ const MainApp: React.FC = () => {
       });
 
       const sourceTabIds = tabIdsBySourceIdRef.current[source.id] ?? [];
-      const backgroundTabIds = sourceTabIds.filter((tabId) => tabId && tabId !== activeTabIdRef.current);
+      const backgroundTabIds = sourceTabIds.filter((tabId) => {
+        if (!tabId || tabId === activeTabIdRef.current) return false;
+        const group = (currentSettings.tabGroups ?? {})[tabId] ?? "";
+        if (!group) return true;
+        return !(currentSettings.mutedGroups ?? []).includes(group);
+      });
       if (backgroundTabIds.length > 0) {
         setTabUnreadCounts((previous) => {
           const next = { ...previous };
@@ -1918,8 +2073,8 @@ const MainApp: React.FC = () => {
             `${message.platform.toUpperCase()} mention in #${message.channel}`,
             `${message.displayName}: ${message.message}`,
             mentionAlertKey,
-            mentionTargetTabIds.length > 0 ? mentionAllows.sound : true,
-            mentionTargetTabIds.length > 0 ? mentionAllows.notify : true
+            (mentionTargetTabIds.length > 0 ? mentionAllows.sound : true) && sceneOverrides.sound,
+            (mentionTargetTabIds.length > 0 ? mentionAllows.notify : true) && sceneOverrides.notify
           );
         }
         const mentionTabId = sourceTabIds[0] ?? null;
@@ -1958,8 +2113,8 @@ const MainApp: React.FC = () => {
           `Tab alert in ${source.platform}/${source.channel}`,
           `${message.displayName}: ${message.message}`,
           `tab:${tabId}:${keyword.toLowerCase()}`,
-          rule?.sound !== false,
-          rule?.notify !== false
+          rule?.sound !== false && sceneOverrides.sound,
+          rule?.notify !== false && sceneOverrides.notify
         );
       }
 
@@ -2716,6 +2871,40 @@ const MainApp: React.FC = () => {
     }
   };
 
+  const sendDeckMessage = async (tab: ChatTab) => {
+    const content = (deckComposerByTabId[tab.id] ?? "").trim();
+    if (!content) return;
+    const deckSources = tab.sourceIds
+      .map((sourceId) => sourceById.get(sourceId))
+      .filter(Boolean) as ChatSource[];
+    const writableSources = deckSources.filter((source) =>
+      source.platform === "twitch" ? Boolean(settings.twitchToken) : source.platform === "kick" ? Boolean(settings.kickAccessToken) : false
+    );
+    if (writableSources.length === 0) {
+      setAuthMessage("This deck is read-only.");
+      return;
+    }
+    const results = await Promise.all(
+      writableSources.map(async (source) => {
+        const adapter = adaptersRef.current.get(source.id);
+        if (!adapter) return false;
+        try {
+          await adapter.sendMessage(content);
+          return true;
+        } catch {
+          return false;
+        }
+      })
+    );
+    const success = results.filter(Boolean).length;
+    if (success > 0) {
+      setDeckComposerByTabId((previous) => ({ ...previous, [tab.id]: "" }));
+    }
+    if (success !== writableSources.length) {
+      setAuthMessage(`Sent to ${success}/${writableSources.length} chats in this deck.`);
+    }
+  };
+
   const runQuickMod = async (action: Exclude<ModeratorAction, "delete">) => {
     if (!canModerateActiveTab) {
       setAuthMessage("Quick mod is available only in a single-channel tab where you are mod/broadcaster.");
@@ -2781,8 +2970,8 @@ const MainApp: React.FC = () => {
   const jumpToNewest = () => {
     setNewestLocked(true);
     setLockCutoffTimestamp(null);
-    if (activeTabId && replayFilteredMessages.length > 0) {
-      const latestTs = messageTimestamp(replayFilteredMessages[replayFilteredMessages.length - 1]);
+    if (activeTabId && delayedReplayMessages.length > 0) {
+      const latestTs = messageTimestamp(delayedReplayMessages[delayedReplayMessages.length - 1]);
       if (latestTs > 0) {
         setLastReadAtByTab((previous) => ({
           ...previous,
@@ -2966,6 +3155,14 @@ const MainApp: React.FC = () => {
     setTabMentionNotify(rule?.mentionNotify !== false);
   }, [activeTabId, settings.tabAlertRules]);
 
+  useEffect(() => {
+    if (!activeTabId) {
+      setTabGroupDraft("");
+      return;
+    }
+    setTabGroupDraft((settings.tabGroups ?? {})[activeTabId] ?? "");
+  }, [activeTabId, settings.tabGroups]);
+
   const persistSettings = async (updates: Partial<Settings>) => {
     const next = await window.electronAPI.setSettings(updates as Settings);
     setSettings({ ...defaultSettings, ...next });
@@ -2985,6 +3182,112 @@ const MainApp: React.FC = () => {
     };
     await persistSettings({ tabAlertRules: nextRules });
     setAuthMessage("Tab alert rule saved.");
+  };
+
+  const setDockedPanel = async (panel: keyof NonNullable<Settings["dockedPanels"]>, enabled: boolean) => {
+    const nextPanels = {
+      ...(settings.dockedPanels ?? {}),
+      [panel]: enabled
+    };
+    await persistSettings({ dockedPanels: nextPanels });
+  };
+
+  const assignActiveTabGroup = async () => {
+    if (!activeTabId) return;
+    const group = tabGroupDraft.trim();
+    const nextGroups = { ...(settings.tabGroups ?? {}) };
+    if (!group) {
+      delete nextGroups[activeTabId];
+    } else {
+      nextGroups[activeTabId] = group;
+    }
+    await persistSettings({ tabGroups: nextGroups });
+    setAuthMessage(group ? `Assigned active tab to group "${group}".` : "Removed active tab from group.");
+  };
+
+  const toggleGroupMute = async (group: string) => {
+    if (!group) return;
+    const current = new Set(settings.mutedGroups ?? []);
+    if (current.has(group)) {
+      current.delete(group);
+    } else {
+      current.add(group);
+    }
+    await persistSettings({ mutedGroups: Array.from(current) });
+  };
+
+  const uniqueGroups = useMemo(() => {
+    return Array.from(
+      new Set(
+        Object.values(settings.tabGroups ?? {})
+          .map((value) => value.trim())
+          .filter(Boolean)
+      )
+    ).sort((a, b) => a.localeCompare(b));
+  }, [settings.tabGroups]);
+
+  const openGlobalSearchResult = (message: ChatMessage) => {
+    const source = sourceByPlatformChannel.get(`${message.platform}:${message.channel}`);
+    if (!source) return;
+    const tabId = tabs.find((tab) => tab.sourceIds.includes(source.id))?.id;
+    if (tabId) {
+      setActiveTabId(tabId);
+    }
+    setSearch(message.message);
+  };
+
+  const saveCurrentAccountProfile = async () => {
+    const name = newAccountProfileName.trim();
+    if (!name) {
+      setAuthMessage("Name the account profile first.");
+      return;
+    }
+    const profile = {
+      id: createId(),
+      name,
+      twitchToken: settings.twitchToken,
+      twitchUsername: settings.twitchUsername,
+      kickAccessToken: settings.kickAccessToken,
+      kickRefreshToken: settings.kickRefreshToken,
+      kickUsername: settings.kickUsername
+    };
+    const nextProfiles = [...(settings.accountProfiles ?? []), profile].slice(-12);
+    await persistSettings({ accountProfiles: nextProfiles });
+    setNewAccountProfileName("");
+    setAuthMessage(`Saved account profile: ${name}.`);
+  };
+
+  const switchAccountProfile = async (profileId: string) => {
+    const profile = (settings.accountProfiles ?? []).find((entry) => entry.id === profileId);
+    if (!profile) return;
+    await persistSettings({
+      twitchToken: profile.twitchToken ?? "",
+      twitchUsername: profile.twitchUsername ?? "",
+      kickAccessToken: profile.kickAccessToken ?? "",
+      kickRefreshToken: profile.kickRefreshToken ?? "",
+      kickUsername: profile.kickUsername ?? ""
+    });
+    for (const adapter of adaptersRef.current.values()) {
+      try {
+        await adapter.disconnect();
+      } catch {
+        // no-op
+      }
+    }
+    adaptersRef.current.clear();
+    for (const source of sources) {
+      if (source.platform === "twitch" && !profile.twitchToken) continue;
+      if (source.platform === "kick" && !profile.kickAccessToken) continue;
+      void ensureAdapterConnected(source, {
+        ...settings,
+        twitchToken: profile.twitchToken ?? "",
+        twitchUsername: profile.twitchUsername ?? "",
+        kickAccessToken: profile.kickAccessToken ?? "",
+        kickRefreshToken: profile.kickRefreshToken ?? "",
+        kickUsername: profile.kickUsername ?? ""
+      });
+    }
+    setAuthMessage(`Switched to account profile: ${profile.name}.`);
   };
 
   useEffect(() => {
@@ -3010,7 +3313,7 @@ const MainApp: React.FC = () => {
     if (!activeTabId) return;
     setLastReadAtByTab((previous) => {
       if (previous[activeTabId]) return previous;
-      const latest = replayFilteredMessages[replayFilteredMessages.length - 1];
+      const latest = delayedReplayMessages[delayedReplayMessages.length - 1];
       const latestTs = latest ? messageTimestamp(latest) : Date.now();
       return {
         ...previous,
@@ -3248,6 +3551,14 @@ const MainApp: React.FC = () => {
                     <option value="advanced">Advanced</option>
                   </select>
                 </label>
+                <label className="menu-inline">
+                  Theme
+                  <select value={theme} onChange={(event) => void persistSettings({ theme: event.target.value as "dark" | "light" | "classic" })}>
+                    <option value="dark">Dark</option>
+                    <option value="light">Light</option>
+                    <option value="classic">Classic</option>
+                  </select>
+                </label>
                 <span className="menu-muted">
                   {isSimpleMode ? "Simple mode: core streamer tools only." : "Advanced mode: full controls and diagnostics."}
                 </span>
@@ -3281,6 +3592,117 @@ const MainApp: React.FC = () => {
                   </label>
                 ) : null}
               </div>
+              {isAdvancedMode ? (
+              <div className="menu-group">
+                <strong>Panels</strong>
+                <label className="menu-check">
+                  <input
+                    type="checkbox"
+                    checked={settings.dockedPanels?.mentions === true}
+                    onChange={(event) => void setDockedPanel("mentions", event.target.checked)}
+                  />
+                  Mentions panel
+                </label>
+                <label className="menu-check">
+                  <input
+                    type="checkbox"
+                    checked={settings.dockedPanels?.globalTimeline === true}
+                    onChange={(event) => void setDockedPanel("globalTimeline", event.target.checked)}
+                  />
+                  Global timeline panel
+                </label>
+                {isAdvancedMode ? (
+                  <>
+                    <label className="menu-check">
+                      <input
+                        type="checkbox"
+                        checked={settings.dockedPanels?.modHistory === true}
+                        onChange={(event) => void setDockedPanel("modHistory", event.target.checked)}
+                      />
+                      Mod history panel
+                    </label>
+                    <label className="menu-check">
+                      <input
+                        type="checkbox"
+                        checked={settings.dockedPanels?.userCard === true}
+                        onChange={(event) => void setDockedPanel("userCard", event.target.checked)}
+                      />
+                      User card panel
+                    </label>
+                  </>
+                ) : null}
+              </div>
+              ) : null}
+              {isAdvancedMode ? (
+              <div className="menu-group">
+                <strong>Stream Sync</strong>
+                <label className="menu-check">
+                  <input
+                    type="checkbox"
+                    checked={streamDelayMode}
+                    onChange={(event) => void persistSettings({ streamDelayMode: event.target.checked })}
+                  />
+                  Stream delay mode
+                </label>
+                <label className="menu-inline">
+                  Delay (sec)
+                  <input
+                    type="number"
+                    min={0}
+                    max={180}
+                    value={streamDelaySeconds}
+                    onChange={(event) => void persistSettings({ streamDelaySeconds: Number(event.target.value) || 0 })}
+                  />
+                </label>
+                <label className="menu-check">
+                  <input
+                    type="checkbox"
+                    checked={spoilerBlurDelayed}
+                    onChange={(event) => void persistSettings({ spoilerBlurDelayed: event.target.checked })}
+                  />
+                  Blur delayed lines
+                </label>
+              </div>
+              ) : null}
+              {isAdvancedMode ? (
+              <div className="menu-group">
+                <strong>Tab Groups</strong>
+                <label className="menu-inline">
+                  Active tab group
+                  <input value={tabGroupDraft} onChange={(event) => setTabGroupDraft(event.target.value)} placeholder="e.g. Event A" />
+                </label>
+                <div className="menu-row">
+                  <button type="button" onClick={() => void assignActiveTabGroup()} disabled={!activeTabId}>
+                    Save group
+                  </button>
+                </div>
+                {uniqueGroups.length > 0 ? (
+                  <div className="menu-row">
+                    {uniqueGroups.map((group) => (
+                      <button key={group} type="button" onClick={() => void toggleGroupMute(group)}>
+                        {mutedGroups.includes(group) ? `Unmute ${group}` : `Mute ${group}`}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+              ) : null}
+              {isAdvancedMode ? (
+              <div className="menu-group">
+                <strong>Notifications</strong>
+                <label className="menu-inline">
+                  Scene
+                  <select
+                    value={notificationScene}
+                    onChange={(event) => void persistSettings({ notificationScene: event.target.value as "live" | "chatting" | "offline" })}
+                  >
+                    <option value="live">Live</option>
+                    <option value="chatting">Just Chatting</option>
+                    <option value="offline">Offline</option>
+                  </select>
+                </label>
+              </div>
+              ) : null}
               <div className="menu-group">
                 <strong>Accounts</strong>
                 <details className="menu-submenu">
@@ -3307,6 +3729,36 @@ const MainApp: React.FC = () => {
                     </button>
                   )}
                 </details>
+                {isAdvancedMode ? (
+                  <>
+                <label className="menu-inline">
+                  Save current as
+                  <input
+                    value={newAccountProfileName}
+                    onChange={(event) => setNewAccountProfileName(event.target.value)}
+                    placeholder="Profile name"
+                  />
+                </label>
+                <button type="button" onClick={() => void saveCurrentAccountProfile()}>
+                  Save account profile
+                </button>
+                {(settings.accountProfiles ?? []).length > 0 ? (
+                  <label className="menu-inline">
+                    Switch profile
+                    <select onChange={(event) => void switchAccountProfile(event.target.value)} defaultValue="">
+                      <option value="" disabled>
+                        Choose profile
+                      </option>
+                      {(settings.accountProfiles ?? []).map((profile) => (
+                        <option key={profile.id} value={profile.id}>
+                          {profile.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+                  </>
+                ) : null}
               </div>
               {isAdvancedMode ? (
                 <div className="menu-group">
@@ -3369,6 +3821,7 @@ const MainApp: React.FC = () => {
                 </details>
                 </div>
               ) : null}
+              {isAdvancedMode ? (
               <div className="menu-group">
                 <strong>Mention Inbox</strong>
                 <div className="menu-row">
@@ -3393,6 +3846,7 @@ const MainApp: React.FC = () => {
                   )}
                 </div>
               </div>
+              ) : null}
               {isAdvancedMode ? (
                 <div className="menu-group">
                 <strong>Filters</strong>
@@ -3563,13 +4017,14 @@ const MainApp: React.FC = () => {
                   </label>
                 ) : null}
                 <span>Installed: v{updateStatus.currentVersion || "unknown"}</span>
-                <span>Available: {updateStatus.availableVersion ? `v${updateStatus.availableVersion}` : "n/a"}</span>
-                <span>Release date: {formatOptionalDateTime(updateStatus.releaseDate)}</span>
+                {isAdvancedMode ? <span>Available: {updateStatus.availableVersion ? `v${updateStatus.availableVersion}` : "n/a"}</span> : null}
+                {isAdvancedMode ? <span>Release date: {formatOptionalDateTime(updateStatus.releaseDate)}</span> : null}
                 <button type="button" onClick={() => void checkForUpdatesNow()}>
                   Check for Updates
                 </button>
                 {isAdvancedMode && updateStatus.releaseNotes ? <pre className="release-notes-preview">{updateStatus.releaseNotes}</pre> : null}
               </div>
+              {isAdvancedMode ? (
               <div className="menu-group">
                 <strong>System</strong>
                 <label className="menu-check">
@@ -3581,6 +4036,7 @@ const MainApp: React.FC = () => {
                   Confirm send-to-all
                 </label>
               </div>
+              ) : null}
             </div>
           </details>
         </div>
@@ -3614,18 +4070,134 @@ const MainApp: React.FC = () => {
         {mentionInboxCount > 0 ? <span className="account-pill on">Mentions: {mentionInboxCount}</span> : null}
       </div>
 
+      {chatDeckMode ? (
+        <section className="chat-main">
+          <div className="active-tab-meta">
+            <span>Chat Deck: {tabs.length} columns</span>
+            <span>Horizontal scroll enabled</span>
+          </div>
+          <div className="message-list" style={{ display: "flex", gap: 12, overflowX: "auto", overflowY: "hidden", paddingBottom: 8 }}>
+            {tabs.map((tab) => {
+              const tabSources = tab.sourceIds.map((sourceId) => sourceById.get(sourceId)).filter(Boolean) as ChatSource[];
+              const firstSource = tabSources[0];
+              const group = tabGroups[tab.id] ?? "";
+              const groupMuted = group ? mutedGroups.includes(group) : false;
+              const deckMessages = deckMessagesByTabId[tab.id] ?? [];
+              const writableSources = tabSources.filter((source) =>
+                source.platform === "twitch" ? Boolean(settings.twitchToken) : source.platform === "kick" ? Boolean(settings.kickAccessToken) : false
+              );
+              return (
+                <section
+                  key={tab.id}
+                  className="quick-mod-panel"
+                  style={{
+                    flex: "0 0 auto",
+                    width: `${settings.deckWidths?.[tab.id] ?? 360}px`,
+                    minWidth: 300,
+                    maxWidth: 640,
+                    resize: "horizontal",
+                    overflow: "auto",
+                    opacity: groupMuted ? 0.55 : 1
+                  }}
+                  onMouseUp={(event) => {
+                    const width = Math.round((event.currentTarget as HTMLElement).getBoundingClientRect().width);
+                    if ((settings.deckWidths?.[tab.id] ?? 0) === width) return;
+                    void persistSettings({
+                      deckWidths: {
+                        ...(settings.deckWidths ?? {}),
+                        [tab.id]: width
+                      }
+                    });
+                  }}
+                >
+                  <div className="menu-row">
+                    <strong>
+                      {firstSource ? `${firstSource.platform}/${firstSource.channel}` : tabLabel(tab, sourceById)}
+                    </strong>
+                    <button type="button" onClick={() => void closeTab(tab.id)}>
+                      Close
+                    </button>
+                  </div>
+                  {group ? <span className="menu-muted">Group: {group}</span> : null}
+                  <div style={{ maxHeight: 360, overflowY: "auto", border: "1px solid rgba(37, 65, 78, 0.45)", borderRadius: 8, padding: 8 }}>
+                    {deckMessages.slice(-400).map((message) => (
+                      <div key={`${message.id}-${message.timestamp}`} className="chat-line">
+                        <span className="line-meta">
+                          <span className={`platform ${message.platform}`}>{message.platform}</span>
+                          <span>{new Date(message.timestamp).toLocaleTimeString()}</span>
+                        </span>
+                        <span className="line-author">
+                          <button
+                            type="button"
+                            className="username-button"
+                            style={{ color: message.color, filter: spoilerBlurDelayed ? "blur(1.5px)" : undefined }}
+                            onClick={() =>
+                              setIdentityTarget({
+                                username: message.username,
+                                displayName: message.displayName || message.username
+                              })
+                            }
+                          >
+                            {message.displayName}
+                          </button>
+                        </span>
+                        <span className="line-message" style={{ filter: spoilerBlurDelayed ? "blur(1.5px)" : undefined }}>
+                          {message.message}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <form
+                    className="composer"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void sendDeckMessage(tab);
+                    }}
+                  >
+                    <input
+                      value={deckComposerByTabId[tab.id] ?? ""}
+                      onChange={(event) =>
+                        setDeckComposerByTabId((previous) => ({
+                          ...previous,
+                          [tab.id]: event.target.value
+                        }))
+                      }
+                      placeholder={
+                        writableSources.length > 0
+                          ? writableSources.length > 1
+                            ? `Send to ${writableSources.length} chats in this column`
+                            : "Type a message"
+                          : "Read-only deck"
+                      }
+                      disabled={writableSources.length === 0}
+                    />
+                    <button type="submit" disabled={writableSources.length === 0 || !(deckComposerByTabId[tab.id] ?? "").trim()}>
+                      Send
+                    </button>
+                  </form>
+                </section>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
+
+      {!chatDeckMode ? (
+        <>
       <nav className="tabbar">
         {tabs.map((tab) => {
           const active = tab.id === activeTabId;
           const tabSources = tab.sourceIds.map((sourceId) => sourceById.get(sourceId)).filter(Boolean) as ChatSource[];
           const firstSource = tabSources[0];
           const label = tabLabel(tab, sourceById);
+          const group = tabGroups[tab.id] ?? "";
+          const groupMuted = group ? mutedGroups.includes(group) : false;
           const unreadCount = tabUnreadCounts[tab.id] ?? 0;
           const mentionCount = tabMentionCounts[tab.id] ?? 0;
           return (
             <div
               key={tab.id}
-              className={active ? "tab active" : "tab"}
+              className={active ? `tab active${groupMuted ? " muted" : ""}` : `tab${groupMuted ? " muted" : ""}`}
               onContextMenu={(event) => {
                 event.preventDefault();
                 setTabMenu({ x: event.clientX, y: event.clientY, tabId: tab.id });
@@ -3634,6 +4206,7 @@ const MainApp: React.FC = () => {
               <button type="button" className="tab-select" onClick={() => setActiveTabId(tab.id)}>
                 {firstSource ? <PlatformIcon platform={firstSource.platform} /> : null}
                 <span>{label}</span>
+                {group ? <span className="tab-badge unread">{group}</span> : null}
                 {!active && (mentionCount > 0 || unreadCount > 0) ? (
                   <span className="tab-badges">
                     {mentionCount > 0 ? (
@@ -3668,10 +4241,18 @@ const MainApp: React.FC = () => {
         <input
           ref={searchRef}
           type="search"
-          placeholder="Search in active tab"
+          placeholder={globalSearchMode ? "Search all tabs" : "Search in active tab"}
           value={search}
           onChange={(event) => setSearch(event.target.value)}
         />
+        <label className="menu-check">
+          <input
+            type="checkbox"
+            checked={globalSearchMode}
+            onChange={(event) => void persistSettings({ globalSearchMode: event.target.checked })}
+          />
+          Global
+        </label>
         <span>
           {activeTab
             ? newestLocked
@@ -3712,6 +4293,18 @@ const MainApp: React.FC = () => {
                   </span>
                 );
               })}
+            </div>
+            <div className="quick-actions-row">
+              <strong>Quick Actions</strong>
+              <button type="button" className="quick-action-button" onClick={() => void refreshActiveTab()}>
+                Reconnect tab
+              </button>
+              <button type="button" className="quick-action-button" onClick={() => window.electronAPI.openOverlay()}>
+                Open overlay
+              </button>
+              <button type="button" className="quick-action-button" onClick={() => void copyActiveTabLinks()}>
+                Copy channel link
+              </button>
             </div>
             <div
               ref={messageListRef}
@@ -3837,7 +4430,11 @@ const MainApp: React.FC = () => {
               ) : null}
               <input
                 value={composerText}
-                onChange={(event) => setComposerText(event.target.value)}
+                onChange={(event) => {
+                  const next = event.target.value;
+                  setComposerText(next);
+                  setCommandPaletteOpen(next.trim().startsWith("/"));
+                }}
                 placeholder={composerPlaceholder}
                 maxLength={500}
                 disabled={writableActiveTabSources.length === 0}
@@ -3865,6 +4462,23 @@ const MainApp: React.FC = () => {
                 {sending ? "Sending..." : "Send"}
               </button>
             </form>
+            {commandPaletteOpen && commandSuggestions.length > 0 ? (
+              <div className="quick-mod-panel">
+                <strong>Command Center</strong>
+                {commandSuggestions.map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    type="button"
+                    onClick={() => {
+                      setComposerText(suggestion);
+                      setCommandPaletteOpen(false);
+                    }}
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            ) : null}
             {isAdvancedMode && writableActiveTabSources.length > 0 && canModerateActiveTab ? (
               <div className="quick-mod-panel">
                 <strong>Quick Mod</strong>
@@ -3892,6 +4506,78 @@ const MainApp: React.FC = () => {
           </>
         )}
       </main>
+        </>
+      ) : null}
+
+      {settings.dockedPanels?.mentions || settings.dockedPanels?.modHistory || settings.dockedPanels?.userCard || settings.dockedPanels?.globalTimeline ? (
+        <aside className="quick-mod-panel">
+          {settings.dockedPanels?.mentions ? (
+            <div>
+              <strong>Mentions</strong>
+              {mentionInbox.length === 0 ? (
+                <span className="menu-muted">No mentions.</span>
+              ) : (
+                mentionInbox.slice(0, 8).map((entry) => (
+                  <button key={entry.id} type="button" onClick={() => openMention(entry)}>
+                    [{platformIconGlyph(entry.platform)}] #{entry.channel} {entry.displayName}
+                  </button>
+                ))
+              )}
+            </div>
+          ) : null}
+          {settings.dockedPanels?.globalTimeline ? (
+            <div>
+              <strong>Global Timeline</strong>
+              {!globalSearchMode || !search.trim() ? (
+                <span className="menu-muted">Enable Global search and type a query.</span>
+              ) : globalSearchResults.length === 0 ? (
+                <span className="menu-muted">No results.</span>
+              ) : (
+                globalSearchResults.slice(0, 10).map((message) => (
+                  <button
+                    key={`${message.id}-${message.timestamp}`}
+                    type="button"
+                    onClick={() => openGlobalSearchResult(message)}
+                  >
+                    [{platformIconGlyph(message.platform)}] #{message.channel} {message.displayName}: {message.message.slice(0, 42)}
+                  </button>
+                ))
+              )}
+            </div>
+          ) : null}
+          {isAdvancedMode && settings.dockedPanels?.modHistory ? (
+            <div>
+              <strong>Mod History</strong>
+              {moderationHistory.length === 0 ? (
+                <span className="menu-muted">No actions yet.</span>
+              ) : (
+                moderationHistory.slice(0, 10).map((entry) => (
+                  <span key={entry.id} className="menu-muted">
+                    {new Date(entry.at).toLocaleTimeString()} {entry.action} {entry.target}
+                  </span>
+                ))
+              )}
+            </div>
+          ) : null}
+          {isAdvancedMode && settings.dockedPanels?.userCard ? (
+            <div>
+              <strong>User Card</strong>
+              {identityTarget ? (
+                <>
+                  <span className="menu-muted">
+                    {identityTarget.displayName} @{identityTarget.username}
+                  </span>
+                  <span className="menu-muted">
+                    Total {identityStats.total} · 1m {identityStats.inLastMinute} · 5m {identityStats.inLastFiveMinutes}
+                  </span>
+                </>
+              ) : (
+                <span className="menu-muted">Click a username to pin stats.</span>
+              )}
+            </div>
+          ) : null}
+        </aside>
+      ) : null}
 
       {tabMenu ? (
         <div className="context-menu" style={tabMenuStyle} onClick={(event) => event.stopPropagation()}>
@@ -4061,8 +4747,8 @@ const MainApp: React.FC = () => {
               ) : null}
               {setupWizardStep === 1 ? (
                 <div className="guide-section">
-                  <h3>Add your first channel tab</h3>
-                  <p>Use the channel bar at the top to type a channel username and create a tab.</p>
+                  <h3>Open your first tab</h3>
+                  <p>Use the channel bar at the top to type a channel username and open your first chat tab.</p>
                   <div className="guide-actions">
                     <button
                       type="button"
@@ -4079,8 +4765,8 @@ const MainApp: React.FC = () => {
                       Open My Kick Tab
                     </button>
                   </div>
-                  <p className="guide-note">Smart tabs prevent duplicates. Right click a tab to merge it with another tab.</p>
-                  <p className="guide-note">Status: {setupFirstTabReady ? `First tab opened (${tabs.length} total)` : "Open at least one tab"}</p>
+                  <p className="guide-note">Tabs keep chats focused and fast: one tab per channel, with merge available from tab right-click.</p>
+                  <p className="guide-note">Status: {setupFirstTabReady ? `First tab ready (${tabs.length} open)` : "Open at least one tab"}</p>
                 </div>
               ) : null}
               {setupWizardStep === 2 ? (

@@ -12,6 +12,8 @@ export default defineConfig({
   plugins: [react()],
   build: {
     outDir: path.join(__dirname, "dist/renderer"),
-    emptyOutDir: true
+    emptyOutDir: true,
+    sourcemap: true,
+    minify: false
   }
 });
