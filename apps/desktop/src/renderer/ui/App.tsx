@@ -583,6 +583,53 @@ const isLocalEcho = (message: ChatMessage) => {
   return raw?.localEcho === true;
 };
 
+const FOLLOW_EVENT_TOKENS = ["follow", "follower", "followed"] as const;
+const SUB_EVENT_TOKENS = ["sub", "subscriber", "subscribed", "subscription", "resubscribed", "member", "membership", "sponsor"] as const;
+
+const includesEventToken = (value: string, tokens: readonly string[]) => {
+  const normalized = normalizeUserKey(value);
+  if (!normalized) return false;
+  return tokens.some((token) => normalized.includes(token));
+};
+
+const detectEngagementAlertKind = (message: ChatMessage): "follow" | "subscriber" | null => {
+  const raw = asRecord(message.raw);
+  const eventType =
+    typeof raw?.eventType === "string"
+      ? raw.eventType
+      : typeof raw?.type === "string"
+        ? raw.type
+        : typeof raw?.msgId === "string"
+          ? raw.msgId
+          : "";
+  if (includesEventToken(eventType, FOLLOW_EVENT_TOKENS)) {
+    return "follow";
+  }
+  if (includesEventToken(eventType, SUB_EVENT_TOKENS)) {
+    return "subscriber";
+  }
+
+  const text = message.message.trim();
+  if (!text) return null;
+  const normalizedText = normalizeUserKey(text);
+  const looksSystemMessage =
+    normalizeUserKey(message.username) === "system" ||
+    normalizeUserKey(message.displayName) === "system" ||
+    normalizedText.includes(" just ") ||
+    normalizedText.includes(" has ");
+
+  if (
+    (message.platform === "tiktok" || looksSystemMessage) &&
+    FOLLOW_EVENT_TOKENS.some((token) => normalizedText.includes(token))
+  ) {
+    return "follow";
+  }
+  if (SUB_EVENT_TOKENS.some((token) => normalizedText.includes(token))) {
+    return "subscriber";
+  }
+  return null;
+};
+
 const messageContentFingerprint = (message: ChatMessage) =>
   `${message.platform}|${message.channel}|${normalizeUserKey(message.username)}|${message.message.trim().toLowerCase()}`;
 
@@ -1158,6 +1205,14 @@ const MainApp: React.FC = () => {
     root.setAttribute("data-theme", theme);
     root.style.setProperty("color-scheme", theme === "light" ? "light" : "dark");
   }, [theme]);
+
+  useEffect(() => {
+    if (!authMessage) return;
+    const timer = window.setTimeout(() => {
+      setAuthMessage("");
+    }, 5000);
+    return () => window.clearTimeout(timer);
+  }, [authMessage]);
 
   const sourceExternalLink = (source: ChatSource): string => {
     if (source.platform === "twitch") return `https://www.twitch.tv/${source.channel}`;
@@ -2101,6 +2156,20 @@ const MainApp: React.FC = () => {
           };
           return [next, ...previous].slice(0, 250);
         });
+      }
+
+      const engagementAlertKind = detectEngagementAlertKind(message);
+      if (engagementAlertKind) {
+        const noun = engagementAlertKind === "follow" ? "follow" : "subscriber";
+        const sourceLabel = `${message.platform.toUpperCase()} ${noun} alert`;
+        const alertBody = `${message.displayName}: ${message.message}`;
+        triggerAttention(
+          sourceLabel,
+          alertBody,
+          `engagement:${source.id}:${message.id}:${engagementAlertKind}`,
+          sceneOverrides.sound,
+          sceneOverrides.notify
+        );
       }
 
       const tabRules = currentSettings.tabAlertRules ?? {};
@@ -4871,7 +4940,11 @@ const MainApp: React.FC = () => {
         </div>
       ) : null}
 
-      {authMessage ? <p className="floating-status">{authMessage}</p> : null}
+      {authMessage ? (
+        <p className="floating-status" onClick={() => setAuthMessage("")} title="Click to dismiss">
+          {authMessage}
+        </p>
+      ) : null}
       {updateLockActive ? (
         <div className="update-lock-screen">
           <div className="update-lock-card">

@@ -724,6 +724,42 @@ const normalizeTikTokChatMessage = (channel: string, payload: unknown): Normaliz
   };
 };
 
+const normalizeTikTokFollowMessage = (channel: string, payload: unknown): NormalizedTikTokChatMessage | null => {
+  const record = asUnknownRecord(payload);
+  if (!record) return null;
+
+  const user = asUnknownRecord(record.user) ?? {};
+  const username = asString(user.uniqueId).trim() || asString(user.username).trim() || "tiktok-user";
+  const displayName = asString(user.nickname).trim() || asString(user.displayName).trim() || username;
+  const messageId =
+    asString(record.msgId).trim() ||
+    asString(record.messageId).trim() ||
+    `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const createdEpochRaw = Number(asString(record.createTime));
+  const createdEpochMillis =
+    Number.isFinite(createdEpochRaw) && createdEpochRaw > 0
+      ? createdEpochRaw < 1_000_000_000_000
+        ? createdEpochRaw * 1000
+        : createdEpochRaw
+      : 0;
+  const createdAt =
+    createdEpochMillis > 0 ? new Date(createdEpochMillis).toISOString() : new Date().toISOString();
+
+  return {
+    id: messageId,
+    platform: "tiktok",
+    channel,
+    username,
+    displayName,
+    message: `${displayName} followed`,
+    timestamp: createdAt,
+    raw: {
+      ...record,
+      eventType: "follow"
+    }
+  };
+};
+
 const parseKickChatroomId = (payload: unknown): number | null => {
   if (!payload || typeof payload !== "object") return null;
   const record = payload as Record<string, unknown>;
@@ -3008,6 +3044,20 @@ app.whenReady().then(() => {
         message
       });
     });
+
+    const followEventName = (WebcastEvent as Record<string, string | undefined>).FOLLOW;
+    if (followEventName) {
+      connection.on(followEventName, (payload: unknown) => {
+        const message = normalizeTikTokFollowMessage(normalizedChannel, payload);
+        if (!message) return;
+        emitTikTokEvent({
+          connectionId,
+          type: "chat",
+          roomId: record.roomId,
+          message
+        });
+      });
+    }
 
     connection.on(ControlEvent.CONNECTED, (state: unknown) => {
       const roomId = asString(asUnknownRecord(state)?.roomId).trim();

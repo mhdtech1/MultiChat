@@ -1204,6 +1204,7 @@ select {
   background: rgba(10, 20, 24, 0.94);
   color: var(--text-main);
   font-size: 12px;
+  cursor: pointer;
 }
 
 .guide-overlay {
