@@ -4734,6 +4734,17 @@ const MainApp: React.FC = () => {
                 <div className="guide-section">
                   <h3>Connect an account</h3>
                   <p>Sign into Twitch or Kick to unlock typing, moderation tools, and full chat controls.</p>
+                  <label className="menu-inline">
+                    Theme
+                    <select
+                      value={theme}
+                      onChange={(event) => void persistSettings({ theme: event.target.value as "dark" | "light" | "classic" })}
+                    >
+                      <option value="dark">Dark</option>
+                      <option value="light">Light</option>
+                      <option value="classic">Classic</option>
+                    </select>
+                  </label>
                   <div className="guide-actions">
                     <button type="button" onClick={() => void signInTwitch()} disabled={authBusy !== null || Boolean(settings.twitchToken)}>
                       {settings.twitchToken ? "Twitch connected" : authBusy === "twitch" ? "Signing in Twitch..." : "Connect Twitch"}
