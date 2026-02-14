@@ -694,6 +694,65 @@ select {
   flex: 1 1 100%;
 }
 
+.main-layout {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+.main-layout-primary {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.dock-resize-handle {
+  width: 8px;
+  cursor: col-resize;
+  border-left: 1px solid var(--border-soft);
+  border-right: 1px solid var(--border-soft);
+  background: linear-gradient(180deg, transparent, rgba(22, 199, 154, 0.12), transparent);
+}
+
+.dock-resize-handle:hover,
+.dock-resize-handle.active {
+  background: linear-gradient(180deg, transparent, rgba(22, 199, 154, 0.24), transparent);
+}
+
+.dock-sidebar {
+  min-height: 0;
+  overflow: auto;
+  border-left: 1px solid var(--border-soft);
+  background: var(--panel-gradient);
+  padding: 12px;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.dock-sidebar > div {
+  display: grid;
+  gap: 8px;
+}
+
+.dock-sidebar button {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  color: var(--text-main);
+  padding: 7px 9px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dock-sidebar button:hover {
+  border-color: var(--accent);
+  background: var(--btn-solid-bg-hover);
+}
+
 .chat-main {
   min-height: 0;
   flex: 1;
@@ -1510,6 +1569,27 @@ select {
 }
 
 @media (max-width: 900px) {
+  .main-layout {
+    flex-direction: column;
+  }
+
+  .dock-resize-handle {
+    width: 100%;
+    height: 8px;
+    cursor: row-resize;
+    border-left: none;
+    border-right: none;
+    border-top: 1px solid var(--border-soft);
+    border-bottom: 1px solid var(--border-soft);
+  }
+
+  .dock-sidebar {
+    width: 100% !important;
+    max-height: 38vh;
+    border-left: none;
+    border-top: 1px solid var(--border-soft);
+  }
+
   .topbar {
     grid-template-columns: 1fr;
   }

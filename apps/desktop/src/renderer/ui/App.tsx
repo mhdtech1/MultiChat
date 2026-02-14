@@ -706,6 +706,9 @@ const LOCKED_RENDERED_MESSAGE_LIMIT = 420;
 const CONTEXT_MENU_EDGE_GAP_PX = 12;
 const CONTEXT_MENU_DEFAULT_WIDTH_PX = 250;
 const CONTEXT_MENU_DEFAULT_HEIGHT_PX = 360;
+const DOCK_PANEL_MIN_WIDTH = 240;
+const DOCK_PANEL_MAX_WIDTH = 560;
+const DOCK_PANEL_DEFAULT_WIDTH = 340;
 
 const clampContextMenuPosition = (x: number, y: number, menuWidth = CONTEXT_MENU_DEFAULT_WIDTH_PX, menuHeight = CONTEXT_MENU_DEFAULT_HEIGHT_PX) => {
   if (typeof window === "undefined") return { x, y };
@@ -1158,11 +1161,14 @@ const MainApp: React.FC = () => {
   const [newAccountProfileName, setNewAccountProfileName] = useState("");
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [deckComposerByTabId, setDeckComposerByTabId] = useState<Record<string, string>>({});
+  const [dockPanelWidth, setDockPanelWidth] = useState(DOCK_PANEL_DEFAULT_WIDTH);
+  const [dockPanelResizing, setDockPanelResizing] = useState(false);
 
   const searchRef = useRef<HTMLInputElement | null>(null);
   const channelInputRef = useRef<HTMLInputElement | null>(null);
   const importSessionInputRef = useRef<HTMLInputElement | null>(null);
   const messageListRef = useRef<HTMLDivElement | null>(null);
+  const mainLayoutRef = useRef<HTMLDivElement | null>(null);
   const adaptersRef = useRef<Map<string, ChatAdapter>>(new Map());
   const lastMessageByUser = useRef<Map<string, number>>(new Map());
   const emoteFetchInFlight = useRef<Set<string>>(new Set());
@@ -1199,6 +1205,38 @@ const MainApp: React.FC = () => {
       : notificationScene === "chatting"
         ? { sound: false, notify: true }
         : { sound: true, notify: true };
+  const hasDockedPanels =
+    settings.dockedPanels?.mentions ||
+    settings.dockedPanels?.modHistory ||
+    settings.dockedPanels?.userCard ||
+    settings.dockedPanels?.globalTimeline;
+
+  const startDockPanelResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!hasDockedPanels) return;
+    event.preventDefault();
+    setDockPanelResizing(true);
+  };
+
+  useEffect(() => {
+    if (!dockPanelResizing) return;
+    const onPointerMove = (event: PointerEvent) => {
+      const rect = mainLayoutRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const desiredWidth = rect.right - event.clientX;
+      const nextWidth = Math.max(DOCK_PANEL_MIN_WIDTH, Math.min(DOCK_PANEL_MAX_WIDTH, Math.round(desiredWidth)));
+      setDockPanelWidth(nextWidth);
+    };
+    const onPointerUp = () => {
+      setDockPanelResizing(false);
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+  }, [dockPanelResizing]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -4252,7 +4290,8 @@ const MainApp: React.FC = () => {
       ) : null}
 
       {!chatDeckMode ? (
-        <>
+        <div className={hasDockedPanels ? "main-layout has-docked-panels" : "main-layout"} ref={mainLayoutRef}>
+      <div className="main-layout-primary">
       <nav className="tabbar">
         {tabs.map((tab) => {
           const active = tab.id === activeTabId;
@@ -4575,11 +4614,18 @@ const MainApp: React.FC = () => {
           </>
         )}
       </main>
-        </>
-      ) : null}
-
-      {settings.dockedPanels?.mentions || settings.dockedPanels?.modHistory || settings.dockedPanels?.userCard || settings.dockedPanels?.globalTimeline ? (
-        <aside className="quick-mod-panel">
+      </div>
+      {hasDockedPanels ? (
+        <>
+        <div
+          className={dockPanelResizing ? "dock-resize-handle active" : "dock-resize-handle"}
+          onPointerDown={startDockPanelResize}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize docked panels"
+          title="Drag to resize menus"
+        />
+        <aside className="dock-sidebar" style={{ width: `${dockPanelWidth}px` }}>
           {settings.dockedPanels?.mentions ? (
             <div>
               <strong>Mentions</strong>
@@ -4646,6 +4692,9 @@ const MainApp: React.FC = () => {
             </div>
           ) : null}
         </aside>
+        </>
+      ) : null}
+      </div>
       ) : null}
 
       {tabMenu ? (
