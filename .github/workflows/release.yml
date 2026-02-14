@@ -50,6 +50,7 @@ jobs:
           path: |
             apps/desktop/dist/MultiChat-win*.exe
             apps/desktop/dist/latest*.yml
+            apps/desktop/dist/stable*.yml
 
   build-macos:
     name: Build macOS
@@ -92,6 +93,7 @@ jobs:
             apps/desktop/dist/MultiChat-mac*.dmg
             apps/desktop/dist/MultiChat-mac*.zip
             apps/desktop/dist/latest-mac*.yml
+            apps/desktop/dist/stable-mac*.yml
 
   publish-release:
     name: Publish GitHub Release

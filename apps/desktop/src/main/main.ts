@@ -1971,7 +1971,8 @@ const setUpdateStatus = (state: UpdateStatus["state"], message: string, extras: 
 const applyAutoUpdaterChannel = (channel: UpdateChannel) => {
   autoUpdater.allowPrerelease = channel === "beta";
   try {
-    (autoUpdater as unknown as { channel?: string }).channel = channel;
+    const updaterWithChannel = autoUpdater as unknown as { channel?: string };
+    updaterWithChannel.channel = channel === "beta" ? "beta" : undefined;
   } catch {
     // keep defaults when runtime doesn't expose channel assignment
   }

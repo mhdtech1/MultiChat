@@ -1,6 +1,6 @@
 {
   "name": "@multichat/desktop",
-  "version": "0.1.28",
+  "version": "0.1.31",
   "private": true,
   "type": "module",
   "main": "dist/main/main.js",
@@ -11,7 +11,7 @@
     "build:main": "tsc -p tsconfig.main.json",
     "package": "electron-builder --config electron-builder.yml --mac dir && node ../../scripts/prepare-mac-update-artifacts.mjs",
     "package:mac": "electron-builder --config electron-builder.yml --mac dir && node ../../scripts/prepare-mac-update-artifacts.mjs",
-    "package:win": "electron-builder --config electron-builder.yml --win nsis --x64",
+    "package:win": "electron-builder --config electron-builder.yml --win nsis --x64 && node ../../scripts/prepare-win-update-artifacts.mjs",
     "test": "node ../../scripts/smoke-test.mjs",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "format": "prettier --check \"src/**/*.{ts,tsx,css,html}\""

@@ -18,6 +18,7 @@ const dmgPath = path.join(distDir, "MultiChat-mac.dmg");
 const zipBlockmapPath = path.join(distDir, "MultiChat-mac.zip.blockmap");
 const dmgBlockmapPath = path.join(distDir, "MultiChat-mac.dmg.blockmap");
 const ymlPath = path.join(distDir, "latest-mac.yml");
+const stableYmlPath = path.join(distDir, "stable-mac.yml");
 
 if (!existsSync(appPath)) {
   console.log("[mac-update] skipping: mac app bundle was not found");
@@ -136,8 +137,10 @@ try {
     releaseDate: new Date().toISOString()
   };
 
-  writeFileSync(ymlPath, yaml.dump(latestMac, { lineWidth: -1, noRefs: true }), "utf8");
-  console.log("[mac-update] generated signed MultiChat-mac.zip/.dmg and refreshed latest-mac.yml");
+  const ymlContent = yaml.dump(latestMac, { lineWidth: -1, noRefs: true });
+  writeFileSync(ymlPath, ymlContent, "utf8");
+  writeFileSync(stableYmlPath, ymlContent, "utf8");
+  console.log("[mac-update] generated signed MultiChat-mac.zip/.dmg and refreshed latest-mac.yml + stable-mac.yml");
 } finally {
   rmSync(tempDir, { recursive: true, force: true });
 }
