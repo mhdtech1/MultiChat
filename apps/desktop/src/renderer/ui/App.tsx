@@ -14,6 +14,7 @@ const SEND_TARGET_TAB_ALL = "__all_in_tab__";
 type Settings = {
   uiMode?: "simple" | "advanced";
   theme?: "dark" | "light" | "classic";
+  collaborationMode?: boolean;
   chatDeckMode?: boolean;
   dockedPanels?: {
     mentions?: boolean;
@@ -149,6 +150,7 @@ type UserLogTarget = {
 
 type ModeratorAction = "timeout_60" | "timeout_600" | "ban" | "unban" | "delete";
 type ReplayWindow = 0 | 5 | 10 | 30;
+type TabAlertProfile = "custom" | "default" | "quiet" | "mod-heavy" | "tournament";
 type RoleBadge = {
   key: string;
   label: string;
@@ -222,6 +224,7 @@ const defaultSettings: Settings = {
   globalSearchMode: false,
   notificationScene: "live",
   accountProfiles: [],
+  collaborationMode: false,
   twitchToken: "",
   twitchUsername: "",
   twitchGuest: false,
@@ -275,6 +278,12 @@ const COMMAND_SNIPPETS = [
   "/unban {user}",
   "/clear"
 ] as const;
+const TAB_ALERT_PROFILES: Record<Exclude<TabAlertProfile, "custom">, { sound: boolean; notify: boolean; mentionSound: boolean; mentionNotify: boolean }> = {
+  default: { sound: true, notify: true, mentionSound: true, mentionNotify: true },
+  quiet: { sound: false, notify: true, mentionSound: false, mentionNotify: true },
+  "mod-heavy": { sound: true, notify: true, mentionSound: true, mentionNotify: true },
+  tournament: { sound: false, notify: true, mentionSound: true, mentionNotify: true }
+};
 
 const messageMentionsUser = (message: ChatMessage, username?: string) => {
   const normalizedUsername = (username ?? "").trim().replace(/^@+/, "");
@@ -1128,6 +1137,7 @@ const MainApp: React.FC = () => {
   const [tabAlertNotify, setTabAlertNotify] = useState(true);
   const [tabMentionSound, setTabMentionSound] = useState(true);
   const [tabMentionNotify, setTabMentionNotify] = useState(true);
+  const [tabAlertProfile, setTabAlertProfile] = useState<TabAlertProfile>("custom");
   const [snippetToInsert, setSnippetToInsert] = useState("");
 
   const [sources, setSources] = useState<ChatSource[]>([]);
@@ -1161,6 +1171,8 @@ const MainApp: React.FC = () => {
   const [newAccountProfileName, setNewAccountProfileName] = useState("");
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [deckComposerByTabId, setDeckComposerByTabId] = useState<Record<string, string>>({});
+  const [replayBufferSeconds, setReplayBufferSeconds] = useState<0 | 30 | 60>(0);
+  const [pendingMessageJumpKey, setPendingMessageJumpKey] = useState<string | null>(null);
   const [dockPanelWidth, setDockPanelWidth] = useState(DOCK_PANEL_DEFAULT_WIDTH);
   const [dockPanelResizing, setDockPanelResizing] = useState(false);
 
@@ -1185,6 +1197,8 @@ const MainApp: React.FC = () => {
   const openingSourceKeysRef = useRef<Set<string>>(new Set());
   const lastAdaptiveToggleAtRef = useRef(0);
   const lastHealthPublishAtBySourceRef = useRef<Record<string, number>>({});
+  const twitchRoomIdToChannelRef = useRef<Map<string, string>>(new Map());
+  const twitchSharedChatAlertAtRef = useRef<Map<string, number>>(new Map());
   const mentionInboxCount = mentionInbox.length;
   const isSimpleMode = settings.uiMode === "simple";
   const isAdvancedMode = !isSimpleMode;
@@ -1543,6 +1557,7 @@ const MainApp: React.FC = () => {
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      if (!isAdvancedMode) return;
       const key = `${event.ctrlKey ? "Control+" : ""}${event.shiftKey ? "Shift+" : ""}${event.key.toUpperCase()}`;
       if (key === hotkeys.focusSearch.toUpperCase()) {
         event.preventDefault();
@@ -1551,7 +1566,7 @@ const MainApp: React.FC = () => {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, []);
+  }, [isAdvancedMode]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -1715,10 +1730,12 @@ const MainApp: React.FC = () => {
   }, [activeTab, messagesBySource, normalizedSearch]);
 
   const replayFilteredMessages = useMemo(() => {
-    if (replayWindow <= 0) return activeMessages;
-    const cutoff = Date.now() - replayWindow * 60 * 1000;
+    if (replayWindow <= 0 && replayBufferSeconds <= 0) return activeMessages;
+    const minuteCutoff = replayWindow > 0 ? Date.now() - replayWindow * 60 * 1000 : 0;
+    const secondCutoff = replayBufferSeconds > 0 ? Date.now() - replayBufferSeconds * 1000 : 0;
+    const cutoff = Math.max(minuteCutoff, secondCutoff);
     return activeMessages.filter((message) => messageTimestamp(message) >= cutoff);
-  }, [activeMessages, replayWindow]);
+  }, [activeMessages, replayBufferSeconds, replayWindow]);
 
   const delayedReplayMessages = useMemo(() => {
     if (!streamDelayMode || streamDelaySeconds <= 0) return replayFilteredMessages;
@@ -2037,6 +2054,23 @@ const MainApp: React.FC = () => {
       const raw = asRecord(message.raw);
       const isHiddenMeta = raw?.hidden === true;
       const isSelfRoleState = raw?.selfRoleState === true;
+      if (source.platform === "twitch" && raw) {
+        const roomIdRaw = typeof raw["room-id"] === "string" ? raw["room-id"].trim() : "";
+        const sourceRoomIdRaw = typeof raw["source-room-id"] === "string" ? raw["source-room-id"].trim() : "";
+        if (roomIdRaw) {
+          twitchRoomIdToChannelRef.current.set(roomIdRaw, message.channel);
+        }
+        if (roomIdRaw && sourceRoomIdRaw && sourceRoomIdRaw !== roomIdRaw) {
+          const currentChannel = twitchRoomIdToChannelRef.current.get(roomIdRaw) ?? message.channel;
+          const linkedChannel = twitchRoomIdToChannelRef.current.get(sourceRoomIdRaw) ?? `room ${sourceRoomIdRaw}`;
+          const alertKey = [roomIdRaw, sourceRoomIdRaw].sort().join(":");
+          const lastAlertAt = twitchSharedChatAlertAtRef.current.get(alertKey) ?? 0;
+          if (now - lastAlertAt > 120_000) {
+            twitchSharedChatAlertAtRef.current.set(alertKey, now);
+            setAuthMessage(`Twitch shared chat active: #${currentChannel} is combined with #${linkedChannel}.`);
+          }
+        }
+      }
       const currentUsername =
         source.platform === "twitch"
           ? normalizeUserKey(currentSettings.twitchUsername ?? "")
@@ -2735,10 +2769,16 @@ const MainApp: React.FC = () => {
     setMentionInbox([]);
   };
 
+  const buildMessageJumpKey = (message: ChatMessage) =>
+    `${message.platform}|${message.channel}|${message.timestamp}|${normalizeUserKey(message.displayName)}|${message.message.slice(0, 80)}`;
+  const buildMentionJumpKey = (entry: MentionInboxEntry) =>
+    `${entry.platform}|${entry.channel}|${entry.timestamp}|${normalizeUserKey(entry.displayName)}|${entry.message.slice(0, 80)}`;
+
   const openMention = (entry: MentionInboxEntry) => {
     const tabId = entry.tabId ?? tabs.find((tab) => tab.sourceIds.includes(entry.sourceId))?.id ?? "";
     if (tabId) {
       setActiveTabId(tabId);
+      setPendingMessageJumpKey(buildMentionJumpKey(entry));
       const ts = new Date(entry.timestamp).getTime();
       if (Number.isFinite(ts)) {
         setLastReadAtByTab((previous) => ({
@@ -2748,6 +2788,49 @@ const MainApp: React.FC = () => {
       }
     }
     setMentionInbox((previous) => previous.filter((item) => item.id !== entry.id));
+  };
+
+  const fillComposerCommandForMessage = (action: Exclude<ModeratorAction, "delete">, message: ChatMessage) => {
+    const username = message.username.trim().replace(/^@+/, "");
+    if (!username) return;
+    const command =
+      action === "timeout_60"
+        ? `/timeout ${username} 60`
+        : action === "timeout_600"
+          ? `/timeout ${username} 600`
+          : action === "ban"
+            ? `/ban ${username}`
+            : `/unban ${username}`;
+    setComposerText(command);
+    const source = sourceByPlatformChannel.get(`${message.platform}:${message.channel}`);
+    if (source && writableActiveTabSources.some((candidate) => candidate.id === source.id)) {
+      setSendTargetId(source.id);
+    }
+    setMessageMenu(null);
+  };
+
+  const openPlatformModMenu = (message: ChatMessage) => {
+    const source = sourceByPlatformChannel.get(`${message.platform}:${message.channel}`);
+    if (!source) return;
+    const url =
+      source.platform === "twitch"
+        ? `https://www.twitch.tv/popout/${encodeURIComponent(source.channel)}/moderator`
+        : source.platform === "kick"
+          ? `https://kick.com/${encodeURIComponent(source.channel)}/moderator`
+          : "";
+    if (!url) return;
+    window.open(url, "_blank", "noopener,noreferrer");
+    setMessageMenu(null);
+  };
+
+  const applyTabAlertProfile = (profile: Exclude<TabAlertProfile, "custom">) => {
+    const preset = TAB_ALERT_PROFILES[profile];
+    if (!preset) return;
+    setTabAlertProfile(profile);
+    setTabAlertSound(preset.sound);
+    setTabAlertNotify(preset.notify);
+    setTabMentionSound(preset.mentionSound);
+    setTabMentionNotify(preset.mentionNotify);
   };
 
   const openUserLogsForMessage = (message: ChatMessage) => {
@@ -3260,7 +3343,21 @@ const MainApp: React.FC = () => {
     setTabAlertNotify(rule?.notify !== false);
     setTabMentionSound(rule?.mentionSound !== false);
     setTabMentionNotify(rule?.mentionNotify !== false);
+    setTabAlertProfile("custom");
   }, [activeTabId, settings.tabAlertRules]);
+
+  useEffect(() => {
+    if (!pendingMessageJumpKey) return;
+    const list = messageListRef.current;
+    if (!list) return;
+    const targets = Array.from(list.querySelectorAll<HTMLElement>("[data-jump-key]"));
+    const target = targets.find((item) => item.dataset.jumpKey === pendingMessageJumpKey);
+    if (!target) return;
+    target.scrollIntoView({ block: "center", behavior: "smooth" });
+    target.classList.add("highlight");
+    window.setTimeout(() => target.classList.remove("highlight"), 1400);
+    setPendingMessageJumpKey(null);
+  }, [pendingMessageJumpKey, renderedMessages]);
 
   useEffect(() => {
     if (!activeTabId) {
@@ -3581,9 +3678,18 @@ const MainApp: React.FC = () => {
       normalizeUserKey(messageMenu.message.username) !== "system"
         ? 1
         : 0;
+    const smartCommandCount =
+      messageMenu.message.platform === "twitch" || messageMenu.message.platform === "kick"
+        ? 4
+        : 0;
+    const collabLinkCount =
+      settings.collaborationMode === true &&
+      (messageMenu.message.platform === "twitch" || messageMenu.message.platform === "kick")
+        ? 1
+        : 0;
     const copyCount = 3;
-    const sectionCount = (modActionCount > 0 ? 1 : 0) + 1;
-    const rowCount = modActionCount + userLogCount + copyCount + sectionCount;
+    const sectionCount = (modActionCount > 0 ? 1 : 0) + (smartCommandCount > 0 ? 1 : 0) + 1;
+    const rowCount = modActionCount + userLogCount + smartCommandCount + collabLinkCount + copyCount + sectionCount;
     const estimatedHeight = Math.min(680, 26 + Math.max(4, rowCount) * 38);
     const { x, y } = clampContextMenuPosition(messageMenu.x, messageMenu.y, 300, estimatedHeight);
     return { top: y, left: x };
@@ -3699,6 +3805,19 @@ const MainApp: React.FC = () => {
                   </label>
                 ) : null}
               </div>
+              {isAdvancedMode ? (
+                <div className="menu-group">
+                  <strong>Collaboration</strong>
+                  <label className="menu-check">
+                    <input
+                      type="checkbox"
+                      checked={settings.collaborationMode === true}
+                      onChange={(event) => void persistSettings({ collaborationMode: event.target.checked })}
+                    />
+                    Enable shared mod links (Twitch/Kick)
+                  </label>
+                </div>
+              ) : null}
               {isAdvancedMode ? (
               <div className="menu-group">
                 <strong>Panels</strong>
@@ -3956,6 +4075,26 @@ const MainApp: React.FC = () => {
               ) : null}
               {isAdvancedMode ? (
                 <div className="menu-group">
+                  <strong>Search</strong>
+                  <input
+                    ref={searchRef}
+                    type="search"
+                    placeholder={globalSearchMode ? "Search all tabs" : "Search in active tab"}
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                  />
+                  <label className="menu-check">
+                    <input
+                      type="checkbox"
+                      checked={globalSearchMode}
+                      onChange={(event) => void persistSettings({ globalSearchMode: event.target.checked })}
+                    />
+                    Global search
+                  </label>
+                </div>
+              ) : null}
+              {isAdvancedMode ? (
+                <div className="menu-group">
                 <strong>Filters</strong>
                 <label className="menu-inline">
                   Profile
@@ -4016,6 +4155,26 @@ const MainApp: React.FC = () => {
               {isAdvancedMode ? (
                 <div className="menu-group">
                 <strong>Current Tab Alerts</strong>
+                <label className="menu-inline">
+                  Profile
+                  <select
+                    value={tabAlertProfile}
+                    onChange={(event) => {
+                      const profile = event.target.value as TabAlertProfile;
+                      if (profile === "custom") {
+                        setTabAlertProfile("custom");
+                        return;
+                      }
+                      applyTabAlertProfile(profile);
+                    }}
+                  >
+                    <option value="custom">Custom</option>
+                    <option value="default">Default</option>
+                    <option value="quiet">Quiet</option>
+                    <option value="mod-heavy">Mod-heavy</option>
+                    <option value="tournament">Tournament</option>
+                  </select>
+                </label>
                 <input
                   value={tabAlertKeywordInput}
                   onChange={(event) => setTabAlertKeywordInput(event.target.value)}
@@ -4346,21 +4505,6 @@ const MainApp: React.FC = () => {
       </nav>
 
       <section className="toolbar">
-        <input
-          ref={searchRef}
-          type="search"
-          placeholder={globalSearchMode ? "Search all tabs" : "Search in active tab"}
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-        />
-        <label className="menu-check">
-          <input
-            type="checkbox"
-            checked={globalSearchMode}
-            onChange={(event) => void persistSettings({ globalSearchMode: event.target.checked })}
-          />
-          Global
-        </label>
         <span>
           {activeTab
             ? newestLocked
@@ -4406,6 +4550,12 @@ const MainApp: React.FC = () => {
               <strong>Quick Actions</strong>
               <button type="button" className="quick-action-button" onClick={() => void refreshActiveTab()}>
                 Reconnect tab
+              </button>
+              <button type="button" className="quick-action-button" onClick={() => setReplayBufferSeconds((previous) => (previous === 30 ? 0 : 30))}>
+                {replayBufferSeconds === 30 ? "Replay 30s off" : "Replay 30s"}
+              </button>
+              <button type="button" className="quick-action-button" onClick={() => setReplayBufferSeconds((previous) => (previous === 60 ? 0 : 60))}>
+                {replayBufferSeconds === 60 ? "Replay 60s off" : "Replay 60s"}
               </button>
               <button type="button" className="quick-action-button" onClick={() => window.electronAPI.openOverlay()}>
                 Open overlay
@@ -4454,6 +4604,7 @@ const MainApp: React.FC = () => {
                     ) : null}
                     <div
                       className={highlighted ? "chat-line highlight" : "chat-line"}
+                      data-jump-key={buildMessageJumpKey(message)}
                       onContextMenu={(event) => {
                         event.preventDefault();
                         setMessageMenu({ x: event.clientX, y: event.clientY, message });
@@ -4755,6 +4906,29 @@ const MainApp: React.FC = () => {
           normalizeUserKey(messageMenu.message.username) !== "system" ? (
             <button type="button" onClick={() => openUserLogsForMessage(messageMenu.message)}>
               View User Logs
+            </button>
+          ) : null}
+          {(messageMenu.message.platform === "twitch" || messageMenu.message.platform === "kick") ? (
+            <>
+              <strong>Smart Commands</strong>
+              <button type="button" onClick={() => fillComposerCommandForMessage("timeout_60", messageMenu.message)}>
+                Fill timeout 1m
+              </button>
+              <button type="button" onClick={() => fillComposerCommandForMessage("timeout_600", messageMenu.message)}>
+                Fill timeout 10m
+              </button>
+              <button type="button" onClick={() => fillComposerCommandForMessage("ban", messageMenu.message)}>
+                Fill ban
+              </button>
+              <button type="button" onClick={() => fillComposerCommandForMessage("unban", messageMenu.message)}>
+                Fill unban
+              </button>
+            </>
+          ) : null}
+          {settings.collaborationMode === true &&
+          (messageMenu.message.platform === "twitch" || messageMenu.message.platform === "kick") ? (
+            <button type="button" onClick={() => openPlatformModMenu(messageMenu.message)}>
+              Open Platform Mod Menu
             </button>
           ) : null}
           <strong>Copy</strong>
