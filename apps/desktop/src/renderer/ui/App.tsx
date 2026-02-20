@@ -603,6 +603,7 @@ const includesEventToken = (value: string, tokens: readonly string[]) => {
 
 const detectEngagementAlertKind = (message: ChatMessage): "follow" | "subscriber" | null => {
   const raw = asRecord(message.raw);
+  // Prefer explicit platform event metadata only; avoid text-based false positives.
   const eventType =
     typeof raw?.eventType === "string"
       ? raw.eventType
@@ -615,25 +616,6 @@ const detectEngagementAlertKind = (message: ChatMessage): "follow" | "subscriber
     return "follow";
   }
   if (includesEventToken(eventType, SUB_EVENT_TOKENS)) {
-    return "subscriber";
-  }
-
-  const text = message.message.trim();
-  if (!text) return null;
-  const normalizedText = normalizeUserKey(text);
-  const looksSystemMessage =
-    normalizeUserKey(message.username) === "system" ||
-    normalizeUserKey(message.displayName) === "system" ||
-    normalizedText.includes(" just ") ||
-    normalizedText.includes(" has ");
-
-  if (
-    (message.platform === "tiktok" || looksSystemMessage) &&
-    FOLLOW_EVENT_TOKENS.some((token) => normalizedText.includes(token))
-  ) {
-    return "follow";
-  }
-  if (SUB_EVENT_TOKENS.some((token) => normalizedText.includes(token))) {
     return "subscriber";
   }
   return null;
@@ -2162,6 +2144,7 @@ const MainApp: React.FC = () => {
       });
 
       const sourceTabIds = tabIdsBySourceIdRef.current[source.id] ?? [];
+      const sourceInActiveTab = sourceTabIds.includes(activeTabIdRef.current);
       const backgroundTabIds = sourceTabIds.filter((tabId) => {
         if (!tabId || tabId === activeTabIdRef.current) return false;
         const group = (currentSettings.tabGroups ?? {})[tabId] ?? "";
@@ -2183,26 +2166,18 @@ const MainApp: React.FC = () => {
         const mentionAlertKey = `mention:${message.platform}:${message.channel}:${normalizeUserKey(message.username)}:${message.message
           .trim()
           .toLowerCase()}`;
-        const mentionTargetTabIds = sourceTabIds.filter((tabId) => tabId !== activeTabIdRef.current);
-        const mentionAllows = mentionTargetTabIds.reduce(
-          (acc, tabId) => {
-            const rule = (currentSettings.tabAlertRules ?? {})[tabId];
-            return {
-              sound: acc.sound || rule?.mentionSound !== false,
-              notify: acc.notify || rule?.mentionNotify !== false
-            };
-          },
-          { sound: false, notify: false }
-        );
+        const activeTabRule = (currentSettings.tabAlertRules ?? {})[activeTabIdRef.current];
         if (now - lastMentionAlertAtRef.current > 1000) {
           lastMentionAlertAtRef.current = now;
-          triggerAttention(
-            `${message.platform.toUpperCase()} mention in #${message.channel}`,
-            `${message.displayName}: ${message.message}`,
-            mentionAlertKey,
-            (mentionTargetTabIds.length > 0 ? mentionAllows.sound : true) && sceneOverrides.sound,
-            (mentionTargetTabIds.length > 0 ? mentionAllows.notify : true) && sceneOverrides.notify
-          );
+          if (sourceInActiveTab) {
+            triggerAttention(
+              `${message.platform.toUpperCase()} mention in #${message.channel}`,
+              `${message.displayName}: ${message.message}`,
+              mentionAlertKey,
+              (activeTabRule?.mentionSound ?? true) && sceneOverrides.sound,
+              (activeTabRule?.mentionNotify ?? true) && sceneOverrides.notify
+            );
+          }
         }
         const mentionTabId = sourceTabIds[0] ?? null;
         if (mentionTabId && mentionTabId !== activeTabIdRef.current) {
@@ -2231,7 +2206,7 @@ const MainApp: React.FC = () => {
       }
 
       const engagementAlertKind = detectEngagementAlertKind(message);
-      if (engagementAlertKind) {
+      if (engagementAlertKind && sourceInActiveTab) {
         const noun = engagementAlertKind === "follow" ? "follow" : "subscriber";
         const sourceLabel = `${message.platform.toUpperCase()} ${noun} alert`;
         const alertBody = `${message.displayName}: ${message.message}`;
@@ -2246,6 +2221,7 @@ const MainApp: React.FC = () => {
 
       const tabRules = currentSettings.tabAlertRules ?? {};
       for (const tabId of sourceTabIds) {
+        if (tabId !== activeTabIdRef.current) continue;
         const rule = tabRules[tabId];
         const keyword = (rule?.keyword ?? "").trim();
         if (!keyword) continue;
