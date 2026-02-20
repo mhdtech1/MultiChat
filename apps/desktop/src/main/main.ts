@@ -32,6 +32,7 @@ type AppSettings = {
   twitchToken?: string;
   twitchUsername?: string;
   twitchGuest?: boolean;
+  twitchScopeVersion?: number;
   twitchClientId?: string;
   twitchRedirectUri?: string;
   kickClientId?: string;
@@ -86,6 +87,8 @@ type AppSettings = {
   }>;
   sessionActiveTabId?: string;
   setupWizardCompleted?: boolean;
+  lastLaunchedVersion?: string;
+  forcedResetAppliedVersion?: string;
 };
 
 type UpdateChannel = "stable" | "beta";
@@ -109,6 +112,17 @@ type AuthPermissionSnapshot = {
   tokenExpiry: number | null;
   lastCheckedAt: number;
   error?: string;
+};
+
+type ModeratorAction = "timeout_60" | "timeout_600" | "ban" | "unban" | "delete";
+
+type ModerationRequest = {
+  platform?: "twitch" | "kick";
+  channel?: string;
+  action?: ModeratorAction;
+  username?: string;
+  messageId?: string;
+  targetUserId?: number;
 };
 
 const DEV_UPDATE_MESSAGE = "Auto updates are available in packaged builds only.";
@@ -139,28 +153,43 @@ const KICK_MANAGED_CLIENT_SECRET = "29f43591eb0496352c66ea36f55c5c21e3fbc5053ba2
 const YOUTUBE_MANAGED_CLIENT_ID = "1008732662207-rufcsa7rafob02h29docduk7pboim0s8.apps.googleusercontent.com";
 const YOUTUBE_MANAGED_CLIENT_SECRET = "";
 const YOUTUBE_MANAGED_API_KEY = "";
-const TWITCH_SCOPES = ["chat:read", "chat:edit"];
-const KICK_SCOPES = ["user:read", "channel:read", "chat:write"];
+const TWITCH_SCOPE_VERSION = 2;
+const TWITCH_SCOPES = [
+  "chat:read",
+  "chat:edit",
+  "moderator:manage:banned_users",
+  "moderator:manage:chat_messages",
+  "moderator:read:moderators"
+];
+const KICK_SCOPES = ["user:read", "channel:read", "chat:write", "moderation:ban", "moderation:chat_message:manage"];
 const YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl"];
-const KICK_SCOPE_VERSION = 2;
+const KICK_SCOPE_VERSION = 3;
 const YOUTUBE_ALPHA_ENABLED = true;
 const TIKTOK_ALPHA_ENABLED = true;
 const DEFAULT_UPDATE_CHANNEL: UpdateChannel = "stable";
+const FORCE_APP_RESET_VERSION = "0.1.35";
 
 class JsonSettingsStore {
   private readonly filePath: string;
   private readonly defaults: AppSettings;
+  private readonly hasLoadedPersistedState: boolean;
   private state: AppSettings;
 
   constructor(defaults: AppSettings) {
     this.defaults = defaults;
     this.filePath = path.join(app.getPath("userData"), "settings.json");
-    this.state = { ...defaults, ...this.readFromDisk() };
+    const persisted = this.readFromDisk();
+    this.hasLoadedPersistedState = Object.keys(persisted).length > 0;
+    this.state = { ...defaults, ...persisted };
     this.writeToDisk();
   }
 
   get store(): AppSettings {
     return { ...this.state };
+  }
+
+  get hasPersistedState(): boolean {
+    return this.hasLoadedPersistedState;
   }
 
   get<K extends keyof AppSettings>(key: K): AppSettings[K] {
@@ -175,6 +204,11 @@ class JsonSettingsStore {
     } else {
       this.state = { ...this.state, ...arg1 };
     }
+    this.writeToDisk();
+  }
+
+  reset(overrides: Partial<AppSettings> = {}): void {
+    this.state = { ...this.defaults, ...overrides };
     this.writeToDisk();
   }
 
@@ -785,6 +819,35 @@ const parseKickChatroomId = (payload: unknown): number | null => {
   return null;
 };
 
+const parseKickUserId = (payload: unknown): number | null => {
+  if (!payload || typeof payload !== "object") return null;
+  const record = payload as Record<string, unknown>;
+
+  if (typeof record.broadcaster_user_id === "number") return record.broadcaster_user_id;
+  if (typeof record.user_id === "number") return record.user_id;
+  if (typeof record.id === "number") return record.id;
+
+  const user = asUnknownRecord(record.user);
+  if (typeof user?.id === "number") return user.id;
+  if (typeof user?.user_id === "number") return user.user_id;
+
+  const sender = asUnknownRecord(record.sender);
+  if (typeof sender?.id === "number") return sender.id;
+  if (typeof sender?.user_id === "number") return sender.user_id;
+
+  if (Array.isArray(record.data)) {
+    for (const item of record.data) {
+      const nested = parseKickUserId(item);
+      if (nested) return nested;
+    }
+  } else if (record.data && typeof record.data === "object") {
+    const nested = parseKickUserId(record.data);
+    if (nested) return nested;
+  }
+
+  return null;
+};
+
 type YouTubeTokenResponse = {
   access_token?: string;
   refresh_token?: string;
@@ -1314,14 +1377,20 @@ const testTwitchPermissions = async (): Promise<AuthPermissionSnapshot> => {
         Authorization: `OAuth ${token}`
       }
     });
-    const payload = await fetchJsonOrThrow<{ login?: string; expires_in?: number }>(response, "Twitch token validation");
+    const payload = await fetchJsonOrThrow<{ login?: string; expires_in?: number; scopes?: unknown }>(
+      response,
+      "Twitch token validation"
+    );
     const expiresIn = typeof payload.expires_in === "number" ? payload.expires_in : 0;
+    const scopes = new Set(
+      Array.isArray(payload.scopes) ? payload.scopes.filter((scope): scope is string => typeof scope === "string") : []
+    );
     return {
       platform: "twitch",
       signedIn: true,
       username: payload.login?.trim() || username,
       canSend: true,
-      canModerate: false,
+      canModerate: scopes.has("moderator:manage:banned_users") && scopes.has("moderator:manage:chat_messages"),
       tokenExpiry: expiresIn > 0 ? now + expiresIn * 1000 : null,
       lastCheckedAt: now
     };
@@ -1834,6 +1903,340 @@ const resolveKickChannelViaBrowser = async (slug: string): Promise<KickLookupRes
   });
 };
 
+const normalizeLogin = (value: string) => value.trim().replace(/^@+/, "").toLowerCase();
+
+const resolveKickChannelLookup = async (slug: string): Promise<KickLookupResult> => {
+  let lookup = await resolveKickChannelViaHttp(slug);
+  if ((!lookup.ok || (!parseKickChatroomId(lookup.payload) && !parseKickUserId(lookup.payload))) && lookup.status === 403) {
+    lookup = await resolveKickChannelViaBrowser(slug);
+  }
+  return lookup;
+};
+
+type TwitchValidatePayload = {
+  login?: string;
+  user_id?: string;
+  scopes?: unknown;
+};
+
+type TwitchAuthContext = {
+  accessToken: string;
+  clientId: string;
+  login: string;
+  userId: string;
+  scopes: Set<string>;
+};
+
+const getTwitchAuthContext = async (): Promise<TwitchAuthContext> => {
+  const accessToken = store.get("twitchToken")?.trim() ?? "";
+  const clientId = store.get("twitchClientId")?.trim() ?? "";
+  if (!accessToken || !clientId) {
+    throw new Error("Twitch sign-in required. Sign in again to use moderation.");
+  }
+  const response = await fetch("https://id.twitch.tv/oauth2/validate", {
+    headers: {
+      Authorization: `OAuth ${accessToken}`
+    }
+  });
+  const payload = await fetchJsonOrThrow<TwitchValidatePayload>(response, "Twitch token validation");
+  const login = payload.login?.trim() ?? "";
+  const userId = payload.user_id?.trim() ?? "";
+  if (!login || !userId) {
+    throw new Error("Twitch token validation did not return account details.");
+  }
+  const scopes = new Set(
+    Array.isArray(payload.scopes) ? payload.scopes.filter((scope): scope is string => typeof scope === "string") : []
+  );
+  return {
+    accessToken,
+    clientId,
+    login,
+    userId,
+    scopes
+  };
+};
+
+const twitchApiFetchJson = async <T>(
+  context: TwitchAuthContext,
+  input: string | URL,
+  init: RequestInit = {},
+  source = "Twitch API"
+): Promise<T> => {
+  const headers = new Headers(init.headers ?? {});
+  headers.set("Client-ID", context.clientId);
+  headers.set("Authorization", `Bearer ${context.accessToken}`);
+  if (!headers.has("Accept")) {
+    headers.set("Accept", "application/json");
+  }
+  const response = await fetch(input, {
+    ...init,
+    headers
+  });
+  if ((response.status === 401 || response.status === 403) && source.toLowerCase().includes("moderat")) {
+    throw new Error("Twitch moderation is unauthorized for this account. Re-sign in to Twitch to grant mod scopes.");
+  }
+  return fetchJsonOrThrow<T>(response, source);
+};
+
+const getTwitchUserByLogin = async (context: TwitchAuthContext, login: string, source: string) => {
+  const normalized = normalizeLogin(login);
+  if (!normalized) {
+    throw new Error("Twitch username is required.");
+  }
+  const requestUrl = new URL("https://api.twitch.tv/helix/users");
+  requestUrl.searchParams.set("login", normalized);
+  const payload = await twitchApiFetchJson<{ data?: Array<{ id?: string; login?: string }> }>(context, requestUrl, {}, source);
+  const first = Array.isArray(payload.data) ? payload.data[0] : undefined;
+  const id = first?.id?.trim() ?? "";
+  if (!id) {
+    throw new Error(`Twitch user "${normalized}" was not found.`);
+  }
+  return {
+    id,
+    login: first?.login?.trim() ?? normalized
+  };
+};
+
+const canModerateTwitchChannel = async (channel: string): Promise<boolean> => {
+  const normalizedChannel = normalizeLogin(channel);
+  if (!normalizedChannel) return false;
+  const context = await getTwitchAuthContext();
+  if (normalizeLogin(context.login) === normalizedChannel) {
+    return true;
+  }
+  if (!context.scopes.has("moderator:read:moderators")) {
+    return false;
+  }
+  const broadcaster = await getTwitchUserByLogin(context, normalizedChannel, "Twitch channel lookup");
+  const requestUrl = new URL("https://api.twitch.tv/helix/moderation/moderators");
+  requestUrl.searchParams.set("broadcaster_id", broadcaster.id);
+  requestUrl.searchParams.set("user_id", context.userId);
+  const payload = await twitchApiFetchJson<{ data?: unknown[] }>(context, requestUrl, {}, "Twitch moderator lookup");
+  return Array.isArray(payload.data) && payload.data.length > 0;
+};
+
+const moderateTwitch = async (request: ModerationRequest): Promise<void> => {
+  const action = request.action;
+  const normalizedChannel = normalizeLogin(request.channel ?? "");
+  if (!action) {
+    throw new Error("Twitch moderation action is required.");
+  }
+  if (!normalizedChannel) {
+    throw new Error("Twitch channel is required for moderation.");
+  }
+  const context = await getTwitchAuthContext();
+  const broadcaster = await getTwitchUserByLogin(context, normalizedChannel, "Twitch channel lookup");
+
+  if (action === "delete") {
+    if (!context.scopes.has("moderator:manage:chat_messages")) {
+      throw new Error("Missing Twitch scope moderator:manage:chat_messages. Re-sign in to Twitch.");
+    }
+    const messageId = (request.messageId ?? "").trim();
+    if (!messageId) {
+      throw new Error("Twitch message id is required to delete a message.");
+    }
+    const requestUrl = new URL("https://api.twitch.tv/helix/moderation/chat");
+    requestUrl.searchParams.set("broadcaster_id", broadcaster.id);
+    requestUrl.searchParams.set("moderator_id", context.userId);
+    requestUrl.searchParams.set("message_id", messageId);
+    await twitchApiFetchJson<Record<string, unknown>>(
+      context,
+      requestUrl,
+      {
+        method: "DELETE"
+      },
+      "Twitch delete message"
+    );
+    return;
+  }
+
+  if (!context.scopes.has("moderator:manage:banned_users")) {
+    throw new Error("Missing Twitch scope moderator:manage:banned_users. Re-sign in to Twitch.");
+  }
+  const normalizedUser = normalizeLogin(request.username ?? "");
+  if (!normalizedUser) {
+    throw new Error("Twitch username is required for this moderation action.");
+  }
+  const target = await getTwitchUserByLogin(context, normalizedUser, "Twitch target user lookup");
+  if (action === "unban") {
+    const requestUrl = new URL("https://api.twitch.tv/helix/moderation/bans");
+    requestUrl.searchParams.set("broadcaster_id", broadcaster.id);
+    requestUrl.searchParams.set("moderator_id", context.userId);
+    requestUrl.searchParams.set("user_id", target.id);
+    await twitchApiFetchJson<Record<string, unknown>>(
+      context,
+      requestUrl,
+      {
+        method: "DELETE"
+      },
+      "Twitch unban user"
+    );
+    return;
+  }
+
+  const durationSeconds = action === "timeout_60" ? 60 : action === "timeout_600" ? 600 : 0;
+  const body = {
+    data: {
+      user_id: target.id,
+      ...(durationSeconds > 0 ? { duration: durationSeconds } : {})
+    }
+  };
+  const requestUrl = new URL("https://api.twitch.tv/helix/moderation/bans");
+  requestUrl.searchParams.set("broadcaster_id", broadcaster.id);
+  requestUrl.searchParams.set("moderator_id", context.userId);
+  await twitchApiFetchJson<Record<string, unknown>>(
+    context,
+    requestUrl,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(body)
+    },
+    durationSeconds > 0 ? "Twitch timeout user" : "Twitch ban user"
+  );
+};
+
+const kickApiFetchJson = async <T>(
+  input: string | URL,
+  init: RequestInit = {},
+  source = "Kick API",
+  allowRetry = true
+): Promise<T> => {
+  const firstToken = store.get("kickAccessToken")?.trim() || (await refreshKickAccessToken());
+  const doFetch = async (token: string) => {
+    const headers = new Headers(init.headers ?? {});
+    headers.set("Authorization", `Bearer ${token}`);
+    if (!headers.has("Accept")) {
+      headers.set("Accept", "application/json");
+    }
+    return fetch(input, {
+      ...init,
+      headers
+    });
+  };
+
+  let response = await doFetch(firstToken);
+  if ((response.status === 401 || response.status === 403) && allowRetry) {
+    const refreshedToken = await refreshKickAccessToken();
+    response = await doFetch(refreshedToken);
+  }
+  if (response.status === 401 || response.status === 403) {
+    throw new Error(KICK_REAUTH_REQUIRED_MESSAGE);
+  }
+  return fetchJsonOrThrow<T>(response, source);
+};
+
+const resolveKickBroadcasterUserId = async (channel: string): Promise<number> => {
+  const slug = normalizeLogin(channel);
+  if (!slug) {
+    throw new Error("Kick channel is required.");
+  }
+  const lookup = await resolveKickChannelLookup(slug);
+  if (!lookup.ok) {
+    throw new Error(lookup.message);
+  }
+  const userId = parseKickUserId(lookup.payload);
+  if (!userId) {
+    throw new Error("Kick broadcaster user id was not found for this channel.");
+  }
+  return userId;
+};
+
+const resolveKickTargetUserId = async (request: ModerationRequest): Promise<number> => {
+  if (Number.isFinite(request.targetUserId) && Number(request.targetUserId) > 0) {
+    return Number(request.targetUserId);
+  }
+  const username = normalizeLogin(request.username ?? "");
+  if (!username) {
+    throw new Error("Kick username is required for this moderation action.");
+  }
+  const lookup = await resolveKickChannelLookup(username);
+  if (!lookup.ok) {
+    throw new Error(lookup.message);
+  }
+  const userId = parseKickUserId(lookup.payload);
+  if (!userId) {
+    throw new Error("Kick user lookup failed for this username.");
+  }
+  return userId;
+};
+
+const moderateKick = async (request: ModerationRequest): Promise<void> => {
+  const action = request.action;
+  if (!action) {
+    throw new Error("Kick moderation action is required.");
+  }
+
+  if (action === "delete") {
+    const messageId = (request.messageId ?? "").trim();
+    if (!messageId) {
+      throw new Error("Kick message id is required to delete a message.");
+    }
+    await kickApiFetchJson<Record<string, unknown>>(
+      `https://api.kick.com/public/v1/chat/${encodeURIComponent(messageId)}`,
+      {
+        method: "DELETE"
+      },
+      "Kick delete message"
+    );
+    return;
+  }
+
+  const broadcasterUserId = await resolveKickBroadcasterUserId(request.channel ?? "");
+  const targetUserId = await resolveKickTargetUserId(request);
+  if (action === "unban") {
+    await kickApiFetchJson<Record<string, unknown>>(
+      "https://api.kick.com/public/v1/moderation/bans",
+      {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          broadcaster_user_id: broadcasterUserId,
+          user_id: targetUserId
+        })
+      },
+      "Kick unban user"
+    );
+    return;
+  }
+
+  const timeoutMinutes = action === "timeout_60" ? 1 : action === "timeout_600" ? 10 : 0;
+  const body: Record<string, unknown> = {
+    broadcaster_user_id: broadcasterUserId,
+    user_id: targetUserId
+  };
+  if (timeoutMinutes > 0) {
+    body.duration = timeoutMinutes;
+  }
+  await kickApiFetchJson<Record<string, unknown>>(
+    "https://api.kick.com/public/v1/moderation/bans",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(body)
+    },
+    timeoutMinutes > 0 ? "Kick timeout user" : "Kick ban user"
+  );
+};
+
+const runModerationAction = async (request: ModerationRequest): Promise<void> => {
+  if (request.platform === "twitch") {
+    await moderateTwitch(request);
+    return;
+  }
+  if (request.platform === "kick") {
+    await moderateKick(request);
+    return;
+  }
+  throw new Error("Unsupported moderation platform.");
+};
+
 const writeLog = (message: string) => {
   const formatted = `[${new Date().toISOString()}] ${message}`;
   console.log(formatted);
@@ -2071,6 +2474,11 @@ const checkForUpdatesFromMenu = async () => {
   const finalStatus =
     status.state === "checking" || status.state === "idle" ? await waitForUpdateTerminalState(12_000) : status;
 
+  if (isWindows) {
+    // Windows update checks stay in-app only (no OS modal popups).
+    return;
+  }
+
   const options: MessageBoxOptions = {
     type: finalStatus.state === "error" ? "error" : "info",
     buttons: ["OK"],
@@ -2202,7 +2610,7 @@ const setupAutoUpdater = () => {
   }
 
   autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.autoInstallOnAppQuit = false;
   if (isWindows) {
     const windowsUpdater = autoUpdater as unknown as {
       autoRunAppAfterInstall?: boolean;
@@ -2350,6 +2758,7 @@ app.whenReady().then(() => {
     confirmSendAll: true,
     updateChannel: DEFAULT_UPDATE_CHANNEL,
     twitchGuest: false,
+    twitchScopeVersion: TWITCH_SCOPE_VERSION,
     kickGuest: false,
     kickScopeVersion: KICK_SCOPE_VERSION,
     twitchClientId: process.env.TWITCH_CLIENT_ID ?? TWITCH_MANAGED_CLIENT_ID,
@@ -2368,6 +2777,26 @@ app.whenReady().then(() => {
     tiktokUsername: "",
     setupWizardCompleted: false
   });
+
+  const currentVersion = app.getVersion();
+  const lastLaunchedVersion = store.get("lastLaunchedVersion")?.trim() ?? "";
+  const forcedResetAppliedVersion = store.get("forcedResetAppliedVersion")?.trim() ?? "";
+  const shouldApplyForcedReset =
+    currentVersion === FORCE_APP_RESET_VERSION &&
+    forcedResetAppliedVersion !== FORCE_APP_RESET_VERSION &&
+    store.hasPersistedState &&
+    lastLaunchedVersion !== currentVersion;
+
+  if (shouldApplyForcedReset) {
+    store.reset({
+      forcedResetAppliedVersion: FORCE_APP_RESET_VERSION,
+      lastLaunchedVersion: currentVersion
+    });
+  } else if (lastLaunchedVersion !== currentVersion) {
+    store.set({
+      lastLaunchedVersion: currentVersion
+    });
+  }
 
   const managedTwitchClientId = (process.env.TWITCH_CLIENT_ID ?? TWITCH_MANAGED_CLIENT_ID).trim();
   if (!store.get("twitchClientId")?.trim() && managedTwitchClientId) {
@@ -2465,6 +2894,14 @@ app.whenReady().then(() => {
     store.set({
       twitchGuest: false,
       twitchUsername: store.get("twitchToken") ? store.get("twitchUsername") : ""
+    });
+  }
+  if ((store.get("twitchScopeVersion") ?? 0) < TWITCH_SCOPE_VERSION) {
+    store.set({
+      twitchToken: "",
+      twitchUsername: "",
+      twitchGuest: false,
+      twitchScopeVersion: TWITCH_SCOPE_VERSION
     });
   }
   if (store.get("kickGuest") && store.get("kickClientId")?.trim() && store.get("kickClientSecret")?.trim()) {
@@ -2626,6 +3063,7 @@ app.whenReady().then(() => {
       twitchToken: accessToken,
       twitchUsername: validated.login,
       twitchGuest: false,
+      twitchScopeVersion: TWITCH_SCOPE_VERSION,
       twitchRedirectUri: redirectUri
     });
 
@@ -2635,7 +3073,8 @@ app.whenReady().then(() => {
     store.set({
       twitchToken: "",
       twitchUsername: "",
-      twitchGuest: false
+      twitchGuest: false,
+      twitchScopeVersion: TWITCH_SCOPE_VERSION
     });
     return store.store;
   });
@@ -2733,6 +3172,7 @@ app.whenReady().then(() => {
       kickRefreshToken: tokens.refresh_token ?? "",
       kickUsername: username ?? "",
       kickGuest: false,
+      kickScopeVersion: KICK_SCOPE_VERSION,
       kickRedirectUri: redirectUri
     });
 
@@ -2743,7 +3183,8 @@ app.whenReady().then(() => {
       kickAccessToken: "",
       kickRefreshToken: "",
       kickUsername: "",
-      kickGuest: false
+      kickGuest: false,
+      kickScopeVersion: KICK_SCOPE_VERSION
     });
     return store.store;
   });
@@ -2883,16 +3324,52 @@ app.whenReady().then(() => {
   ipcMain.handle("auth:testPermissions", async () => {
     return getAuthHealthSnapshot();
   });
+  ipcMain.handle("moderation:act", async (_event, payload: ModerationRequest) => {
+    const platform = payload?.platform;
+    const channel = normalizeLogin(payload?.channel ?? "");
+    const action = payload?.action;
+    if (!platform) {
+      throw new Error("Moderation platform is required.");
+    }
+    if (!channel) {
+      throw new Error("Moderation channel is required.");
+    }
+    if (!action) {
+      throw new Error("Moderation action is required.");
+    }
+    await runModerationAction({
+      ...payload,
+      platform,
+      channel,
+      action
+    });
+  });
+  ipcMain.handle("moderation:canModerate", async (_event, payload: { platform?: "twitch" | "kick"; channel?: string }) => {
+    const platform = payload?.platform;
+    const channel = normalizeLogin(payload?.channel ?? "");
+    if (!platform || !channel) return false;
+
+    if (platform === "twitch") {
+      try {
+        return await canModerateTwitchChannel(channel);
+      } catch {
+        return false;
+      }
+    }
+
+    const kickUsername = normalizeLogin(store.get("kickUsername")?.trim() ?? "");
+    if (kickUsername && kickUsername === channel) {
+      return true;
+    }
+    return false;
+  });
   ipcMain.handle("kick:resolveChatroom", async (_event, channel: string) => {
     const slug = channel.trim().toLowerCase();
     if (!slug) {
       throw new Error("Kick channel is required.");
     }
 
-    let lookup = await resolveKickChannelViaHttp(slug);
-    if ((!lookup.ok || !parseKickChatroomId(lookup.payload)) && lookup.status === 403) {
-      lookup = await resolveKickChannelViaBrowser(slug);
-    }
+    const lookup = await resolveKickChannelLookup(slug);
 
     if (!lookup.ok) {
       throw new Error(lookup.message);

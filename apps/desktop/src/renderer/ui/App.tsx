@@ -42,6 +42,7 @@ type Settings = {
   twitchToken?: string;
   twitchUsername?: string;
   twitchGuest?: boolean;
+  twitchScopeVersion?: number;
   twitchClientId?: string;
   twitchRedirectUri?: string;
   kickClientId?: string;
@@ -228,6 +229,7 @@ const defaultSettings: Settings = {
   twitchToken: "",
   twitchUsername: "",
   twitchGuest: false,
+  twitchScopeVersion: 0,
   twitchClientId: "",
   twitchRedirectUri: "",
   kickClientId: "",
@@ -363,6 +365,38 @@ const platformIconGlyph = (platform: string) => {
   if (value === "youtube") return "YT";
   if (value === "tiktok") return "TT";
   return "?";
+};
+
+const buildModerationCommand = (
+  platform: Platform,
+  action: ModeratorAction,
+  username: string,
+  messageId?: string | null
+): string | null => {
+  const normalizedUser = username.trim().replace(/^@+/, "");
+  const prefix = platform === "twitch" ? "." : "/";
+
+  if (action === "timeout_60") {
+    if (!normalizedUser) return null;
+    return `${prefix}timeout ${normalizedUser} 60`;
+  }
+  if (action === "timeout_600") {
+    if (!normalizedUser) return null;
+    return `${prefix}timeout ${normalizedUser} 600`;
+  }
+  if (action === "ban") {
+    if (!normalizedUser) return null;
+    return `${prefix}ban ${normalizedUser}`;
+  }
+  if (action === "unban") {
+    if (!normalizedUser) return null;
+    return `${prefix}unban ${normalizedUser}`;
+  }
+  if (action === "delete") {
+    if (!messageId) return null;
+    return `${prefix}delete ${messageId}`;
+  }
+  return null;
 };
 
 const normalizeBadgeKey = (rawBadge: string) => rawBadge.trim().toLowerCase().split(/[/:]/)[0] ?? "";
@@ -693,6 +727,7 @@ const BTTV_EMOTE_URL = (id: string) => `https://cdn.betterttv.net/emote/${id}/1x
 const SEVENTV_EMOTE_URL = (id: string) => `https://cdn.7tv.app/emote/${id}/1x.webp`;
 const KICK_EMOTE_URL = (id: string) => `https://files.kick.com/emotes/${id}/fullsize`;
 const AUTO_SCROLL_BOTTOM_THRESHOLD_PX = 36;
+const AUTO_RESUME_NEWEST_AFTER_MS = 3 * 60 * 1000;
 const LOCKED_RENDERED_MESSAGE_LIMIT = 420;
 const CONTEXT_MENU_EDGE_GAP_PX = 12;
 const CONTEXT_MENU_DEFAULT_WIDTH_PX = 250;
@@ -827,31 +862,12 @@ const checkTwitchModeratorStatus = async (channel: string, username: string): Pr
   const normalizedChannel = normalizeChannel(channel, "twitch");
   const normalizedUser = normalizeUserKey(username);
   if (!normalizedChannel || !normalizedUser) return null;
+  if (normalizedChannel === normalizedUser) return true;
   try {
-    const response = await fetch(`https://tmi.twitch.tv/group/user/${encodeURIComponent(normalizedChannel)}/chatters`, {
-      headers: {
-        Accept: "application/json"
-      }
+    return await window.electronAPI.canModerateSource({
+      platform: "twitch",
+      channel: normalizedChannel
     });
-    if (!response.ok) return null;
-    const payload = (await response.json()) as unknown;
-    const record = asRecord(payload);
-    const chatters = asRecord(record?.chatters);
-    if (!chatters) return null;
-
-    const inList = (key: string) => {
-      const value = chatters[key];
-      if (!Array.isArray(value)) return false;
-      return value.some((item) => typeof item === "string" && normalizeUserKey(item) === normalizedUser);
-    };
-
-    return (
-      inList("broadcaster") ||
-      inList("moderators") ||
-      inList("staff") ||
-      inList("admins") ||
-      inList("global_mods")
-    );
   } catch {
     return null;
   }
@@ -1021,6 +1037,25 @@ const getRawMessageId = (message: ChatMessage): string | null => {
   const raw = asRecord(message.raw);
   const id = typeof raw?.id === "string" ? raw.id : typeof raw?.id === "number" ? String(raw.id) : "";
   return id || null;
+};
+
+const getKickRawUserId = (message: ChatMessage): number | null => {
+  if (message.platform !== "kick") return null;
+  const raw = asRecord(message.raw);
+  const sender = asRecord(raw?.sender);
+  const senderId = sender?.id;
+  if (typeof senderId === "number" && Number.isFinite(senderId) && senderId > 0) {
+    return senderId;
+  }
+  const senderUserId = sender?.user_id;
+  if (typeof senderUserId === "number" && Number.isFinite(senderUserId) && senderUserId > 0) {
+    return senderUserId;
+  }
+  const rawUserId = raw?.user_id;
+  if (typeof rawUserId === "number" && Number.isFinite(rawUserId) && rawUserId > 0) {
+    return rawUserId;
+  }
+  return null;
 };
 
 export const App: React.FC = () => {
@@ -1619,7 +1654,13 @@ const MainApp: React.FC = () => {
     }
     return false;
   };
-  const canModerateActiveTab = !activeTabIsMerged && canModerateSource(activeSingleSource);
+  const canModerateActiveTab = Boolean(
+    !activeTabIsMerged &&
+      activeSingleSource &&
+      (activeSingleSource.platform === "twitch" || activeSingleSource.platform === "kick") &&
+      writableActiveTabSources.some((source) => source.id === activeSingleSource.id) &&
+      canModerateSource(activeSingleSource)
+  );
   const youtubeAlphaEnabled = Boolean(settings.youtubeAlphaEnabled);
   const tiktokAlphaEnabled = Boolean(settings.tiktokAlphaEnabled);
   const hasTwitchAuth = Boolean(settings.twitchToken || settings.twitchGuest);
@@ -1734,6 +1775,19 @@ const MainApp: React.FC = () => {
     if (newestLocked) return 0;
     return Math.max(0, delayedReplayMessages.length - visibleMessages.length);
   }, [delayedReplayMessages.length, newestLocked, visibleMessages.length]);
+
+  useEffect(() => {
+    if (newestLocked) return;
+    const timer = window.setTimeout(() => {
+      setNewestLocked(true);
+      setLockCutoffTimestamp(null);
+      const list = messageListRef.current;
+      if (list) {
+        list.scrollTop = list.scrollHeight;
+      }
+    }, AUTO_RESUME_NEWEST_AFTER_MS);
+    return () => window.clearTimeout(timer);
+  }, [activeTabId, newestLocked]);
 
   const renderedMessages = useMemo(() => {
     if (!newestLocked) return visibleMessages;
@@ -2769,14 +2823,8 @@ const MainApp: React.FC = () => {
   const fillComposerCommandForMessage = (action: Exclude<ModeratorAction, "delete">, message: ChatMessage) => {
     const username = message.username.trim().replace(/^@+/, "");
     if (!username) return;
-    const command =
-      action === "timeout_60"
-        ? `/timeout ${username} 60`
-        : action === "timeout_600"
-          ? `/timeout ${username} 600`
-          : action === "ban"
-            ? `/ban ${username}`
-            : `/unban ${username}`;
+    const command = buildModerationCommand(message.platform as Platform, action, username);
+    if (!command) return;
     setComposerText(command);
     const source = sourceByPlatformChannel.get(`${message.platform}:${message.channel}`);
     if (source && writableActiveTabSources.some((candidate) => candidate.id === source.id)) {
@@ -2828,16 +2876,10 @@ const MainApp: React.FC = () => {
   };
 
   const runModeratorAction = async (action: ModeratorAction, message: ChatMessage) => {
-    if (!canModerateActiveTab) {
-      setAuthMessage("Moderator actions are available only in a single-channel tab where you are mod/broadcaster.");
+    if (activeTabIsMerged || !activeSingleSource) {
+      setAuthMessage("Moderator actions are available only in an active single-channel tab.");
       return;
     }
-    const username = message.username.trim();
-    if (!username || username === "system") {
-      setAuthMessage("This message cannot be moderated.");
-      return;
-    }
-
     const source = sourceByPlatformChannel.get(`${message.platform}:${message.channel}`);
     if (!source) {
       setAuthMessage("Cannot map this message to a connected chat source.");
@@ -2847,34 +2889,26 @@ const MainApp: React.FC = () => {
       setAuthMessage("Moderator actions are limited to the active single-channel tab.");
       return;
     }
-
-    const adapter = adaptersRef.current.get(source.id);
-    if (!adapter) {
-      setAuthMessage("Chat connection is not ready for moderator commands.");
-      return;
-    }
     if (source.platform === "youtube" || source.platform === "tiktok") {
       const platformLabel = source.platform === "youtube" ? "YouTube" : "TikTok";
       setAuthMessage(`${platformLabel} moderation actions are not supported in this build.`);
       return;
     }
+    if (!canModerateSource(source)) {
+      setAuthMessage("You are not a moderator for this channel.");
+      return;
+    }
 
-    let command = "";
-    if (action === "timeout_60") {
-      command = `/timeout ${username} 60`;
-    } else if (action === "timeout_600") {
-      command = `/timeout ${username} 600`;
-    } else if (action === "ban") {
-      command = `/ban ${username}`;
-    } else if (action === "unban") {
-      command = `/unban ${username}`;
-    } else if (action === "delete") {
-      const messageId = getRawMessageId(message);
-      if (!messageId || message.platform !== "twitch") {
-        setAuthMessage("Delete message is currently supported for Twitch messages with ids only.");
+    const username = message.username.trim();
+    const messageId = action === "delete" ? getRawMessageId(message) : null;
+    if (action === "delete") {
+      if (!messageId) {
+        setAuthMessage("Delete message is not available for this chat event.");
         return;
       }
-      command = `/delete ${messageId}`;
+    } else if (!username || username === "system") {
+      setAuthMessage("This message cannot be moderated.");
+      return;
     }
 
     const appendModeratorSystemMessage = (text: string) => {
@@ -2896,7 +2930,14 @@ const MainApp: React.FC = () => {
     };
 
     try {
-      await adapter.sendMessage(command);
+      await window.electronAPI.moderateChat({
+        platform: source.platform,
+        channel: source.channel,
+        action,
+        username: username || undefined,
+        messageId: messageId ?? undefined,
+        targetUserId: source.platform === "kick" ? (getKickRawUserId(message) ?? undefined) : undefined
+      });
       setModerationHistory((previous) => [
         {
           id: createId(),
@@ -3072,8 +3113,8 @@ const MainApp: React.FC = () => {
   };
 
   const runQuickMod = async (action: Exclude<ModeratorAction, "delete">) => {
-    if (!canModerateActiveTab) {
-      setAuthMessage("Quick mod is available only in a single-channel tab where you are mod/broadcaster.");
+    if (activeTabIsMerged || !activeSingleSource) {
+      setAuthMessage("Quick mod is available only in an active single-channel tab.");
       return;
     }
     const username = quickModUser.trim().replace(/^@+/, "");
@@ -3092,28 +3133,53 @@ const MainApp: React.FC = () => {
       return;
     }
 
-    const command =
-      action === "timeout_60"
-        ? `/timeout ${username} 60`
-        : action === "timeout_600"
-          ? `/timeout ${username} 600`
-          : action === "ban"
-            ? `/ban ${username}`
-            : `/unban ${username}`;
-
     const results = await Promise.all(
       targetIds.map(async (sourceId) => {
-        const adapter = adaptersRef.current.get(sourceId);
-        if (!adapter) return false;
+        const source = sourceById.get(sourceId);
+        const label = source ? `${source.platform}/${source.channel}` : sourceId;
+        if (!source) {
+          return { ok: false as const, label, error: "source not found" };
+        }
+        if (source.platform !== "twitch" && source.platform !== "kick") {
+          return { ok: false as const, label, error: "platform is not supported for moderation" };
+        }
         try {
-          await adapter.sendMessage(command);
-          return true;
-        } catch {
-          return false;
+          let targetUserId: number | undefined;
+          if (source.platform === "kick") {
+            const matchingMessage = [...(messagesBySource[source.id] ?? [])]
+              .reverse()
+              .find((entry) => normalizeUserKey(entry.username) === normalizeUserKey(username));
+            targetUserId = matchingMessage ? (getKickRawUserId(matchingMessage) ?? undefined) : undefined;
+            if (!targetUserId) {
+              return {
+                ok: false as const,
+                label,
+                error: "Kick quick mod needs a recent message from this user in the active tab."
+              };
+            }
+          }
+          await window.electronAPI.moderateChat({
+            platform: source.platform,
+            channel: source.channel,
+            action,
+            username,
+            targetUserId
+          });
+          return { ok: true as const, label };
+        } catch (error) {
+          return {
+            ok: false as const,
+            label,
+            error: error instanceof Error ? error.message : String(error)
+          };
         }
       })
     );
-    const ok = results.filter(Boolean).length;
+    const ok = results.filter((result) => result.ok).length;
+    const failed = results.filter((result) => !result.ok).map((result) => ({
+      label: result.label,
+      error: result.error
+    }));
     setModerationHistory((previous) => [
       {
         id: createId(),
@@ -3130,7 +3196,20 @@ const MainApp: React.FC = () => {
       },
       ...previous
     ].slice(0, 120));
-    setAuthMessage(ok > 0 ? `Quick mod sent to ${ok}/${targetIds.length} chats.` : "Quick mod failed.");
+    if (failed.length === 0) {
+      setAuthMessage(`Quick mod sent to ${ok}/${targetIds.length} chats.`);
+      return;
+    }
+    const failureSummary = failed
+      .slice(0, 2)
+      .map((entry) => `${entry.label}: ${entry.error}`)
+      .join(" | ");
+    const extraFailures = failed.length > 2 ? ` (+${failed.length - 2} more)` : "";
+    if (ok > 0) {
+      setAuthMessage(`Quick mod sent to ${ok}/${targetIds.length}. Failed: ${failureSummary}${extraFailures}`);
+      return;
+    }
+    setAuthMessage(`Quick mod failed: ${failureSummary}${extraFailures}`);
   };
 
   const jumpToNewest = () => {
@@ -3162,14 +3241,42 @@ const MainApp: React.FC = () => {
     }
   };
 
+  const openOwnChannelTabAfterSignIn = async (platform: Platform, usernameRaw: string, currentSettings: Settings) => {
+    const username = normalizeChannel(usernameRaw, platform);
+    if (!username) return;
+
+    const existingSource = sourceByPlatformChannel.get(`${platform}:${username}`);
+    if (existingSource) {
+      const existingTab = tabs.find((tab) => tab.sourceIds.includes(existingSource.id));
+      if (existingTab) {
+        setActiveTabId(existingTab.id);
+      }
+      try {
+        await ensureAdapterConnected(existingSource, currentSettings);
+      } catch {
+        // no-op
+      }
+      return;
+    }
+
+    await addSource({
+      platform,
+      channel: username
+    });
+  };
+
   const signInTwitch = async () => {
     setAuthBusy("twitch");
     setAuthMessage("");
     try {
       const next = await window.electronAPI.signInTwitch();
-      setSettings({ ...defaultSettings, ...next });
+      const mergedSettings = { ...defaultSettings, ...next };
+      setSettings(mergedSettings);
       const mode = next.twitchGuest ? "guest mode" : "oauth";
       setAuthMessage(`Signed in to Twitch as ${next.twitchUsername ?? "unknown user"} (${mode}).`);
+      if (next.twitchUsername) {
+        await openOwnChannelTabAfterSignIn("twitch", next.twitchUsername, mergedSettings);
+      }
       void refreshAuthHealth(false);
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : String(error));
@@ -3183,9 +3290,13 @@ const MainApp: React.FC = () => {
     setAuthMessage("");
     try {
       const next = await window.electronAPI.signInKick();
-      setSettings({ ...defaultSettings, ...next });
+      const mergedSettings = { ...defaultSettings, ...next };
+      setSettings(mergedSettings);
       const mode = next.kickGuest ? "guest mode" : "oauth";
       setAuthMessage(`Signed in to Kick as ${next.kickUsername ?? "unknown user"} (${mode}).`);
+      if (next.kickUsername) {
+        await openOwnChannelTabAfterSignIn("kick", next.kickUsername, mergedSettings);
+      }
       void refreshAuthHealth(false);
     } catch (error) {
       setAuthMessage(error instanceof Error ? error.message : String(error));
@@ -3636,6 +3747,7 @@ const MainApp: React.FC = () => {
       !activeTabIsMerged &&
       activeSingleSource &&
       messageMenuSource.id === activeSingleSource.id &&
+      writableActiveTabSources.some((source) => source.id === messageMenuSource.id) &&
       canModerateSource(messageMenuSource) &&
       (messageMenu.message.platform === "twitch" || messageMenu.message.platform === "kick")
   );

@@ -5,6 +5,7 @@ type AppSettings = {
   twitchToken?: string;
   twitchUsername?: string;
   twitchGuest?: boolean;
+  twitchScopeVersion?: number;
   twitchClientId?: string;
   twitchRedirectUri?: string;
   kickClientId?: string;
@@ -59,6 +60,8 @@ type AppSettings = {
   }>;
   sessionActiveTabId?: string;
   setupWizardCompleted?: boolean;
+  lastLaunchedVersion?: string;
+  forcedResetAppliedVersion?: string;
 };
 
 type UpdateStatus = {
@@ -97,6 +100,17 @@ type TikTokRendererEvent = {
   error?: string;
 };
 
+type ModeratorAction = "timeout_60" | "timeout_600" | "ban" | "unban" | "delete";
+
+type ModerationRequest = {
+  platform: "twitch" | "kick";
+  channel: string;
+  action: ModeratorAction;
+  username?: string;
+  messageId?: string;
+  targetUserId?: number;
+};
+
 const api = {
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke("settings:get"),
   setSettings: (updates: AppSettings): Promise<AppSettings> => ipcRenderer.invoke("settings:set", updates),
@@ -117,6 +131,9 @@ const api = {
   signOutTikTok: (): Promise<AppSettings> => ipcRenderer.invoke("auth:tiktok:signOut"),
   getAuthHealth: (): Promise<AuthHealthSnapshot> => ipcRenderer.invoke("auth:getHealth"),
   testAuthPermissions: (): Promise<AuthHealthSnapshot> => ipcRenderer.invoke("auth:testPermissions"),
+  moderateChat: (payload: ModerationRequest): Promise<void> => ipcRenderer.invoke("moderation:act", payload),
+  canModerateSource: (payload: { platform: "twitch" | "kick"; channel: string }): Promise<boolean> =>
+    ipcRenderer.invoke("moderation:canModerate", payload),
   resolveKickChatroom: (channel: string): Promise<{ chatroomId: number }> =>
     ipcRenderer.invoke("kick:resolveChatroom", channel),
   resolveYouTubeLiveChat: (channel: string): Promise<{ liveChatId: string; channelId: string; channelTitle: string; videoId: string }> =>

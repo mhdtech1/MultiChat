@@ -3,6 +3,7 @@ type AppSettings = {
   twitchToken?: string;
   twitchUsername?: string;
   twitchGuest?: boolean;
+  twitchScopeVersion?: number;
   twitchClientId?: string;
   twitchRedirectUri?: string;
   kickClientId?: string;
@@ -57,6 +58,8 @@ type AppSettings = {
   }>;
   sessionActiveTabId?: string;
   setupWizardCompleted?: boolean;
+  lastLaunchedVersion?: string;
+  forcedResetAppliedVersion?: string;
 };
 
 type UpdateStatus = {
@@ -95,6 +98,17 @@ type TikTokRendererEvent = {
   error?: string;
 };
 
+type ModeratorAction = "timeout_60" | "timeout_600" | "ban" | "unban" | "delete";
+
+type ModerationRequest = {
+  platform: "twitch" | "kick";
+  channel: string;
+  action: ModeratorAction;
+  username?: string;
+  messageId?: string;
+  targetUserId?: number;
+};
+
 type ElectronAPI = {
   getSettings: () => Promise<AppSettings>;
   setSettings: (updates: AppSettings) => Promise<AppSettings>;
@@ -114,6 +128,8 @@ type ElectronAPI = {
   signOutTikTok: () => Promise<AppSettings>;
   getAuthHealth: () => Promise<AuthHealthSnapshot>;
   testAuthPermissions: () => Promise<AuthHealthSnapshot>;
+  moderateChat: (payload: ModerationRequest) => Promise<void>;
+  canModerateSource: (payload: { platform: "twitch" | "kick"; channel: string }) => Promise<boolean>;
   resolveKickChatroom: (channel: string) => Promise<{ chatroomId: number }>;
   resolveYouTubeLiveChat: (channel: string) => Promise<{
     liveChatId: string;
