@@ -28,7 +28,30 @@ const { TikTokLiveConnection, WebcastEvent, ControlEvent } = tikTokLiveConnector
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 type AppSettings = {
+  workspacePreset?: "streamer" | "moddesk" | "viewer";
   theme?: "dark" | "light" | "classic";
+  mentionMutedTabIds?: string[];
+  mentionSnoozeUntilByTab?: Record<string, number>;
+  tabSendRules?: Record<string, {
+    defaultTarget?: "all" | "first" | "specific";
+    sourceId?: string;
+    confirmOnSendAll?: boolean;
+    blockSendAll?: boolean;
+  }>;
+  pinnedMessageByTabId?: Record<string, {
+    platform: "twitch" | "kick" | "youtube" | "tiktok";
+    channel: string;
+    displayName: string;
+    message: string;
+    timestamp: string;
+  }>;
+  localPollByTabId?: Record<string, {
+    id: string;
+    question: string;
+    options: Array<{ id: string; label: string; votes: number }>;
+    active: boolean;
+    createdAt: string;
+  }>;
   twitchToken?: string;
   twitchUsername?: string;
   twitchGuest?: boolean;
@@ -87,6 +110,8 @@ type AppSettings = {
   }>;
   sessionActiveTabId?: string;
   setupWizardCompleted?: boolean;
+  setupWizardVersion?: number;
+  setupWizardSendTestCompleted?: boolean;
   lastLaunchedVersion?: string;
   forcedResetAppliedVersion?: string;
 };
@@ -2749,7 +2774,13 @@ const createOverlayWindow = () => {
 
 app.whenReady().then(() => {
   store = new JsonSettingsStore({
+    workspacePreset: "streamer",
     theme: "dark",
+    mentionMutedTabIds: [],
+    mentionSnoozeUntilByTab: {},
+    tabSendRules: {},
+    pinnedMessageByTabId: {},
+    localPollByTabId: {},
     columns: 2,
     verboseLogs: false,
     performanceMode: false,
@@ -2775,7 +2806,9 @@ app.whenReady().then(() => {
     tiktokSessionId: "",
     tiktokTtTargetIdc: "",
     tiktokUsername: "",
-    setupWizardCompleted: false
+    setupWizardCompleted: false,
+    setupWizardVersion: 0,
+    setupWizardSendTestCompleted: false
   });
 
   const currentVersion = app.getVersion();

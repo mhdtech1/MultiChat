@@ -1,5 +1,28 @@
 type AppSettings = {
+  workspacePreset?: "streamer" | "moddesk" | "viewer";
   theme?: "dark" | "light" | "classic";
+  mentionMutedTabIds?: string[];
+  mentionSnoozeUntilByTab?: Record<string, number>;
+  tabSendRules?: Record<string, {
+    defaultTarget?: "all" | "first" | "specific";
+    sourceId?: string;
+    confirmOnSendAll?: boolean;
+    blockSendAll?: boolean;
+  }>;
+  pinnedMessageByTabId?: Record<string, {
+    platform: "twitch" | "kick" | "youtube" | "tiktok";
+    channel: string;
+    displayName: string;
+    message: string;
+    timestamp: string;
+  }>;
+  localPollByTabId?: Record<string, {
+    id: string;
+    question: string;
+    options: Array<{ id: string; label: string; votes: number }>;
+    active: boolean;
+    createdAt: string;
+  }>;
   twitchToken?: string;
   twitchUsername?: string;
   twitchGuest?: boolean;
@@ -58,6 +81,8 @@ type AppSettings = {
   }>;
   sessionActiveTabId?: string;
   setupWizardCompleted?: boolean;
+  setupWizardVersion?: number;
+  setupWizardSendTestCompleted?: boolean;
   lastLaunchedVersion?: string;
   forcedResetAppliedVersion?: string;
 };
