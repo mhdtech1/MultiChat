@@ -1,6 +1,8 @@
 type AppSettings = {
   workspacePreset?: "streamer" | "moddesk" | "viewer";
   theme?: "dark" | "light" | "classic";
+  streamSafeMode?: boolean;
+  welcomeMode?: boolean;
   mentionMutedTabIds?: string[];
   mentionSnoozeUntilByTab?: Record<string, number>;
   tabSendRules?: Record<string, {

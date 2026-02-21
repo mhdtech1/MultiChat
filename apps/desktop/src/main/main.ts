@@ -30,6 +30,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 type AppSettings = {
   workspacePreset?: "streamer" | "moddesk" | "viewer";
   theme?: "dark" | "light" | "classic";
+  streamSafeMode?: boolean;
+  welcomeMode?: boolean;
   mentionMutedTabIds?: string[];
   mentionSnoozeUntilByTab?: Record<string, number>;
   tabSendRules?: Record<string, {
@@ -2776,6 +2778,8 @@ app.whenReady().then(() => {
   store = new JsonSettingsStore({
     workspacePreset: "streamer",
     theme: "dark",
+    streamSafeMode: false,
+    welcomeMode: false,
     mentionMutedTabIds: [],
     mentionSnoozeUntilByTab: {},
     tabSendRules: {},

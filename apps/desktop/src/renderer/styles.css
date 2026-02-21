@@ -309,6 +309,12 @@ select {
   position: relative;
 }
 
+.safe-mode-button.active {
+  border-color: color-mix(in srgb, #ffb347, var(--accent) 30%);
+  background: color-mix(in srgb, var(--bg-panel), #ffb347 28%);
+  color: var(--text-main);
+}
+
 .menu-dropdown {
   position: relative;
   z-index: 60;
@@ -707,6 +713,26 @@ select {
   flex: 1 1 100%;
 }
 
+.analytics-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--bg-soft), var(--bg-panel) 22%);
+}
+
+.analytics-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  padding: 4px 9px;
+  font-size: 11px;
+  color: var(--text-dim);
+  background: var(--bg-pill);
+}
+
 .main-layout {
   min-height: 0;
   flex: 1;
@@ -807,6 +833,21 @@ select {
 .quick-action-button:hover {
   border-color: var(--accent);
   background: var(--btn-solid-bg-hover);
+}
+
+.quick-action-button.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--bg-panel), var(--accent) 22%);
+}
+
+.raid-alert {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent), var(--border-soft) 45%);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-panel), var(--accent) 10%);
 }
 
 .source-chip {

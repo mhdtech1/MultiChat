@@ -39,6 +39,8 @@ type Settings = {
   uiMode?: "simple" | "advanced";
   workspacePreset?: WorkspacePreset;
   theme?: "dark" | "light" | "classic";
+  streamSafeMode?: boolean;
+  welcomeMode?: boolean;
   mentionMutedTabIds?: string[];
   mentionSnoozeUntilByTab?: Record<string, number>;
   tabSendRules?: Record<string, TabSendRule>;
@@ -243,6 +245,8 @@ const defaultSettings: Settings = {
   uiMode: "advanced",
   workspacePreset: "streamer",
   theme: "dark",
+  streamSafeMode: false,
+  welcomeMode: false,
   mentionMutedTabIds: [],
   mentionSnoozeUntilByTab: {},
   tabSendRules: {},
@@ -310,6 +314,16 @@ const defaultSettings: Settings = {
 const hasTikTokSession = (settings: Settings) =>
   Boolean((settings.tiktokSessionId ?? "").trim() && (settings.tiktokTtTargetIdc ?? "").trim());
 const normalizeUserKey = (value: string) => value.trim().toLowerCase();
+const anonymizeName = (value: string) => {
+  const source = value.trim();
+  if (!source) return "Viewer";
+  let hash = 0;
+  for (let index = 0; index < source.length; index += 1) {
+    hash = (hash * 31 + source.charCodeAt(index)) >>> 0;
+  }
+  const suffix = (hash % 9000) + 1000;
+  return `Viewer${suffix}`;
+};
 const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const SCAM_PATTERN =
   /(t\.me\/|bit\.ly|tinyurl|free (gift|nitro|sub)|claim reward|steamcommunity\.com\/gift|crypto giveaway|double your)/i;
@@ -1246,6 +1260,12 @@ const MainApp: React.FC = () => {
   const [pollQuestionDraft, setPollQuestionDraft] = useState("");
   const [pollOptionsDraft, setPollOptionsDraft] = useState("");
   const [setupTestMessageSent, setSetupTestMessageSent] = useState(false);
+  const [raidSignal, setRaidSignal] = useState<{
+    tabId: string;
+    detectedAt: number;
+    messagesPerMinute: number;
+    uniqueChatters: number;
+  } | null>(null);
 
   const [sources, setSources] = useState<ChatSource[]>([]);
   const [tabs, setTabs] = useState<ChatTab[]>([]);
@@ -1265,6 +1285,7 @@ const MainApp: React.FC = () => {
   const [quickTourOpen, setQuickTourOpen] = useState(false);
   const [setupWizardOpen, setSetupWizardOpen] = useState(false);
   const [setupWizardStep, setSetupWizardStep] = useState(0);
+  const [setupWizardDismissed, setSetupWizardDismissed] = useState(false);
   const [tabUnreadCounts, setTabUnreadCounts] = useState<Record<string, number>>({});
   const [tabMentionCounts, setTabMentionCounts] = useState<Record<string, number>>({});
   const [lastReadAtByTab, setLastReadAtByTab] = useState<Record<string, number>>({});
@@ -1309,6 +1330,8 @@ const MainApp: React.FC = () => {
   const lastHealthPublishAtBySourceRef = useRef<Record<string, number>>({});
   const twitchRoomIdToChannelRef = useRef<Map<string, string>>(new Map());
   const twitchSharedChatAlertAtRef = useRef<Map<string, number>>(new Map());
+  const raidSamplesByTabRef = useRef<Record<string, Array<{ at: number; messagesPerMinute: number; uniqueChatters: number }>>>({});
+  const lastRaidSampleAtByTabRef = useRef<Record<string, number>>({});
   const mentionInboxCount = mentionInbox.length;
   const isSimpleMode = settings.uiMode === "simple";
   const isAdvancedMode = !isSimpleMode;
@@ -1566,6 +1589,30 @@ const MainApp: React.FC = () => {
   }, [tabs]);
 
   useEffect(() => {
+    const validTabIds = new Set(tabs.map((tab) => tab.id));
+    const nextSamples: Record<string, Array<{ at: number; messagesPerMinute: number; uniqueChatters: number }>> = {};
+    for (const [tabId, values] of Object.entries(raidSamplesByTabRef.current)) {
+      if (validTabIds.has(tabId)) {
+        nextSamples[tabId] = values;
+      }
+    }
+    raidSamplesByTabRef.current = nextSamples;
+
+    const nextLastSample: Record<string, number> = {};
+    for (const [tabId, value] of Object.entries(lastRaidSampleAtByTabRef.current)) {
+      if (validTabIds.has(tabId)) {
+        nextLastSample[tabId] = value;
+      }
+    }
+    lastRaidSampleAtByTabRef.current = nextLastSample;
+
+    setRaidSignal((previous) => {
+      if (!previous) return previous;
+      return validTabIds.has(previous.tabId) ? previous : null;
+    });
+  }, [tabs]);
+
+  useEffect(() => {
     let cancelled = false;
     if (effectivePerformanceMode) {
       setGlobalEmoteMap({});
@@ -1794,13 +1841,19 @@ const MainApp: React.FC = () => {
   const setupPrimaryConnected = Boolean(settings.twitchToken || settings.kickAccessToken);
   const setupFirstTabReady = tabs.length > 0;
   const setupMessageReady = settings.setupWizardSendTestCompleted === true || setupTestMessageSent;
-  const setupCanFinish = setupPrimaryConnected && setupFirstTabReady && setupMessageReady;
+  const setupCanFinish = setupPrimaryConnected && setupFirstTabReady;
+  const streamSafeMode = settings.streamSafeMode === true;
+  const welcomeModeEnabled = settings.welcomeMode === true;
   const activeTabSendRule = activeTabId ? settings.tabSendRules?.[activeTabId] : undefined;
   const mentionMutedTabIds = new Set((settings.mentionMutedTabIds ?? []).filter((tabId) => typeof tabId === "string" && tabId.length > 0));
   const mentionSnoozeUntilByTab = settings.mentionSnoozeUntilByTab ?? {};
   const activeMentionSnoozeUntil = activeTabId ? Number(mentionSnoozeUntilByTab[activeTabId] ?? 0) : 0;
   const activeMentionSnoozed = Number.isFinite(activeMentionSnoozeUntil) && activeMentionSnoozeUntil > Date.now();
   const activeMentionMuted = activeTabId ? mentionMutedTabIds.has(activeTabId) : false;
+  const activeRaidSignal =
+    raidSignal && raidSignal.tabId === activeTabId && Date.now() - raidSignal.detectedAt < 10 * 60_000
+      ? raidSignal
+      : null;
   const readOnlyPlatforms = useMemo(() => {
     const next: Platform[] = [];
     if (youtubeAlphaEnabled) {
@@ -1941,6 +1994,30 @@ const MainApp: React.FC = () => {
     return { messagesPerMinute, uniqueChatters };
   }, [delayedReplayMessages]);
 
+  const analyticsSummary = useMemo(() => {
+    const now = Date.now();
+    const oneMinute = now - 60_000;
+    const recentMessages = delayedReplayMessages.filter((message) => messageTimestamp(message) >= oneMinute);
+    const mentionCountPerMinute = recentMessages.filter(
+      (message) => isMentionForPlatformUser(message, settings) || isReplyForPlatformUser(message, settings)
+    ).length;
+    const activeSourceLabels = new Set(activeTabSources.map((source) => `${source.platform}/${source.channel}`));
+    const modActionsPerMinute = moderationHistory.filter((entry) => {
+      if (entry.at < oneMinute) return false;
+      if (activeSourceLabels.size === 0) return true;
+      for (const label of activeSourceLabels) {
+        if (entry.source.includes(label)) return true;
+      }
+      return false;
+    }).length;
+    return {
+      activeChatters: chatHealth.uniqueChatters,
+      messagesPerMinute: chatHealth.messagesPerMinute,
+      mentionRatePerMinute: mentionCountPerMinute,
+      modActionRatePerMinute: modActionsPerMinute
+    };
+  }, [activeTabSources, chatHealth.messagesPerMinute, chatHealth.uniqueChatters, delayedReplayMessages, moderationHistory, settings]);
+
   const globalSearchResults = useMemo(() => {
     if (!globalSearchMode || !normalizedSearch) return [];
     const all = sources.flatMap((source) => messagesBySource[source.id] ?? []);
@@ -2045,6 +2122,55 @@ const MainApp: React.FC = () => {
       setAuthMessage("Adaptive performance mode disabled.");
     }
   }, [adaptivePerformanceMode, chatHealth.messagesPerMinute]);
+
+  useEffect(() => {
+    if (!activeTabId || !activeTab) return;
+    const now = Date.now();
+    const lastSampleAt = lastRaidSampleAtByTabRef.current[activeTabId] ?? 0;
+    if (now - lastSampleAt < 10_000) return;
+    lastRaidSampleAtByTabRef.current[activeTabId] = now;
+
+    const previousSamples = raidSamplesByTabRef.current[activeTabId] ?? [];
+    const baselineSamples = previousSamples.slice(-6);
+    const baselineMessages =
+      baselineSamples.length > 0
+        ? baselineSamples.reduce((sum, sample) => sum + sample.messagesPerMinute, 0) / baselineSamples.length
+        : chatHealth.messagesPerMinute;
+    const baselineChatters =
+      baselineSamples.length > 0
+        ? baselineSamples.reduce((sum, sample) => sum + sample.uniqueChatters, 0) / baselineSamples.length
+        : chatHealth.uniqueChatters;
+
+    const nextSample = {
+      at: now,
+      messagesPerMinute: chatHealth.messagesPerMinute,
+      uniqueChatters: chatHealth.uniqueChatters
+    };
+    raidSamplesByTabRef.current[activeTabId] = [...previousSamples, nextSample].slice(-12);
+
+    if (baselineSamples.length < 3) return;
+    const messagesThreshold = Math.max(45, Math.round(baselineMessages * 2.4));
+    const chattersThreshold = Math.max(24, Math.round(baselineChatters * 1.8));
+    const isSpike = nextSample.messagesPerMinute >= messagesThreshold && nextSample.uniqueChatters >= chattersThreshold;
+    if (!isSpike) return;
+
+    setRaidSignal((previous) => {
+      if (previous && previous.tabId === activeTabId && now - previous.detectedAt < 3 * 60_000) {
+        return previous;
+      }
+      return {
+        tabId: activeTabId,
+        detectedAt: now,
+        messagesPerMinute: nextSample.messagesPerMinute,
+        uniqueChatters: nextSample.uniqueChatters
+      };
+    });
+    if (!welcomeModeEnabled) {
+      setAuthMessage(
+        `Possible raid spike detected (${nextSample.messagesPerMinute}/min, ${nextSample.uniqueChatters} chatters). Enable Welcome Mode.`
+      );
+    }
+  }, [activeTab, activeTabId, chatHealth.messagesPerMinute, chatHealth.uniqueChatters, welcomeModeEnabled]);
 
   const composerPlaceholder =
     writableActiveTabSources.length === 0
@@ -2372,6 +2498,7 @@ const MainApp: React.FC = () => {
       const last = lastMessageByUser.current.get(dedupeKey) ?? 0;
       if (isLocalEcho(message) && now - last < 400) return;
       lastMessageByUser.current.set(dedupeKey, now);
+      const welcomeModeActive = currentSettings.welcomeMode === true;
 
       if (currentSettings.hideCommands && message.message.startsWith("!")) return;
       if (currentSettings.smartFilterScam !== false && SCAM_PATTERN.test(message.message)) return;
@@ -2514,8 +2641,8 @@ const MainApp: React.FC = () => {
           sourceLabel,
           alertBody,
           `engagement:${source.id}:${message.id}:${engagementAlertKind}`,
-          sceneOverrides.sound,
-          sceneOverrides.notify
+          sceneOverrides.sound && !welcomeModeActive,
+          sceneOverrides.notify && !welcomeModeActive
         );
       }
 
@@ -2530,8 +2657,8 @@ const MainApp: React.FC = () => {
           `Tab alert in ${source.platform}/${source.channel}`,
           `${message.displayName}: ${message.message}`,
           `tab:${tabId}:${keyword.toLowerCase()}`,
-          rule?.sound !== false && sceneOverrides.sound,
-          rule?.notify !== false && sceneOverrides.notify
+          rule?.sound !== false && sceneOverrides.sound && !welcomeModeActive,
+          rule?.notify !== false && sceneOverrides.notify && !welcomeModeActive
         );
       }
 
@@ -3671,10 +3798,12 @@ const MainApp: React.FC = () => {
 
   useEffect(() => {
     if (!sessionHydrated) return;
+    if (setupWizardDismissed) return;
     if (!hasPrimaryAuth) return;
     if (setupWizardVersion >= SETUP_WIZARD_VERSION && settings.setupWizardCompleted) return;
+    if (settings.setupWizardCompleted && tabs.length > 0) return;
     setSetupWizardOpen(true);
-  }, [hasPrimaryAuth, sessionHydrated, settings.setupWizardCompleted, setupWizardVersion]);
+  }, [hasPrimaryAuth, sessionHydrated, settings.setupWizardCompleted, setupWizardDismissed, setupWizardVersion, tabs.length]);
 
   const completeSetupWizard = async () => {
     try {
@@ -3684,6 +3813,7 @@ const MainApp: React.FC = () => {
         setupWizardSendTestCompleted: true
       });
       setSetupTestMessageSent(true);
+      setSetupWizardDismissed(false);
       setSetupWizardOpen(false);
       setSetupWizardStep(0);
       setQuickTourOpen(true);
@@ -3699,6 +3829,7 @@ const MainApp: React.FC = () => {
         setupWizardCompleted: true,
         setupWizardVersion: SETUP_WIZARD_VERSION
       });
+      setSetupWizardDismissed(false);
       setSetupWizardOpen(false);
       setSetupWizardStep(0);
       setAuthMessage("Setup wizard dismissed. You can reopen the quick tour from Menu.");
@@ -4226,6 +4357,15 @@ const MainApp: React.FC = () => {
     }
   }, []);
 
+  useEffect(() => {
+    if (!streamSafeMode) return;
+    setMessageMenu(null);
+    setTabMenu(null);
+    setUserLogTarget(null);
+    setIdentityTarget(null);
+    setQuickTourOpen(false);
+  }, [streamSafeMode]);
+
   if (loading) {
     return (
       <>
@@ -4388,6 +4528,15 @@ const MainApp: React.FC = () => {
           <button type="submit">Open Tab</button>
         </form>
         <div className="top-actions">
+          <button
+            type="button"
+            className={streamSafeMode ? "safe-mode-button active" : "safe-mode-button"}
+            onClick={() => void persistSettings({ streamSafeMode: !streamSafeMode })}
+            title={streamSafeMode ? "Exit Stream Safe Mode" : "Enable Stream Safe Mode"}
+          >
+            {streamSafeMode ? "Exit Safe Mode" : "Stream Safe Mode"}
+          </button>
+          {!streamSafeMode ? (
           <details className="menu-dropdown">
             <summary>Menu</summary>
             <div className="menu-dropdown-panel">
@@ -4425,6 +4574,14 @@ const MainApp: React.FC = () => {
                 <span className="menu-muted">
                   {isSimpleMode ? "Simple mode: core streamer tools only." : "Advanced mode: full controls and diagnostics."}
                 </span>
+                <label className="menu-check">
+                  <input
+                    type="checkbox"
+                    checked={welcomeModeEnabled}
+                    onChange={(event) => void persistSettings({ welcomeMode: event.target.checked })}
+                  />
+                  Welcome mode (quiet non-mention alerts)
+                </label>
               </div>
               <div className="menu-group">
                 <strong>View</strong>
@@ -5021,35 +5178,45 @@ const MainApp: React.FC = () => {
               ) : null}
             </div>
           </details>
+          ) : null}
         </div>
       </header>
 
       <div className="account-strip">
-        {hasPrimaryAuth ? (
-          <span className={settings.twitchToken || settings.twitchGuest ? "account-pill on" : "account-pill"}>
-            <PlatformIcon platform="twitch" />
-            Twitch: {settings.twitchUsername || "off"}
-          </span>
-        ) : null}
-        {hasPrimaryAuth ? (
-          <span className={settings.kickAccessToken ? "account-pill on" : "account-pill"}>
-            <PlatformIcon platform="kick" />
-            Kick typing: {settings.kickUsername || "off"}
-          </span>
-        ) : null}
-        {youtubeAlphaEnabled ? (
-          <span className="account-pill on">
-            <PlatformIcon platform="youtube" />
-            YouTube: read-only
-          </span>
-        ) : null}
-        {tiktokAlphaEnabled ? (
-          <span className="account-pill on">
-            <PlatformIcon platform="tiktok" />
-            TikTok: read-only
-          </span>
-        ) : null}
-        {mentionInboxCount > 0 ? <span className="account-pill on">Mentions: {mentionInboxCount}</span> : null}
+        {streamSafeMode ? (
+          <>
+            <span className="account-pill on">Stream Safe Mode active</span>
+            <span className="account-pill">Usernames and menu are hidden on this screen.</span>
+          </>
+        ) : (
+          <>
+            {hasPrimaryAuth ? (
+              <span className={settings.twitchToken || settings.twitchGuest ? "account-pill on" : "account-pill"}>
+                <PlatformIcon platform="twitch" />
+                Twitch: {settings.twitchUsername || "off"}
+              </span>
+            ) : null}
+            {hasPrimaryAuth ? (
+              <span className={settings.kickAccessToken ? "account-pill on" : "account-pill"}>
+                <PlatformIcon platform="kick" />
+                Kick typing: {settings.kickUsername || "off"}
+              </span>
+            ) : null}
+            {youtubeAlphaEnabled ? (
+              <span className="account-pill on">
+                <PlatformIcon platform="youtube" />
+                YouTube: read-only
+              </span>
+            ) : null}
+            {tiktokAlphaEnabled ? (
+              <span className="account-pill on">
+                <PlatformIcon platform="tiktok" />
+                TikTok: read-only
+              </span>
+            ) : null}
+            {mentionInboxCount > 0 ? <span className="account-pill on">Mentions: {mentionInboxCount}</span> : null}
+          </>
+        )}
       </div>
 
       {chatDeckMode ? (
@@ -5101,28 +5268,29 @@ const MainApp: React.FC = () => {
                     </button>
                   </div>
                   {group ? <span className="menu-muted">Group: {group}</span> : null}
-                  <div style={{ maxHeight: 360, overflowY: "auto", border: "1px solid rgba(37, 65, 78, 0.45)", borderRadius: 8, padding: 8 }}>
-                    {deckMessages.slice(-400).map((message) => (
-                      <div key={`${message.id}-${message.timestamp}`} className="chat-line">
+	                  <div style={{ maxHeight: 360, overflowY: "auto", border: "1px solid rgba(37, 65, 78, 0.45)", borderRadius: 8, padding: 8 }}>
+	                    {deckMessages.slice(-400).map((message) => (
+	                      <div key={`${message.id}-${message.timestamp}`} className="chat-line">
                         <span className="line-meta">
                           <span className={`platform ${message.platform}`}>{message.platform}</span>
                           <span>{new Date(message.timestamp).toLocaleTimeString()}</span>
                         </span>
-                        <span className="line-author">
-                          <button
-                            type="button"
-                            className="username-button"
-                            style={{ color: message.color, filter: spoilerBlurDelayed ? "blur(1.5px)" : undefined }}
-                            onClick={() =>
-                              setIdentityTarget({
-                                username: message.username,
-                                displayName: message.displayName || message.username
-                              })
-                            }
-                          >
-                            {message.displayName}
-                          </button>
-                        </span>
+	                        <span className="line-author">
+	                          <button
+	                            type="button"
+	                            className="username-button"
+	                            style={{ color: message.color, filter: spoilerBlurDelayed ? "blur(1.5px)" : undefined }}
+	                            onClick={() => {
+	                              if (streamSafeMode) return;
+	                              setIdentityTarget({
+	                                username: message.username,
+	                                displayName: message.displayName || message.username
+	                              });
+	                            }}
+	                          >
+	                            {streamSafeMode ? anonymizeName(message.displayName || message.username) : message.displayName || message.username}
+	                          </button>
+	                        </span>
                         <span className="line-message" style={{ filter: spoilerBlurDelayed ? "blur(1.5px)" : undefined }}>
                           {message.message}
                         </span>
@@ -5182,6 +5350,7 @@ const MainApp: React.FC = () => {
               key={tab.id}
               className={active ? `tab active${groupMuted ? " muted" : ""}` : `tab${groupMuted ? " muted" : ""}`}
               onContextMenu={(event) => {
+                if (streamSafeMode) return;
                 event.preventDefault();
                 setTabMenu({ x: event.clientX, y: event.clientY, tabId: tab.id });
               }}
@@ -5224,8 +5393,8 @@ const MainApp: React.FC = () => {
         <span>
           {activeTab
             ? newestLocked
-              ? `${visibleMessages.length} messages · ${chatHealth.messagesPerMinute}/min · ${chatHealth.uniqueChatters} chatters`
-              : `${visibleMessages.length} messages (${pendingNewestCount} new paused) · ${chatHealth.messagesPerMinute}/min · ${chatHealth.uniqueChatters} chatters`
+              ? `${visibleMessages.length} messages · ${analyticsSummary.messagesPerMinute}/min · ${analyticsSummary.activeChatters} chatters`
+              : `${visibleMessages.length} messages (${pendingNewestCount} new paused) · ${analyticsSummary.messagesPerMinute}/min · ${analyticsSummary.activeChatters} chatters`
             : "Open a channel tab to start"}
         </span>
         {firstUnreadTimestamp > 0 ? (
@@ -5234,6 +5403,12 @@ const MainApp: React.FC = () => {
           </button>
         ) : null}
         {adaptivePerformanceMode ? <span className="account-pill on">Adaptive perf on</span> : null}
+      </section>
+      <section className="analytics-strip" aria-label="Live analytics">
+        <span className="analytics-chip">Chatters: {analyticsSummary.activeChatters}</span>
+        <span className="analytics-chip">Msg/min: {analyticsSummary.messagesPerMinute}</span>
+        <span className="analytics-chip">Mentions/min: {analyticsSummary.mentionRatePerMinute}</span>
+        <span className="analytics-chip">Mod actions/min: {analyticsSummary.modActionRatePerMinute}</span>
       </section>
 
       <main className="chat-main">
@@ -5254,11 +5429,11 @@ const MainApp: React.FC = () => {
                 return (
                   <span key={source.id} className={`source-chip ${status}`}>
                     <PlatformIcon platform={source.platform} />
-                    <span>
-                      {source.platform}/{source.channel} ({status}
-                      {staleSeconds !== null && staleSeconds > 30 ? ` · lag ${staleSeconds}s` : ""})
-                    </span>
-                  </span>
+	                    <span>
+	                      {streamSafeMode ? `${source.platform}/hidden` : `${source.platform}/${source.channel}`} ({status}
+	                      {staleSeconds !== null && staleSeconds > 30 ? ` · lag ${staleSeconds}s` : ""})
+	                    </span>
+	                  </span>
                 );
               })}
             </div>
@@ -5279,10 +5454,33 @@ const MainApp: React.FC = () => {
               <button type="button" className="quick-action-button" onClick={() => void copyActiveTabLinks()}>
                 Copy channel link
               </button>
+              <button
+                type="button"
+                className={welcomeModeEnabled ? "quick-action-button active" : "quick-action-button"}
+                onClick={() => void persistSettings({ welcomeMode: !welcomeModeEnabled })}
+              >
+                {welcomeModeEnabled ? "Welcome mode: on" : "Welcome mode: off"}
+              </button>
               <button type="button" className="quick-action-button" onClick={() => setPollComposerOpen((previous) => !previous)}>
                 {pollComposerOpen ? "Close poll builder" : "Create poll"}
               </button>
             </div>
+            {activeRaidSignal ? (
+              <div className="raid-alert">
+                <strong>Possible raid/host spike detected</strong>
+                <span>
+                  {activeRaidSignal.messagesPerMinute}/min · {activeRaidSignal.uniqueChatters} active chatters
+                </span>
+                <div className="menu-row">
+                  <button type="button" onClick={() => void persistSettings({ welcomeMode: true })}>
+                    Enable Welcome Mode
+                  </button>
+                  <button type="button" onClick={() => setRaidSignal(null)}>
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            ) : null}
             {activePinnedMessage ? (
               <div className="quick-mod-panel">
                 <strong>Pinned (MultiChat)</strong>
@@ -5370,29 +5568,37 @@ const MainApp: React.FC = () => {
                 const source = sourceByPlatformChannel.get(`${message.platform}:${message.channel}`);
                 const sourceEmoteMap = source ? channelEmoteMapBySourceId[source.id] : undefined;
                 const resolveEmote = (token: string) => (effectivePerformanceMode ? undefined : sourceEmoteMap?.[token] ?? globalEmoteMap[token]);
-                const messageChunks = buildMessageChunks(message, resolveEmote);
-                const combinedChannels = readCombinedChannels(message);
-                const channelLabel =
-                  combinedChannels.length > 1
-                    ? `#${combinedChannels[0]} +${combinedChannels.length - 1}`
-                    : `#${message.channel}`;
-                const channelTitle =
-                  combinedChannels.length > 1 ? combinedChannels.map((channel) => `#${channel}`).join(", ") : `#${message.channel}`;
-                const roleBadges = roleBadgesForMessage(message);
-                return (
-                  <React.Fragment key={message.id}>
+	                const messageChunks = buildMessageChunks(message, resolveEmote);
+	                const combinedChannels = readCombinedChannels(message);
+	                const channelLabel =
+	                  streamSafeMode
+	                    ? "#hidden"
+	                    : combinedChannels.length > 1
+	                      ? `#${combinedChannels[0]} +${combinedChannels.length - 1}`
+	                      : `#${message.channel}`;
+	                const channelTitle = streamSafeMode
+	                  ? "Hidden while Stream Safe Mode is active"
+	                  : combinedChannels.length > 1
+	                    ? combinedChannels.map((channel) => `#${channel}`).join(", ")
+	                    : `#${message.channel}`;
+	                const roleBadges = streamSafeMode ? [] : roleBadgesForMessage(message);
+	                const displayName = message.displayName || message.username;
+	                const renderedDisplayName = streamSafeMode ? anonymizeName(displayName) : displayName;
+	                return (
+	                  <React.Fragment key={message.id}>
                     {showUnreadMarker ? (
                       <div className="chat-unread-marker" data-unread-marker="1">
                         New messages
                       </div>
                     ) : null}
-                    <div
-                      className={highlighted ? "chat-line highlight" : "chat-line"}
-                      data-jump-key={buildMessageJumpKey(message)}
-                      onContextMenu={(event) => {
-                        event.preventDefault();
-                        setMessageMenu({ x: event.clientX, y: event.clientY, message });
-                      }}
+	                    <div
+	                      className={highlighted ? "chat-line highlight" : "chat-line"}
+	                      data-jump-key={buildMessageJumpKey(message)}
+	                      onContextMenu={(event) => {
+	                        if (streamSafeMode) return;
+	                        event.preventDefault();
+	                        setMessageMenu({ x: event.clientX, y: event.clientY, message });
+	                      }}
                     >
                     <span className="line-meta">
                       <span className={`platform ${message.platform}`}>
@@ -5414,19 +5620,21 @@ const MainApp: React.FC = () => {
                           ))}
                         </span>
                       ) : null}
-                      <button
-                        type="button"
-                        className="username-button"
-                        style={{ color: message.color }}
-                        onClick={() =>
-                          setIdentityTarget({
-                            username: message.username,
-                            displayName: message.displayName || message.username
-                          })}
-                      >
-                        {message.displayName}
-                      </button>
-                    </span>
+	                      <button
+	                        type="button"
+	                        className="username-button"
+	                        style={{ color: message.color }}
+	                        onClick={() => {
+	                          if (streamSafeMode) return;
+	                          setIdentityTarget({
+	                            username: message.username,
+	                            displayName: message.displayName || message.username
+	                          });
+	                        }}
+	                      >
+	                        {renderedDisplayName}
+	                      </button>
+	                    </span>
                     <span className="line-message">
                       {messageChunks.map((chunk, index) =>
                         chunk.type === "text" ? (
@@ -5654,10 +5862,10 @@ const MainApp: React.FC = () => {
         </div>
       ) : null}
 
-      {messageMenu ? (
-        <div
-          className="context-menu"
-          style={messageMenuStyle}
+	      {messageMenu && !streamSafeMode ? (
+	        <div
+	          className="context-menu"
+	          style={messageMenuStyle}
           onClick={(event) => event.stopPropagation()}
         >
           {canShowModerationMenu ? <strong>Moderation</strong> : null}
@@ -5807,8 +6015,18 @@ const MainApp: React.FC = () => {
             <div className="guide-header">
               <div>
                 <strong>Welcome to MultiChat</strong>
-                <span>Step {setupWizardStep + 1} of 4</span>
+                <span>Step {setupWizardStep + 1} of 3</span>
               </div>
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => {
+                  setSetupWizardDismissed(true);
+                  setSetupWizardOpen(false);
+                }}
+              >
+                Close
+              </button>
             </div>
             <div className="guide-body">
               {setupWizardStep === 0 ? (
@@ -5863,8 +6081,12 @@ const MainApp: React.FC = () => {
               ) : null}
               {setupWizardStep === 2 ? (
                 <div className="guide-section">
-                  <h3>Send a test message</h3>
-                  <p>Type a short test in the composer at the bottom and send it in your active chat tab.</p>
+                  <h3>Know the essentials</h3>
+                  <ul>
+                    <li>{setupPrimaryConnected ? "Done" : "Pending"}: Login to Twitch or Kick.</li>
+                    <li>{setupFirstTabReady ? "Done" : "Pending"}: Open your first channel tab.</li>
+                    <li>{setupMessageReady ? "Done" : "Optional"}: Send one test message.</li>
+                  </ul>
                   <div className="guide-actions">
                     <button
                       type="button"
@@ -5877,18 +6099,7 @@ const MainApp: React.FC = () => {
                       Focus Composer
                     </button>
                   </div>
-                  <p className="guide-note">Status: {setupMessageReady ? "Test message sent" : "Send one message to continue"}</p>
-                </div>
-              ) : null}
-              {setupWizardStep === 3 ? (
-                <div className="guide-section">
-                  <h3>Know the essentials</h3>
-                  <ul>
-                    <li>{setupPrimaryConnected ? "Done" : "Pending"}: Login to Twitch or Kick.</li>
-                    <li>{setupFirstTabReady ? "Done" : "Pending"}: Open your first channel tab.</li>
-                    <li>{setupMessageReady ? "Done" : "Pending"}: Send one test message.</li>
-                  </ul>
-                  <p className="guide-note">Finish unlocks after all three tasks are complete.</p>
+                  <p className="guide-note">Finish unlocks after login + first tab. Test message is optional.</p>
                   <ul>
                     <li>Use <strong>Refresh Tab</strong> in the top-left to reconnect only the current tab.</li>
                     <li>Tabs show unread and mention badges while they are in the background.</li>
@@ -5907,14 +6118,13 @@ const MainApp: React.FC = () => {
                   Back
                 </button>
               ) : null}
-              {setupWizardStep < 3 ? (
+              {setupWizardStep < 2 ? (
                 <button
                   type="button"
-                  onClick={() => setSetupWizardStep((previous) => Math.min(3, previous + 1))}
+                  onClick={() => setSetupWizardStep((previous) => Math.min(2, previous + 1))}
                   disabled={
                     (setupWizardStep === 0 && !setupPrimaryConnected) ||
-                    (setupWizardStep === 1 && !setupFirstTabReady) ||
-                    (setupWizardStep === 2 && !setupMessageReady)
+                    (setupWizardStep === 1 && !setupFirstTabReady)
                   }
                 >
                   Next
