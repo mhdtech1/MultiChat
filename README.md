@@ -1,4 +1,4 @@
-# MultiChat (Desktop + iOS)
+# MultiChat (Desktop)
 
 Creator-facing and viewer-facing multi-chat desktop app built with Electron + Vite + React + TypeScript.
 
