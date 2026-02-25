@@ -1,6 +1,7 @@
 import type { ChatMessage } from "@multichat/chat-core";
 import { useSettingsStore } from "../../../store";
 import { ChatLine } from "./ChatLine";
+import { WelcomeScreen } from "../common/WelcomeScreen";
 
 type MessageListProps = {
   messages: ChatMessage[];
@@ -15,7 +16,7 @@ export function MessageList({ messages, onUsernameClick, onMessageClick }: Messa
   if (messages.length === 0) {
     return (
       <div className="message-list" role="list">
-        <div className="empty-state">No messages yet.</div>
+        <WelcomeScreen />
       </div>
     );
   }

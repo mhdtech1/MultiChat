@@ -25,7 +25,10 @@ describe("ChatLine", () => {
 
   it("shows timestamp when enabled", () => {
     render(<ChatLine message={mockMessage} showTimestamp />);
-    const expected = new Date(mockMessage.timestamp).toLocaleTimeString();
+    const expected = new Date(mockMessage.timestamp).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit"
+    });
     expect(screen.getByText(expected)).toBeInTheDocument();
   });
 
@@ -36,7 +39,7 @@ describe("ChatLine", () => {
 
   it("shows badges when enabled", () => {
     render(<ChatLine message={mockMessage} showBadges />);
-    expect(screen.getByTitle("subscriber/3")).toBeInTheDocument();
+    expect(screen.getByTitle("Subscriber")).toBeInTheDocument();
   });
 
   it("calls onUsernameClick when username is clicked", () => {

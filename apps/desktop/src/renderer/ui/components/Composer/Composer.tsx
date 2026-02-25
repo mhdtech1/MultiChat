@@ -19,15 +19,20 @@ export function Composer({ onSend, placeholder, disabled }: ComposerProps) {
 
   return (
     <form className="composer" onSubmit={handleSubmit}>
-      <input
-        value={value}
-        onChange={(event) => setValue(event.target.value)}
-        placeholder={placeholder ?? "Type a message"}
-        disabled={disabled}
-      />
-      <button type="submit" disabled={disabled || !value.trim()}>
-        Send
-      </button>
+      <div className="composer__input-wrapper">
+        <input
+          className="composer__input"
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          placeholder={placeholder ?? "Type a message"}
+          disabled={disabled}
+        />
+      </div>
+      <div className="composer__actions">
+        <button className="composer__button composer__send" type="submit" disabled={disabled || !value.trim()}>
+          Send
+        </button>
+      </div>
     </form>
   );
 }

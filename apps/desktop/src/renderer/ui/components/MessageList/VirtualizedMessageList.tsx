@@ -3,17 +3,26 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import type { ChatMessage } from "@multichat/chat-core";
 import { useSettingsStore } from "../../../store";
 import { ChatLine } from "./ChatLine";
+import { WelcomeScreen } from "../common/WelcomeScreen";
 
 type VirtualizedMessageListProps = {
   messages: ChatMessage[];
   onUsernameClick?: (username: string, platform: string) => void;
   onMessageClick?: (message: ChatMessage) => void;
+  onAddChannel?: () => void;
+  onOpenSettings?: () => void;
 };
 
 const ESTIMATED_ROW_HEIGHT = 32;
 const OVERSCAN_COUNT = 10;
 
-export function VirtualizedMessageList({ messages, onUsernameClick, onMessageClick }: VirtualizedMessageListProps) {
+export function VirtualizedMessageList({
+  messages,
+  onUsernameClick,
+  onMessageClick,
+  onAddChannel,
+  onOpenSettings
+}: VirtualizedMessageListProps) {
   const showTimestamps = useSettingsStore((state) => state.showTimestamps);
   const showBadges = useSettingsStore((state) => state.showBadges);
   const parentRef = useRef<HTMLDivElement>(null);
@@ -70,9 +79,7 @@ export function VirtualizedMessageList({ messages, onUsernameClick, onMessageCli
         style={{ overflow: "auto", height: "100%" }}
       >
         {messages.length === 0 ? (
-          <div className="empty-state">
-            <p>No messages yet. Connect to a channel to start chatting!</p>
-          </div>
+          <WelcomeScreen onAddChannel={onAddChannel} onOpenSettings={onOpenSettings} />
         ) : (
           <div
             style={{

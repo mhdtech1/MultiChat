@@ -2,6 +2,9 @@ import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from "r
 import type { ChatAdapter, ChatAdapterStatus, ChatMessage } from "@multichat/chat-core";
 import { KickAdapter, TikTokAdapter, TwitchAdapter, YouTubeAdapter } from "@multichat/chat-core";
 import { VirtualizedMessageList } from "../components/MessageList";
+import { PlatformIcon } from "../components/common/PlatformIcon";
+import { RoleBadge as UiRoleBadge, type RoleType as UiRoleType } from "../components/common/RoleBadge";
+import { WelcomeScreen } from "../components/common/WelcomeScreen";
 
 const mode = window.location.hash.replace("#", "");
 const broadcast = new BroadcastChannel("multichat-chat");
@@ -546,6 +549,16 @@ const roleBadgeFromKey = (key: string): RoleBadge | null => {
   return null;
 };
 
+const toUiRoleType = (key: string): UiRoleType | null => {
+  if (key === "broadcaster") return "broadcaster";
+  if (key === "moderator") return "moderator";
+  if (key === "staff") return "staff";
+  if (key === "vip") return "vip";
+  if (key === "subscriber") return "subscriber";
+  if (key === "verified") return "verified";
+  return null;
+};
+
 const roleBadgesForMessage = (message: ChatMessage): RoleBadge[] => {
   const raw = asRecord(message.raw);
   const rawBadges: string[] = [];
@@ -628,12 +641,6 @@ const roleBadgesForMessage = (message: ChatMessage): RoleBadge[] => {
 
 const messageHasModerationBadge = (message: ChatMessage) =>
   roleBadgesForMessage(message).some((badge) => badge.key === "moderator" || badge.key === "broadcaster" || badge.key === "staff");
-
-const PlatformIcon: React.FC<{ platform: string }> = ({ platform }) => (
-  <span className={`platform-icon ${platform.trim().toLowerCase()}`} aria-hidden="true">
-    {platformIconGlyph(platform)}
-  </span>
-);
 
 const sanitizeSessionSources = (value: Settings["sessionSources"]): ChatSource[] => {
   if (!Array.isArray(value)) return [];
@@ -1479,6 +1486,7 @@ const MainApp: React.FC = () => {
 
   const searchRef = useRef<HTMLInputElement | null>(null);
   const channelInputRef = useRef<HTMLInputElement | null>(null);
+  const menuDetailsRef = useRef<HTMLDetailsElement | null>(null);
   const importSessionInputRef = useRef<HTMLInputElement | null>(null);
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const mainLayoutRef = useRef<HTMLDivElement | null>(null);
@@ -4880,6 +4888,20 @@ const MainApp: React.FC = () => {
   const showAccountStrip = isAdvancedMode || mentionInboxCount > 0;
   const showToolbar = isAdvancedMode || !activeTab;
   const showActiveTabMeta = isAdvancedMode || activeTabIsMerged;
+  const focusChannelComposer = () => {
+    window.setTimeout(() => {
+      channelInputRef.current?.focus();
+    }, 0);
+  };
+  const openMainMenu = () => {
+    const menu = menuDetailsRef.current;
+    if (!menu) return;
+    menu.open = true;
+    window.setTimeout(() => {
+      const closeButton = menu.querySelector<HTMLButtonElement>(".menu-close-button");
+      closeButton?.focus();
+    }, 0);
+  };
 
   return (
     <div
@@ -4935,7 +4957,7 @@ const MainApp: React.FC = () => {
           <button type="submit">Open Tab</button>
         </form>
         <div className="top-actions">
-          <details className="menu-dropdown">
+          <details className="menu-dropdown" ref={menuDetailsRef}>
             <summary>Menu</summary>
             <div className="menu-dropdown-panel">
               <div className="menu-panel-header">
@@ -5624,22 +5646,22 @@ const MainApp: React.FC = () => {
                       </button>
                     </div>
 	                  <span className={settings.twitchToken || settings.twitchGuest ? "account-pill on" : "account-pill"}>
-	                    <PlatformIcon platform="twitch" />
+	                    <PlatformIcon platform="twitch" size="sm" showBackground />
 	                    Twitch: {settings.twitchUsername || "off"}
                   </span>
                   <span className={settings.kickAccessToken ? "account-pill on" : "account-pill"}>
-                    <PlatformIcon platform="kick" />
+                    <PlatformIcon platform="kick" size="sm" showBackground />
                     Kick typing: {settings.kickUsername || "off"}
                   </span>
                   {youtubeAlphaEnabled ? (
                     <span className="account-pill on">
-                      <PlatformIcon platform="youtube" />
+                      <PlatformIcon platform="youtube" size="sm" showBackground />
                       YouTube: read-only
                     </span>
                   ) : null}
                   {tiktokAlphaEnabled ? (
                     <span className="account-pill on">
-                      <PlatformIcon platform="tiktok" />
+                      <PlatformIcon platform="tiktok" size="sm" showBackground />
                       TikTok: read-only
                     </span>
                   ) : null}
@@ -5703,7 +5725,10 @@ const MainApp: React.FC = () => {
 	                    {deckMessages.slice(-400).map((message) => (
 	                      <div key={`${message.id}-${message.timestamp}`} className="chat-line">
                         <span className="line-meta">
-                          <span className={`platform ${message.platform}`}>{message.platform}</span>
+                          <span className={`platform ${message.platform}`}>
+                            <PlatformIcon platform={message.platform} size="sm" showBackground />
+                            <span>{message.platform}</span>
+                          </span>
                           <span>{new Date(message.timestamp).toLocaleTimeString()}</span>
                         </span>
 		                        <span className="line-author">
@@ -5785,7 +5810,7 @@ const MainApp: React.FC = () => {
 	              }}
 	            >
               <button type="button" className="tab-select" onClick={() => setActiveTabId(tab.id)}>
-                {firstSource ? <PlatformIcon platform={firstSource.platform} /> : null}
+                {firstSource ? <PlatformIcon platform={firstSource.platform} size="sm" showBackground /> : null}
                 <span>{label}</span>
                 {group ? <span className="tab-badge unread">{group}</span> : null}
                 {!active && (mentionCount > 0 || unreadCount > 0) ? (
@@ -5856,10 +5881,7 @@ const MainApp: React.FC = () => {
 
       <main className="chat-main">
         {!activeTab ? (
-          <div className="empty-state">
-            <h2>No tabs open</h2>
-            <p>Enter a channel username above to create a new tab.</p>
-          </div>
+          <WelcomeScreen onAddChannel={focusChannelComposer} onOpenSettings={openMainMenu} />
         ) : (
           <>
             {showActiveTabMeta ? (
@@ -5872,7 +5894,7 @@ const MainApp: React.FC = () => {
                 <>
 	                {activeSourcePreviewItems.map(({ source, status, staleSeconds }) => (
 	                  <span key={source.id} className={`source-chip ${status}`}>
-	                    <PlatformIcon platform={source.platform} />
+	                    <PlatformIcon platform={source.platform} size="sm" showBackground />
 	                    <span>
 	                      {source.platform}/{source.channel} ({status}
 	                      {staleSeconds !== null && staleSeconds > 30 ? ` · lag ${staleSeconds}s` : ""})
@@ -5896,7 +5918,7 @@ const MainApp: React.FC = () => {
                           </div>
 		                        {activeSourceStatusItems.slice(activeSourcePreviewItems.length).map(({ source, status, staleSeconds }) => (
 		                          <span key={source.id} className={`source-chip ${status}`}>
-		                            <PlatformIcon platform={source.platform} />
+		                            <PlatformIcon platform={source.platform} size="sm" showBackground />
 	                            <span>
 	                              {source.platform}/{source.channel} ({status}
 	                              {staleSeconds !== null && staleSeconds > 30 ? ` · lag ${staleSeconds}s` : ""})
@@ -6108,7 +6130,7 @@ const MainApp: React.FC = () => {
                     >
                     <span className="line-meta">
                       <span className={`platform ${message.platform}`}>
-                        <PlatformIcon platform={message.platform} />
+                        <PlatformIcon platform={message.platform} size="sm" showBackground />
                         <span>{message.platform}</span>
                       </span>
                       <span className="line-channel" title={channelTitle}>
@@ -6119,11 +6141,17 @@ const MainApp: React.FC = () => {
                     <span className="line-author">
                       {roleBadges.length > 0 ? (
                         <span className="role-badges">
-                          {roleBadges.map((badge) => (
-                            <span key={`${message.id}-${badge.key}`} className={`role-badge role-${badge.key}`} title={badge.label}>
-                              {badge.icon}
-                            </span>
-                          ))}
+                          {roleBadges.map((badge) => {
+                            const uiRole = toUiRoleType(badge.key);
+                            if (uiRole) {
+                              return <UiRoleBadge key={`${message.id}-${badge.key}`} role={uiRole} size="sm" />;
+                            }
+                            return (
+                              <span key={`${message.id}-${badge.key}`} className={`role-badge role-${badge.key}`} title={badge.label}>
+                                {badge.icon}
+                              </span>
+                            );
+                          })}
                         </span>
                       ) : null}
 		                      <button
