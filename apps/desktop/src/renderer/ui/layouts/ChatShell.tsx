@@ -455,6 +455,14 @@ const platformIconGlyph = (platform: string) => {
   return "?";
 };
 
+const platformDisplayName = (platform: string) => {
+  const normalized = platform.trim().toLowerCase();
+  if (normalized === "twitch" || normalized === "kick" || normalized === "youtube" || normalized === "tiktok") {
+    return normalized[0].toUpperCase() + normalized.slice(1);
+  }
+  return platform;
+};
+
 const buildModerationCommand = (
   platform: Platform,
   action: ModeratorAction,
@@ -4934,18 +4942,36 @@ const MainApp: React.FC = () => {
             void addChannelTab();
           }}
         >
-          <select
-            value={platformInput}
-            onChange={(event) => setPlatformInput(event.target.value as Platform)}
-            className="platform-select"
-          >
-            {availablePlatforms.map((platform) => (
-              <option key={platform} value={platform}>
-                [{platformIconGlyph(platform)}] {platform[0].toUpperCase()}
-                {platform.slice(1)}
-              </option>
-            ))}
-          </select>
+          <details className="platform-picker">
+            <summary>
+              <span className="platform-picker__value">
+                <PlatformIcon platform={platformInput} size="sm" showBackground />
+                <span>{platformDisplayName(platformInput)}</span>
+              </span>
+              <span className="platform-picker__caret" aria-hidden="true">
+                ▾
+              </span>
+            </summary>
+            <div className="platform-picker__menu">
+              {availablePlatforms.map((platform) => (
+                <button
+                  key={platform}
+                  type="button"
+                  className={platform === platformInput ? "platform-picker__option active" : "platform-picker__option"}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setPlatformInput(platform as Platform);
+                    const details = event.currentTarget.closest("details");
+                    details?.removeAttribute("open");
+                  }}
+                >
+                  <PlatformIcon platform={platform} size="sm" showBackground />
+                  <span>{platformDisplayName(platform)}</span>
+                </button>
+              ))}
+            </div>
+          </details>
           <input
             ref={channelInputRef}
             value={channelInput}
@@ -5721,34 +5747,36 @@ const MainApp: React.FC = () => {
                     </button>
                   </div>
                   {group ? <span className="menu-muted">Group: {group}</span> : null}
-	                  <div style={{ maxHeight: 360, overflowY: "auto", border: "1px solid rgba(37, 65, 78, 0.45)", borderRadius: 8, padding: 8 }}>
-	                    {deckMessages.slice(-400).map((message) => (
-	                      <div key={`${message.id}-${message.timestamp}`} className="chat-line">
-                        <span className="line-meta">
-                          <span className={`platform ${message.platform}`}>
-                            <PlatformIcon platform={message.platform} size="sm" showBackground />
-                            <span>{message.platform}</span>
-                          </span>
-                          <span>{new Date(message.timestamp).toLocaleTimeString()}</span>
-                        </span>
-		                        <span className="line-author">
-		                          <button
-		                            type="button"
-		                            className="username-button"
-		                            style={{ color: message.color, filter: spoilerBlurDelayed ? "blur(1.5px)" : undefined }}
-		                            onClick={() =>
-		                              setIdentityTarget({
-		                                username: message.username,
-		                                displayName: message.displayName || message.username
-		                              })
-		                            }
-		                          >
-		                            {message.displayName || message.username}
-		                          </button>
-		                        </span>
-                        <span className="line-message" style={{ filter: spoilerBlurDelayed ? "blur(1.5px)" : undefined }}>
-                          {message.message}
-                        </span>
+                  <div style={{ maxHeight: 360, overflowY: "auto", border: "1px solid rgba(37, 65, 78, 0.45)", borderRadius: 8, padding: 8 }}>
+                    {deckMessages.slice(-400).map((message) => (
+                      <div key={`${message.id}-${message.timestamp}`} className="chat-line chat-line--legacy">
+                        <div className="chat-line__content">
+                          <div className="line-meta">
+                            <span className={`platform ${message.platform}`}>
+                              <PlatformIcon platform={message.platform} size="sm" showBackground />
+                              <span>{message.platform}</span>
+                            </span>
+                            <span>{new Date(message.timestamp).toLocaleTimeString()}</span>
+                          </div>
+                          <div className="line-author">
+                            <button
+                              type="button"
+                              className="username-button"
+                              style={{ color: message.color, filter: spoilerBlurDelayed ? "blur(1.5px)" : undefined }}
+                              onClick={() =>
+                                setIdentityTarget({
+                                  username: message.username,
+                                  displayName: message.displayName || message.username
+                                })
+                              }
+                            >
+                              {message.displayName || message.username}
+                            </button>
+                          </div>
+                          <div className="line-message" style={{ filter: spoilerBlurDelayed ? "blur(1.5px)" : undefined }}>
+                            {message.message}
+                          </div>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -6112,77 +6140,79 @@ const MainApp: React.FC = () => {
 	                        New messages
 	                      </div>
 	                    ) : null}
-			                    <div
-			                      className={
-			                        highlighted
-			                          ? isDeletedMessage
-			                            ? "chat-line highlight deleted"
-			                            : "chat-line highlight"
-			                          : isDeletedMessage
-			                            ? "chat-line deleted"
-			                            : "chat-line"
-			                      }
-			                      data-jump-key={buildMessageJumpKey(message)}
-			                      onContextMenu={(event) => {
-			                        event.preventDefault();
-			                        setMessageMenu({ x: event.clientX, y: event.clientY, message });
-			                      }}
+                    <div
+                      className={
+                        highlighted
+                          ? isDeletedMessage
+                            ? "chat-line chat-line--legacy highlight deleted"
+                            : "chat-line chat-line--legacy highlight"
+                          : isDeletedMessage
+                            ? "chat-line chat-line--legacy deleted"
+                            : "chat-line chat-line--legacy"
+                      }
+                      data-jump-key={buildMessageJumpKey(message)}
+                      onContextMenu={(event) => {
+                        event.preventDefault();
+                        setMessageMenu({ x: event.clientX, y: event.clientY, message });
+                      }}
                     >
-                    <span className="line-meta">
-                      <span className={`platform ${message.platform}`}>
-                        <PlatformIcon platform={message.platform} size="sm" showBackground />
-                        <span>{message.platform}</span>
-                      </span>
-                      <span className="line-channel" title={channelTitle}>
-                        {channelLabel}
-                      </span>
-                      <span>{new Date(message.timestamp).toLocaleTimeString()}</span>
-                    </span>
-                    <span className="line-author">
-                      {roleBadges.length > 0 ? (
-                        <span className="role-badges">
-                          {roleBadges.map((badge) => {
-                            const uiRole = toUiRoleType(badge.key);
-                            if (uiRole) {
-                              return <UiRoleBadge key={`${message.id}-${badge.key}`} role={uiRole} size="sm" />;
+                      <div className="chat-line__content">
+                        <div className="line-meta">
+                          <span className={`platform ${message.platform}`}>
+                            <PlatformIcon platform={message.platform} size="sm" showBackground />
+                            <span>{message.platform}</span>
+                          </span>
+                          <span className="line-channel" title={channelTitle}>
+                            {channelLabel}
+                          </span>
+                          <span>{new Date(message.timestamp).toLocaleTimeString()}</span>
+                        </div>
+                        <div className="line-author">
+                          {roleBadges.length > 0 ? (
+                            <span className="role-badges">
+                              {roleBadges.map((badge) => {
+                                const uiRole = toUiRoleType(badge.key);
+                                if (uiRole) {
+                                  return <UiRoleBadge key={`${message.id}-${badge.key}`} role={uiRole} size="sm" />;
+                                }
+                                return (
+                                  <span key={`${message.id}-${badge.key}`} className={`role-badge role-${badge.key}`} title={badge.label}>
+                                    {badge.icon}
+                                  </span>
+                                );
+                              })}
+                            </span>
+                          ) : null}
+                          <button
+                            type="button"
+                            className="username-button"
+                            style={{ color: message.color }}
+                            onClick={() =>
+                              setIdentityTarget({
+                                username: message.username,
+                                displayName: message.displayName || message.username
+                              })
                             }
-                            return (
-                              <span key={`${message.id}-${badge.key}`} className={`role-badge role-${badge.key}`} title={badge.label}>
-                                {badge.icon}
-                              </span>
-                            );
-                          })}
-                        </span>
-                      ) : null}
-		                      <button
-		                        type="button"
-		                        className="username-button"
-		                        style={{ color: message.color }}
-		                        onClick={() =>
-		                          setIdentityTarget({
-		                            username: message.username,
-		                            displayName: message.displayName || message.username
-		                          })
-		                        }
-		                      >
-		                        {displayName}
-		                      </button>
-		                    </span>
-	                    <span className={isDeletedMessage ? "line-message deleted" : "line-message"}>
-	                      {messageChunks.map((chunk, index) =>
-	                        chunk.type === "text" ? (
-	                          <React.Fragment key={`${message.id}-text-${index}`}>{chunk.value}</React.Fragment>
-                        ) : (
-                          <img
-                            key={`${message.id}-emote-${index}-${chunk.name}`}
-                            className="inline-emote"
-                            src={chunk.url}
-                            alt={chunk.name}
-                            title={chunk.name}
-                          />
-                        )
-                      )}
-                    </span>
+                          >
+                            {displayName}
+                          </button>
+                        </div>
+                        <div className={isDeletedMessage ? "line-message deleted" : "line-message"}>
+                          {messageChunks.map((chunk, index) =>
+                            chunk.type === "text" ? (
+                              <React.Fragment key={`${message.id}-text-${index}`}>{chunk.value}</React.Fragment>
+                            ) : (
+                              <img
+                                key={`${message.id}-emote-${index}-${chunk.name}`}
+                                className="inline-emote"
+                                src={chunk.url}
+                                alt={chunk.name}
+                                title={chunk.name}
+                              />
+                            )
+                          )}
+                        </div>
+                      </div>
                     </div>
                   </React.Fragment>
                 );

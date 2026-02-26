@@ -25,7 +25,7 @@ const TwitchIcon = ({ size }: { size: number }) => (
 
 const KickIcon = ({ size }: { size: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-    <path d="M1.333 0v24h10.666V12h4l4-6-4-6h-4V0H1.333zm5.334 6h2.666l2 3-2 3H6.667V6z" />
+    <path d="M1.333 0h8v5.333H12V2.667h2.667V0h8v8H20v2.667h-2.667v2.666H20V16h2.667v8h-8v-2.667H12v-2.666H9.333V24h-8Z" />
   </svg>
 );
 

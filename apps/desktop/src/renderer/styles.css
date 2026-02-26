@@ -2477,7 +2477,7 @@ h3 {
 
 .platform-icon--kick.platform-icon--with-bg {
   background: var(--kick-bg);
-  border-color: rgba(83, 252, 24, 0.25);
+  border-color: rgba(83, 252, 24, 0.35);
 }
 
 .platform-icon--youtube {
@@ -3234,4 +3234,285 @@ h3 {
 .settings-about h3 {
   font-size: 20px;
   margin: 0 0 8px;
+}
+
+/* ===== Responsive Layout Hotfix ===== */
+.topbar {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: "left form actions";
+}
+
+.top-left {
+  grid-area: left;
+}
+
+.channel-form {
+  grid-area: form;
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 0;
+}
+
+.channel-form > * {
+  min-height: 44px;
+}
+
+.channel-form input {
+  width: 100%;
+  min-width: 0;
+  padding-inline: 14px;
+  line-height: 1.2;
+}
+
+.channel-form button {
+  padding-inline: 16px;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+
+.platform-picker {
+  min-width: 0;
+}
+
+.platform-picker > summary {
+  min-height: 44px;
+  width: 100%;
+  padding: 0 12px;
+}
+
+.top-actions {
+  grid-area: actions;
+  justify-self: end;
+  margin-left: 0;
+  flex-wrap: nowrap;
+}
+
+.platform-picker {
+  position: relative;
+}
+
+.platform-picker > summary {
+  list-style: none;
+  border: 1px solid var(--border-soft);
+  background: var(--bg-panel);
+  color: var(--text-main);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 140px;
+  cursor: pointer;
+}
+
+.platform-picker > summary::-webkit-details-marker {
+  display: none;
+}
+
+.platform-picker__value {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.platform-picker__caret {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.platform-picker[open] > summary {
+  border-color: var(--accent);
+}
+
+.platform-picker__menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 80;
+  min-width: 180px;
+  display: grid;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--bg-soft);
+  box-shadow: var(--shadow-md);
+}
+
+.platform-picker__option {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-main);
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.platform-picker__option:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-medium);
+}
+
+.platform-picker__option.active {
+  background: color-mix(in srgb, var(--accent), transparent 86%);
+  border-color: color-mix(in srgb, var(--accent), transparent 70%);
+}
+
+.chat-main > .welcome-screen {
+  flex: 1;
+  min-height: 0;
+}
+
+.welcome-screen {
+  align-items: flex-start;
+  overflow-y: auto;
+}
+
+.welcome-screen__content {
+  width: min(700px, 100%);
+  margin: 0 auto;
+}
+
+@media (min-height: 860px) {
+  .welcome-screen {
+    align-items: center;
+  }
+}
+
+@media (max-width: 1200px) {
+  .topbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "left actions"
+      "form form";
+    align-items: start;
+  }
+
+  .channel-form {
+    grid-template-columns: 120px minmax(0, 1fr) auto;
+    margin-top: 2px;
+  }
+}
+
+@media (max-width: 900px) {
+  .topbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "left actions"
+      "form form";
+  }
+
+  .top-actions {
+    justify-content: flex-end;
+    justify-self: end;
+  }
+
+  .channel-form {
+    grid-template-columns: 120px minmax(0, 1fr) auto;
+  }
+}
+
+@media (max-width: 760px) {
+  .topbar {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "left"
+      "actions"
+      "form";
+    gap: 10px;
+  }
+
+  .top-actions {
+    justify-self: start;
+  }
+
+  .channel-form {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .platform-picker > summary {
+    width: 100%;
+  }
+
+  .platform-picker__menu {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .channel-form button {
+    width: 100%;
+  }
+}
+
+@media (max-height: 760px) {
+  .welcome-screen {
+    padding-top: 20px;
+    padding-bottom: 24px;
+  }
+
+  .welcome-screen__hero {
+    margin-bottom: 24px;
+  }
+
+  .welcome-screen__features {
+    gap: 14px;
+  }
+
+  .feature-card {
+    padding: 18px 14px;
+  }
+}
+
+/* ===== Legacy Chat Row Compatibility (ChatShell feed/deck) ===== */
+.chat-line--legacy {
+  cursor: default;
+}
+
+.chat-line--legacy:hover {
+  background: transparent;
+}
+
+.chat-line--legacy .chat-line__content {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.chat-line--legacy .line-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  min-width: 0;
+}
+
+.chat-line--legacy .line-author {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chat-line--legacy .role-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.chat-line--legacy .line-message {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
