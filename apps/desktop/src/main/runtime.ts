@@ -3030,34 +3030,52 @@ app.whenReady().then(async () => {
       });
     }
 
+    const prevTwitchToken = String(store.get("twitchToken") ?? "").trim();
+    const prevKickAccessToken = String(store.get("kickAccessToken") ?? "").trim();
+    const prevKickRefreshToken = String(store.get("kickRefreshToken") ?? "").trim();
+    const prevYouTubeAccessToken = String(store.get("youtubeAccessToken") ?? "").trim();
+    const prevYouTubeRefreshToken = String(store.get("youtubeRefreshToken") ?? "").trim();
+
+    const nextTwitchToken =
+      typeof nextUpdates.twitchToken === "string" ? nextUpdates.twitchToken.trim() : prevTwitchToken;
+    const nextKickAccessToken =
+      typeof nextUpdates.kickAccessToken === "string" ? nextUpdates.kickAccessToken.trim() : prevKickAccessToken;
+    const nextKickRefreshToken =
+      typeof nextUpdates.kickRefreshToken === "string" ? nextUpdates.kickRefreshToken.trim() : prevKickRefreshToken;
+    const nextYouTubeAccessToken =
+      typeof nextUpdates.youtubeAccessToken === "string" ? nextUpdates.youtubeAccessToken.trim() : prevYouTubeAccessToken;
+    const nextYouTubeRefreshToken =
+      typeof nextUpdates.youtubeRefreshToken === "string" ? nextUpdates.youtubeRefreshToken.trim() : prevYouTubeRefreshToken;
+
     store.set(nextUpdates);
-    if (typeof nextUpdates.twitchToken === "string") {
-      const token = nextUpdates.twitchToken.trim();
-      if (token) {
-        await storeAuthTokens("twitch", { accessToken: token });
+    if (typeof nextUpdates.twitchToken === "string" && nextTwitchToken !== prevTwitchToken) {
+      if (nextTwitchToken) {
+        await storeAuthTokens("twitch", { accessToken: nextTwitchToken });
       } else {
         await clearAuthTokens("twitch");
       }
     }
-    if (typeof nextUpdates.kickAccessToken === "string" || typeof nextUpdates.kickRefreshToken === "string") {
-      const accessToken = String(nextUpdates.kickAccessToken ?? store.get("kickAccessToken") ?? "").trim();
-      const refreshToken = String(nextUpdates.kickRefreshToken ?? store.get("kickRefreshToken") ?? "").trim();
-      if (accessToken || refreshToken) {
+    if (
+      (typeof nextUpdates.kickAccessToken === "string" || typeof nextUpdates.kickRefreshToken === "string") &&
+      (nextKickAccessToken !== prevKickAccessToken || nextKickRefreshToken !== prevKickRefreshToken)
+    ) {
+      if (nextKickAccessToken || nextKickRefreshToken) {
         await storeAuthTokens("kick", {
-          accessToken,
-          refreshToken
+          accessToken: nextKickAccessToken,
+          refreshToken: nextKickRefreshToken
         });
       } else {
         await clearAuthTokens("kick");
       }
     }
-    if (typeof nextUpdates.youtubeAccessToken === "string" || typeof nextUpdates.youtubeRefreshToken === "string") {
-      const accessToken = String(nextUpdates.youtubeAccessToken ?? store.get("youtubeAccessToken") ?? "").trim();
-      const refreshToken = String(nextUpdates.youtubeRefreshToken ?? store.get("youtubeRefreshToken") ?? "").trim();
-      if (accessToken || refreshToken) {
+    if (
+      (typeof nextUpdates.youtubeAccessToken === "string" || typeof nextUpdates.youtubeRefreshToken === "string") &&
+      (nextYouTubeAccessToken !== prevYouTubeAccessToken || nextYouTubeRefreshToken !== prevYouTubeRefreshToken)
+    ) {
+      if (nextYouTubeAccessToken || nextYouTubeRefreshToken) {
         await storeAuthTokens("youtube", {
-          accessToken,
-          refreshToken
+          accessToken: nextYouTubeAccessToken,
+          refreshToken: nextYouTubeRefreshToken
         });
       } else {
         await clearAuthTokens("youtube");

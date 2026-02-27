@@ -26,21 +26,72 @@ export interface SecureStorageService {
 }
 
 class KeytarSecureStorage implements SecureStorageService {
+  private readonly cache = new Map<string, string | null>();
+
+  private cacheLoaded = false;
+
+  private cacheLoadPromise: Promise<void> | null = null;
+
+  private async ensureCacheLoaded(): Promise<void> {
+    if (this.cacheLoaded) return;
+    if (!this.cacheLoadPromise) {
+      this.cacheLoadPromise = (async () => {
+        const credentials = await keytar.findCredentials(SERVICE_NAME);
+        this.cache.clear();
+        for (const credential of credentials) {
+          this.cache.set(credential.account, credential.password);
+        }
+        this.cacheLoaded = true;
+      })().finally(() => {
+        this.cacheLoadPromise = null;
+      });
+    }
+    await this.cacheLoadPromise;
+  }
+
   async setToken(account: string, token: string): Promise<void> {
-    await keytar.setPassword(SERVICE_NAME, account, token);
+    const normalized = token.trim();
+    if (!normalized) {
+      await this.deleteToken(account);
+      return;
+    }
+    await this.ensureCacheLoaded();
+    const cached = this.cache.get(account);
+    if (cached === normalized) return;
+    await keytar.setPassword(SERVICE_NAME, account, normalized);
+    this.cache.set(account, normalized);
   }
 
   async getToken(account: string): Promise<string | null> {
-    return keytar.getPassword(SERVICE_NAME, account);
+    await this.ensureCacheLoaded();
+    if (!this.cache.has(account)) {
+      this.cache.set(account, null);
+      return null;
+    }
+    return this.cache.get(account) ?? null;
   }
 
   async deleteToken(account: string): Promise<boolean> {
-    return keytar.deletePassword(SERVICE_NAME, account);
+    await this.ensureCacheLoaded();
+    const cached = this.cache.get(account);
+    if (!cached) {
+      this.cache.set(account, null);
+      return false;
+    }
+    const deleted = await keytar.deletePassword(SERVICE_NAME, account);
+    this.cache.set(account, null);
+    return deleted;
   }
 
   async getAllAccounts(): Promise<string[]> {
-    const credentials = await keytar.findCredentials(SERVICE_NAME);
-    return credentials.map((credential) => credential.account);
+    await this.ensureCacheLoaded();
+    const accounts: string[] = [];
+    for (const [account, token] of this.cache.entries()) {
+      if (token) {
+        accounts.push(account);
+      }
+    }
+    return accounts;
   }
 }
 
@@ -84,10 +135,16 @@ export async function storeAuthTokens(
 ): Promise<void> {
   const storage = getSecureStorage();
   const accounts = PLATFORM_ACCOUNTS[platform];
-  await storage.setToken(accounts.access, tokens.accessToken);
+  const accessToken = tokens.accessToken.trim();
+  if (accessToken) {
+    await storage.setToken(accounts.access, accessToken);
+  } else {
+    await storage.deleteToken(accounts.access);
+  }
   if (accounts.refresh) {
-    if (tokens.refreshToken && tokens.refreshToken.trim()) {
-      await storage.setToken(accounts.refresh, tokens.refreshToken);
+    const refreshToken = tokens.refreshToken?.trim() ?? "";
+    if (refreshToken) {
+      await storage.setToken(accounts.refresh, refreshToken);
     } else {
       await storage.deleteToken(accounts.refresh);
     }
@@ -99,11 +156,11 @@ export async function getAuthTokens(
 ): Promise<{ accessToken: string | null; refreshToken: string | null }> {
   const storage = getSecureStorage();
   const accounts = PLATFORM_ACCOUNTS[platform];
-  const accessToken = await storage.getToken(accounts.access);
-  const refreshToken = accounts.refresh ? await storage.getToken(accounts.refresh) : null;
+  const accessToken = (await storage.getToken(accounts.access))?.trim() ?? null;
+  const refreshToken = accounts.refresh ? (await storage.getToken(accounts.refresh))?.trim() ?? null : null;
   return {
-    accessToken,
-    refreshToken
+    accessToken: accessToken || null,
+    refreshToken: refreshToken || null
   };
 }
 
