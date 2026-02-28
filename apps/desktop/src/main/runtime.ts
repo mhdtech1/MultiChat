@@ -2266,6 +2266,7 @@ const youtubeWebChatSessions = new Map<string, YouTubeWebChatSession>();
 let pendingAutoInstallTimer: ReturnType<typeof setTimeout> | null = null;
 let updateInstallTriggered = false;
 const isWindows = process.platform === "win32";
+let appIsQuitting = false;
 
 const normalizeReleaseNotes = (value: unknown): string => {
   if (!value) return "";
@@ -2514,6 +2515,19 @@ const checkForUpdatesFromMenu = async () => {
 
 const setupAppMenu = () => {
   const isMac = process.platform === "darwin";
+  const revealMainWindow = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      createMainWindow();
+      return;
+    }
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+    if (!mainWindow.isVisible()) {
+      mainWindow.show();
+    }
+    mainWindow.focus();
+  };
   const helpSubmenu: MenuItemConstructorOptions[] = [
     ...(!isMac
       ? [
@@ -2600,7 +2614,19 @@ const setupAppMenu = () => {
     {
       label: "Window",
       submenu: isMac
-        ? [{ role: "minimize" }, { role: "zoom" }, { type: "separator" }, { role: "front" }]
+        ? [
+            { role: "minimize" },
+            { role: "zoom" },
+            { type: "separator" },
+            {
+              label: "Show MultiChat",
+              click: () => {
+                revealMainWindow();
+              }
+            },
+            { type: "separator" },
+            { role: "front" }
+          ]
         : [{ role: "minimize" }, { role: "close" }]
     },
     {
@@ -2693,6 +2719,7 @@ const createMainWindow = () => {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      backgroundThrottling: false,
       preload: path.join(__dirname, "../preload/preload.cjs")
     }
   });
@@ -2704,6 +2731,18 @@ const createMainWindow = () => {
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: "deny" };
+  });
+
+  mainWindow.on("close", (event) => {
+    const shouldHideToBackground =
+      process.platform === "darwin" &&
+      !appIsQuitting &&
+      store.get("backgroundMonitorOnClose") !== false;
+    if (!shouldHideToBackground) {
+      return;
+    }
+    event.preventDefault();
+    mainWindow?.hide();
   });
 
   mainWindow.on("closed", () => {
@@ -2775,6 +2814,7 @@ app.whenReady().then(async () => {
     columns: 2,
     verboseLogs: false,
     performanceMode: false,
+    backgroundMonitorOnClose: true,
     smartFilterSpam: true,
     smartFilterScam: true,
     confirmSendAll: true,
@@ -3789,11 +3829,22 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
+  appIsQuitting = true;
   clearPendingAutoInstallTimer();
   void disconnectAllTikTokConnections();
 });
 
 app.on("activate", () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+    if (!mainWindow.isVisible()) {
+      mainWindow.show();
+    }
+    mainWindow.focus();
+    return;
+  }
   if (BrowserWindow.getAllWindows().length === 0) {
     createMainWindow();
   }

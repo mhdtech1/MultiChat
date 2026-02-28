@@ -90,6 +90,7 @@ export type AppSettings = {
   tiktokUsername?: string;
   verboseLogs?: boolean;
   performanceMode?: boolean;
+  backgroundMonitorOnClose?: boolean;
   smartFilterSpam?: boolean;
   smartFilterScam?: boolean;
   confirmSendAll?: boolean;

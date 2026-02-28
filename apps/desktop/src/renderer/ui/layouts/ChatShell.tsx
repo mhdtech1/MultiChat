@@ -104,6 +104,7 @@ type Settings = {
   tiktokUsername?: string;
   verboseLogs?: boolean;
   performanceMode?: boolean;
+  backgroundMonitorOnClose?: boolean;
   smartFilterSpam?: boolean;
   smartFilterScam?: boolean;
   confirmSendAll?: boolean;
@@ -302,6 +303,7 @@ const defaultSettings: Settings = {
   tiktokUsername: "",
   verboseLogs: false,
   performanceMode: false,
+  backgroundMonitorOnClose: true,
   smartFilterSpam: true,
   smartFilterScam: true,
   confirmSendAll: true,
@@ -958,6 +960,212 @@ const AUTO_SCROLL_BOTTOM_THRESHOLD_PX = 36;
 const AUTO_RESUME_NEWEST_AFTER_MS = 15_000;
 const TIKTOK_OFFLINE_RETRY_MS = 2 * 60 * 1000;
 const SETUP_WIZARD_VERSION = 2;
+const RECENT_CHAT_HISTORY_STORAGE_KEY = "multichat:recent-history:v1";
+const RECENT_CHAT_LOOKBACK_MS = 60 * 60 * 1000;
+const RECENT_CHAT_MAX_MESSAGES_PER_SOURCE = 4000;
+const RECENT_CHAT_SAVE_DEBOUNCE_MS = 1200;
+
+type HistoryPlatform = "twitch" | "kick";
+
+type PersistedRecentHistoryMessage = {
+  id: string;
+  platform: HistoryPlatform;
+  channel: string;
+  username: string;
+  displayName: string;
+  message: string;
+  timestamp: string;
+  badges?: string[];
+  color?: string;
+};
+
+type PersistedRecentHistoryPayload = {
+  version: 1;
+  savedAt: number;
+  bySourceKey: Record<string, PersistedRecentHistoryMessage[]>;
+};
+
+const ARABIC_SCRIPT_REGEX = /[\u0600-\u06FF]/;
+const ARABIC_DIACRITICS_REGEX = /[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED]/g;
+const ARABIC_CHAR_TO_EGYPTIAN_FRANCO: Record<string, string> = {
+  "ء": "2",
+  "آ": "aa",
+  "أ": "a",
+  "ؤ": "2w",
+  "إ": "e",
+  "ئ": "2y",
+  "ا": "a",
+  "ٱ": "a",
+  "ب": "b",
+  "ة": "a",
+  "ت": "t",
+  "ث": "s",
+  "ج": "g",
+  "ح": "7",
+  "خ": "5",
+  "د": "d",
+  "ذ": "z",
+  "ر": "r",
+  "ز": "z",
+  "س": "s",
+  "ش": "sh",
+  "ص": "9",
+  "ض": "9'",
+  "ط": "6",
+  "ظ": "6'",
+  "ع": "3",
+  "غ": "8",
+  "ف": "f",
+  "ق": "2",
+  "ك": "k",
+  "ل": "l",
+  "م": "m",
+  "ن": "n",
+  "ه": "h",
+  "و": "w",
+  "ى": "a",
+  "ي": "y",
+  "پ": "p",
+  "ڤ": "v",
+  "چ": "ch",
+  "ژ": "zh",
+  "گ": "g",
+  "٠": "0",
+  "١": "1",
+  "٢": "2",
+  "٣": "3",
+  "٤": "4",
+  "٥": "5",
+  "٦": "6",
+  "٧": "7",
+  "٨": "8",
+  "٩": "9",
+  "؟": "?",
+  "،": ",",
+  "؛": ";"
+};
+
+const isHistoryPlatform = (platform: Platform): platform is HistoryPlatform => platform === "twitch" || platform === "kick";
+
+const normalizeRecentHistoryMessage = (message: ChatMessage): ChatMessage => ({
+  ...message,
+  raw: undefined,
+  badges: Array.isArray(message.badges) ? [...message.badges] : undefined
+});
+
+const toPersistedRecentHistoryMessage = (message: ChatMessage): PersistedRecentHistoryMessage => ({
+  id: message.id,
+  platform: message.platform as HistoryPlatform,
+  channel: message.channel,
+  username: message.username,
+  displayName: message.displayName,
+  message: message.message,
+  timestamp: message.timestamp,
+  badges: Array.isArray(message.badges) ? [...message.badges] : undefined,
+  color: message.color
+});
+
+const pruneRecentHistoryMessages = (messages: ChatMessage[], now = Date.now()) => {
+  const cutoff = now - RECENT_CHAT_LOOKBACK_MS;
+  return messages
+    .filter((entry) => {
+      const at = Date.parse(entry.timestamp);
+      return Number.isFinite(at) && at >= cutoff && at <= now + 120_000;
+    })
+    .slice(-RECENT_CHAT_MAX_MESSAGES_PER_SOURCE);
+};
+
+const readRecentHistoryPayload = () => {
+  try {
+    const raw = window.localStorage.getItem(RECENT_CHAT_HISTORY_STORAGE_KEY);
+    if (!raw) return {} as Record<string, ChatMessage[]>;
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object") return {} as Record<string, ChatMessage[]>;
+    const record = parsed as Partial<PersistedRecentHistoryPayload>;
+    if (record.version !== 1 || !record.bySourceKey || typeof record.bySourceKey !== "object") {
+      return {} as Record<string, ChatMessage[]>;
+    }
+
+    const now = Date.now();
+    const bySourceKey: Record<string, ChatMessage[]> = {};
+    for (const [sourceKey, entries] of Object.entries(record.bySourceKey)) {
+      if (!sourceKey || !Array.isArray(entries)) continue;
+      const normalized = entries
+        .map((entry) => {
+          if (!entry || typeof entry !== "object") return null;
+          const item = entry as Partial<PersistedRecentHistoryMessage>;
+          if ((item.platform !== "twitch" && item.platform !== "kick") || !item.timestamp) return null;
+          const id = typeof item.id === "string" && item.id.trim() ? item.id.trim() : `${item.platform}-${createId()}`;
+          const channel = typeof item.channel === "string" ? item.channel.trim() : "";
+          const username = typeof item.username === "string" ? item.username.trim() : "";
+          const displayName = typeof item.displayName === "string" ? item.displayName.trim() : username;
+          const content = typeof item.message === "string" ? transliterateArabicToEgyptianFranco(item.message) : "";
+          if (!channel || !displayName || !content) return null;
+          return {
+            id,
+            platform: item.platform,
+            channel,
+            username: username || displayName,
+            displayName,
+            message: content,
+            timestamp: item.timestamp,
+            badges: Array.isArray(item.badges) ? item.badges.filter((badge): badge is string => typeof badge === "string") : undefined,
+            color: typeof item.color === "string" ? item.color : undefined
+          } satisfies ChatMessage;
+        })
+        .filter((message): message is ChatMessage => message !== null);
+      const pruned = pruneRecentHistoryMessages(normalized, now);
+      if (pruned.length > 0) {
+        bySourceKey[sourceKey] = pruned;
+      }
+    }
+    return bySourceKey;
+  } catch {
+    return {} as Record<string, ChatMessage[]>;
+  }
+};
+
+const writeRecentHistoryPayload = (historyBySourceKey: Record<string, ChatMessage[]>) => {
+  try {
+    const now = Date.now();
+    const bySourceKey: Record<string, PersistedRecentHistoryMessage[]> = {};
+    for (const [sourceKey, entries] of Object.entries(historyBySourceKey)) {
+      if (!sourceKey || !Array.isArray(entries) || entries.length === 0) continue;
+      const normalized = pruneRecentHistoryMessages(entries, now)
+        .filter((entry) => isHistoryPlatform(entry.platform))
+        .map((entry) => toPersistedRecentHistoryMessage(entry));
+      if (normalized.length > 0) {
+        bySourceKey[sourceKey] = normalized;
+      }
+    }
+
+    const payload: PersistedRecentHistoryPayload = {
+      version: 1,
+      savedAt: now,
+      bySourceKey
+    };
+    window.localStorage.setItem(RECENT_CHAT_HISTORY_STORAGE_KEY, JSON.stringify(payload));
+  } catch {
+    // no-op: local storage can fail due to quota or user privacy settings.
+  }
+};
+
+const transliterateArabicToEgyptianFranco = (input: string) => {
+  if (!input || !ARABIC_SCRIPT_REGEX.test(input)) return input;
+  const normalized = input.normalize("NFKC").replace(/\u0640/g, "").replace(ARABIC_DIACRITICS_REGEX, "");
+  let output = "";
+  for (let index = 0; index < normalized.length; index += 1) {
+    const char = normalized[index];
+    const next = normalized[index + 1] ?? "";
+    if (char === "ل" && next === "ا") {
+      output += "la";
+      index += 1;
+      continue;
+    }
+    output += ARABIC_CHAR_TO_EGYPTIAN_FRANCO[char] ?? char;
+  }
+  return output;
+};
 const LOCKED_RENDERED_MESSAGE_LIMIT = 420;
 const CONTEXT_MENU_EDGE_GAP_PX = 12;
 const CONTEXT_MENU_DEFAULT_WIDTH_PX = 250;
@@ -1368,7 +1576,7 @@ const OverlayView: React.FC = () => {
     };
     broadcast.addEventListener("message", handler);
     return () => broadcast.removeEventListener("message", handler);
-  }, []);
+  }, [settings.backgroundMonitorOnClose]);
 
   const visible = messages.filter((message) => !channelFilter || message.channel === channelFilter);
   const channels = Array.from(new Set(messages.map((message) => message.channel)));
@@ -1501,12 +1709,16 @@ const MainApp: React.FC = () => {
   const [pendingMessageJumpKey, setPendingMessageJumpKey] = useState<string | null>(null);
   const [dockPanelWidth, setDockPanelWidth] = useState(DOCK_PANEL_DEFAULT_WIDTH);
   const [dockPanelResizing, setDockPanelResizing] = useState(false);
+  const [backgroundMonitorActive, setBackgroundMonitorActive] = useState(false);
 
   const searchRef = useRef<HTMLInputElement | null>(null);
   const channelInputRef = useRef<HTMLInputElement | null>(null);
   const menuDetailsRef = useRef<HTMLDetailsElement | null>(null);
   const importSessionInputRef = useRef<HTMLInputElement | null>(null);
   const messageListRef = useRef<HTMLDivElement | null>(null);
+  const recentHistoryBySourceKeyRef = useRef<Record<string, ChatMessage[]>>({});
+  const recentHistorySaveTimerRef = useRef<number | null>(null);
+  const backgroundMonitorActiveRef = useRef(false);
   const lastMessageListScrollTopRef = useRef(0);
   const autoResumeTimerRef = useRef<number | null>(null);
   const mainLayoutRef = useRef<HTMLDivElement | null>(null);
@@ -1540,10 +1752,15 @@ const MainApp: React.FC = () => {
   const theme = settings.theme === "light" ? "light" : settings.theme === "classic" ? "classic" : "dark";
   const chatTextScale = clampChatTextScale(Number(settings.chatTextScale ?? CHAT_TEXT_SCALE_DEFAULT));
   const chatDeckMode = false;
-  const effectivePerformanceMode = settings.performanceMode === true || adaptivePerformanceMode;
+  const effectivePerformanceMode = settings.performanceMode === true || adaptivePerformanceMode || backgroundMonitorActive;
   const mutedGroups = settings.mutedGroups ?? [];
   const tabGroups = settings.tabGroups ?? {};
   const activeTabGroup = activeTabId ? tabGroups[activeTabId] ?? "" : "";
+  const performanceModeStatusNote = backgroundMonitorActive
+    ? "(background monitor active)"
+    : adaptivePerformanceMode
+      ? "(adaptive override active)"
+      : "";
   const streamDelayMode = settings.streamDelayMode === true;
   const streamDelaySeconds = Math.max(0, Math.min(180, Number(settings.streamDelaySeconds ?? 0) || 0));
   const spoilerBlurDelayed = settings.spoilerBlurDelayed === true;
@@ -1604,6 +1821,24 @@ const MainApp: React.FC = () => {
     return () => window.clearTimeout(timer);
   }, [authMessage]);
 
+  useEffect(() => {
+    const syncBackgroundMonitorState = () => {
+      const nextActive = settings.backgroundMonitorOnClose !== false && document.visibilityState === "hidden";
+      backgroundMonitorActiveRef.current = nextActive;
+      setBackgroundMonitorActive((previous) => (previous === nextActive ? previous : nextActive));
+    };
+
+    syncBackgroundMonitorState();
+    document.addEventListener("visibilitychange", syncBackgroundMonitorState);
+    window.addEventListener("pageshow", syncBackgroundMonitorState);
+    window.addEventListener("focus", syncBackgroundMonitorState);
+    return () => {
+      document.removeEventListener("visibilitychange", syncBackgroundMonitorState);
+      window.removeEventListener("pageshow", syncBackgroundMonitorState);
+      window.removeEventListener("focus", syncBackgroundMonitorState);
+    };
+  }, [settings.backgroundMonitorOnClose]);
+
   const sourceExternalLink = (source: ChatSource): string => {
     if (source.platform === "twitch") return `https://www.twitch.tv/${source.channel}`;
     if (source.platform === "kick") return `https://kick.com/${source.channel}`;
@@ -1614,6 +1849,48 @@ const MainApp: React.FC = () => {
     }
     return `https://www.tiktok.com/@${source.channel}/live`;
   };
+
+  const flushRecentHistoryToStorage = useCallback(() => {
+    if (recentHistorySaveTimerRef.current !== null) {
+      window.clearTimeout(recentHistorySaveTimerRef.current);
+      recentHistorySaveTimerRef.current = null;
+    }
+    writeRecentHistoryPayload(recentHistoryBySourceKeyRef.current);
+  }, []);
+
+  const scheduleRecentHistorySave = useCallback(() => {
+    if (recentHistorySaveTimerRef.current !== null) return;
+    recentHistorySaveTimerRef.current = window.setTimeout(() => {
+      recentHistorySaveTimerRef.current = null;
+      writeRecentHistoryPayload(recentHistoryBySourceKeyRef.current);
+    }, RECENT_CHAT_SAVE_DEBOUNCE_MS);
+  }, []);
+
+  const cacheRecentHistoryMessage = useCallback(
+    (source: ChatSource, message: ChatMessage) => {
+      if (!isHistoryPlatform(source.platform) || !isHistoryPlatform(message.platform)) return;
+      if (normalizeUserKey(message.username) === "system") return;
+      const sourceKey = source.key || `${source.platform}:${normalizeChannel(source.channel, source.platform)}`;
+      const existing = recentHistoryBySourceKeyRef.current[sourceKey] ?? [];
+      recentHistoryBySourceKeyRef.current[sourceKey] = pruneRecentHistoryMessages(
+        [...existing, normalizeRecentHistoryMessage(message)],
+        Date.now()
+      );
+      scheduleRecentHistorySave();
+    },
+    [scheduleRecentHistorySave]
+  );
+
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      flushRecentHistoryToStorage();
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      flushRecentHistoryToStorage();
+    };
+  }, [flushRecentHistoryToStorage]);
 
   const copyActiveTabLinks = async () => {
     if (!activeTab) return;
@@ -1668,6 +1945,27 @@ const MainApp: React.FC = () => {
         setSources(restoredSources);
         setTabs(restoredTabs);
         setActiveTabId(restoredActiveTabId);
+
+        const restoredHistoryBySourceKey = readRecentHistoryPayload();
+        recentHistoryBySourceKeyRef.current = restoredHistoryBySourceKey;
+        const restoredMessagesBySource: Record<string, ChatMessage[]> = {};
+        for (const source of restoredSources) {
+          if (!isHistoryPlatform(source.platform)) continue;
+          const sourceKey = source.key || `${source.platform}:${normalizeChannel(source.channel, source.platform)}`;
+          const historyMessages = restoredHistoryBySourceKey[sourceKey];
+          if (!Array.isArray(historyMessages) || historyMessages.length === 0) continue;
+          restoredMessagesBySource[source.id] = historyMessages.map((message) => ({
+            ...message,
+            platform: source.platform,
+            channel: source.channel
+          }));
+        }
+        if (Object.keys(restoredMessagesBySource).length > 0) {
+          setMessagesBySource((previous) => ({
+            ...previous,
+            ...restoredMessagesBySource
+          }));
+        }
 
         const reconnectableSources = restoredSources.filter((source) => {
           if (source.platform === "twitch") {
@@ -2853,6 +3151,13 @@ const MainApp: React.FC = () => {
 
     adapter.onMessage((message) => {
       const now = Date.now();
+      const transliteratedMessage = transliterateArabicToEgyptianFranco(message.message);
+      if (transliteratedMessage !== message.message) {
+        message = {
+          ...message,
+          message: transliteratedMessage
+        };
+      }
       const raw = asRecord(message.raw);
       const moderationEventKind = resolveModerationEventKind(message);
       const isModerationEvent = moderationEventKind !== null;
@@ -2943,7 +3248,7 @@ const MainApp: React.FC = () => {
       }
 
       setMessagesBySource((prev) => {
-        const maxHistory = currentSettings.performanceMode ? 300 : 800;
+        const maxHistory = backgroundMonitorActiveRef.current ? 180 : currentSettings.performanceMode ? 300 : 800;
         const existing = prev[source.id] ?? [];
         let updated = existing;
         let skipAppend = false;
@@ -2975,6 +3280,7 @@ const MainApp: React.FC = () => {
         updated = updated.slice(-maxHistory);
         return { ...prev, [source.id]: updated };
       });
+      cacheRecentHistoryMessage(source, message);
 
       const sourceTabIds = tabIdsBySourceIdRef.current[source.id] ?? [];
       const sourceInActiveTab = sourceTabIds.includes(activeTabIdRef.current);
@@ -3083,7 +3389,7 @@ const MainApp: React.FC = () => {
         );
       }
 
-      if (source.platform === "twitch" && !channelEmoteMapBySourceIdRef.current[source.id]) {
+      if (source.platform === "twitch" && !backgroundMonitorActiveRef.current && !channelEmoteMapBySourceIdRef.current[source.id]) {
         const roomId = extractTwitchRoomId(message);
         if (roomId && !emoteFetchInFlight.current.has(source.id)) {
           emoteFetchInFlight.current.add(source.id);
@@ -3286,6 +3592,23 @@ const MainApp: React.FC = () => {
     if (!existingSource) {
       setSources((prev) => [...prev, source]);
     }
+    if (isHistoryPlatform(source.platform)) {
+      const sourceHistory = recentHistoryBySourceKeyRef.current[source.key] ?? [];
+      if (sourceHistory.length > 0) {
+        setMessagesBySource((previous) => {
+          const existingMessages = previous[source.id] ?? [];
+          if (existingMessages.length > 0) return previous;
+          return {
+            ...previous,
+            [source.id]: sourceHistory.map((entry) => ({
+              ...entry,
+              platform: source.platform,
+              channel: source.channel
+            }))
+          };
+        });
+      }
+    }
     if (!shouldConnectNow) {
       return;
     }
@@ -3352,7 +3675,6 @@ const MainApp: React.FC = () => {
       delete sourceStatusRef.current[source.id];
     });
     setMentionInbox((previous) => previous.filter((entry) => !orphanedIds.has(entry.sourceId)));
-
     for (const source of orphaned) {
       suppressedAutoHealSourceIdsRef.current.add(source.id);
       clearAutoHealRetry(source.id, true);
@@ -5495,7 +5817,15 @@ const MainApp: React.FC = () => {
                     checked={effectivePerformanceMode}
                     onChange={(event) => void persistSettings({ performanceMode: event.target.checked })}
                   />
-                  Performance mode {adaptivePerformanceMode ? "(adaptive override active)" : ""}
+                  Performance mode {performanceModeStatusNote}
+                </label>
+                <label className="menu-check">
+                  <input
+                    type="checkbox"
+                    checked={settings.backgroundMonitorOnClose !== false}
+                    onChange={(event) => void persistSettings({ backgroundMonitorOnClose: event.target.checked })}
+                  />
+                  Keep running in background after close (macOS)
                 </label>
                 </div>
               ) : (
@@ -5507,7 +5837,15 @@ const MainApp: React.FC = () => {
                       checked={effectivePerformanceMode}
                       onChange={(event) => void persistSettings({ performanceMode: event.target.checked })}
                     />
-                    Performance mode
+                    Performance mode {performanceModeStatusNote}
+                  </label>
+                  <label className="menu-check">
+                    <input
+                      type="checkbox"
+                      checked={settings.backgroundMonitorOnClose !== false}
+                      onChange={(event) => void persistSettings({ backgroundMonitorOnClose: event.target.checked })}
+                    />
+                    Keep running in background after close (macOS)
                   </label>
                 </div>
               )}
