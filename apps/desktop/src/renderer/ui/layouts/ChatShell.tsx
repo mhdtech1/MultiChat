@@ -1,10 +1,12 @@
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { ChatAdapter, ChatAdapterStatus, ChatMessage } from "@multichat/chat-core";
 import { KickAdapter, TikTokAdapter, TwitchAdapter, YouTubeAdapter, normalizeTwitchMessage, parseIrcMessage } from "@multichat/chat-core";
 import { VirtualizedMessageList } from "../components/MessageList";
 import { PlatformIcon } from "../components/common/PlatformIcon";
 import { RoleBadge as UiRoleBadge, type RoleType as UiRoleType } from "../components/common/RoleBadge";
 import { WelcomeScreen } from "../components/common/WelcomeScreen";
+import type { OverlayFeedEvent, OverlayMessage, OverlaySourceRef } from "../../../shared/types";
 
 const mode = window.location.hash.replace("#", "");
 const broadcast = new BroadcastChannel("multichat-chat");
@@ -1814,6 +1816,79 @@ const fetchTwitchThirdPartyEmotes = async (
   return fetchTwitchThirdPartyEmotesByUserId(userId);
 };
 
+const toOverlaySourceKey = (platform: Platform, channel: string) => `${platform}:${channel.trim().toLowerCase()}`;
+
+const extractTwitchProfileImageUrl = (payload: unknown): string | null => {
+  const record = asRecord(payload);
+  if (!record?.data || !Array.isArray(record.data) || record.data.length === 0) return null;
+  const first = asRecord(record.data[0]);
+  const profileImageUrl = typeof first?.profile_image_url === "string" ? first.profile_image_url.trim() : "";
+  return profileImageUrl || null;
+};
+
+const fetchTwitchChannelAvatar = async (channel: string, twitchClientId?: string, twitchToken?: string): Promise<string | null> => {
+  const clientId = (twitchClientId ?? "").trim();
+  const token = normalizeOauthToken(twitchToken);
+  const normalizedChannel = normalizeChannel(channel, "twitch");
+  if (!clientId || !token || !normalizedChannel) return null;
+
+  const payload = await fetchJsonSafe(`https://api.twitch.tv/helix/users?login=${encodeURIComponent(normalizedChannel)}`, {
+    headers: {
+      "Client-ID": clientId,
+      Authorization: `Bearer ${token}`
+    }
+  });
+  return extractTwitchProfileImageUrl(payload);
+};
+
+const fetchKickChannelAvatar = async (channel: string): Promise<string | null> => {
+  const normalizedChannel = normalizeChannel(channel, "kick");
+  if (!normalizedChannel) return null;
+  const payload = await fetchJsonSafe(`https://kick.com/api/v2/channels/${encodeURIComponent(normalizedChannel)}`, {
+    headers: {
+      Accept: "application/json",
+      Referer: `https://kick.com/${normalizedChannel}`
+    }
+  });
+  const record = asRecord(payload);
+  const user = asRecord(record?.user);
+  const avatarCandidates = [
+    user?.profile_pic,
+    user?.profile_picture,
+    record?.profile_pic,
+    record?.profile_picture,
+    record?.banner_picture
+  ];
+  for (const candidate of avatarCandidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  return null;
+};
+
+const resolveOverlayChannelAvatar = async (source: ChatSource, settings: Settings): Promise<string | null> => {
+  if (source.platform === "twitch") {
+    return fetchTwitchChannelAvatar(source.channel, settings.twitchClientId, settings.twitchToken);
+  }
+  if (source.platform === "kick") {
+    return fetchKickChannelAvatar(source.channel);
+  }
+  return null;
+};
+
+const toOverlayMessage = (message: ChatMessage, avatarBySourceKey: Record<string, string>): OverlayMessage => ({
+  id: message.id,
+  platform: message.platform,
+  channel: message.channel,
+  username: message.username,
+  displayName: message.displayName,
+  message: message.message,
+  color: message.color,
+  channelAvatarUrl: avatarBySourceKey[toOverlaySourceKey(message.platform as Platform, message.channel)],
+  timestamp: message.timestamp
+});
+
 const checkTwitchModeratorStatus = async (channel: string, username: string): Promise<boolean | null> => {
   const normalizedChannel = normalizeChannel(channel, "twitch");
   const normalizedUser = normalizeUserKey(username);
@@ -2055,20 +2130,55 @@ export const App: React.FC = () => {
 };
 
 const OverlayView: React.FC = () => {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<OverlayMessage[]>([]);
   const [channelFilter, setChannelFilter] = useState<string>("");
   const [locked, setLocked] = useState(false);
+  const [followActiveTab, setFollowActiveTab] = useState(true);
+  const [activeSourceKeys, setActiveSourceKeys] = useState<string[]>([]);
+  const messagesRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const handler = (event: MessageEvent<ChatMessage>) => {
-      setMessages((prev) => [...prev.slice(-300), event.data]);
+    const sourceKey = (source: OverlaySourceRef) => `${source.platform}:${source.channel.trim().toLowerCase()}`;
+    const messageKey = (message: OverlayMessage) => `${message.platform}:${message.channel.trim().toLowerCase()}`;
+
+    const handler = (event: MessageEvent<OverlayFeedEvent>) => {
+      const payload = event.data;
+      if (!payload || typeof payload !== "object") return;
+      if (payload.type === "chat") {
+        setMessages((prev) => [...prev.slice(-300), payload.message]);
+        return;
+      }
+      if (payload.type === "active-sources") {
+        setActiveSourceKeys(payload.sources.map(sourceKey));
+      }
     };
-    broadcast.addEventListener("message", handler);
-    return () => broadcast.removeEventListener("message", handler);
+
+    broadcast.addEventListener("message", handler as EventListener);
+    return () => broadcast.removeEventListener("message", handler as EventListener);
   }, []);
 
-  const visible = messages.filter((message) => !channelFilter || message.channel === channelFilter);
+  useEffect(() => {
+    if (followActiveTab && channelFilter) {
+      setChannelFilter("");
+    }
+  }, [followActiveTab, channelFilter]);
+
+  const visible = messages.filter((message) => {
+    if (followActiveTab && activeSourceKeys.length > 0) {
+      const key = `${message.platform}:${message.channel.trim().toLowerCase()}`;
+      if (!activeSourceKeys.includes(key)) {
+        return false;
+      }
+    }
+    return !channelFilter || message.channel === channelFilter;
+  });
   const channels = Array.from(new Set(messages.map((message) => message.channel)));
+
+  useEffect(() => {
+    const list = messagesRef.current;
+    if (!list) return;
+    list.scrollTo({ top: list.scrollHeight, behavior: "auto" });
+  }, [visible.length, channelFilter, followActiveTab, activeSourceKeys]);
 
   useEffect(() => {
     void window.electronAPI.setOverlayLocked(locked).catch(() => {
@@ -2081,9 +2191,21 @@ const OverlayView: React.FC = () => {
       <header className="overlay-header">
         <h1>Overlay</h1>
         <div className="overlay-controls">
+          <label className="overlay-controls__check">
+            <input
+              type="checkbox"
+              checked={followActiveTab}
+              onChange={(event) => setFollowActiveTab(event.target.checked)}
+            />
+            Follow active tab
+          </label>
           <label>
             Channel
-            <select value={channelFilter} onChange={(event) => setChannelFilter(event.target.value)}>
+            <select
+              value={channelFilter}
+              onChange={(event) => setChannelFilter(event.target.value)}
+              disabled={followActiveTab}
+            >
               <option value="">All</option>
               {channels.map((channel) => (
                 <option key={channel} value={channel}>
@@ -2100,17 +2222,28 @@ const OverlayView: React.FC = () => {
           </button>
         </div>
       </header>
-      <div className="overlay-messages">
+      <div className="overlay-messages" ref={messagesRef}>
         {visible.map((message) => (
-          <div key={message.id} className="overlay-message">
-            <strong>{message.displayName}</strong>
-            <span>{message.message}</span>
+          <div key={message.id} className={`overlay-message overlay-message--${message.platform}`}>
+            <span className="overlay-message__badge">
+              {message.channelAvatarUrl ? (
+                <img src={message.channelAvatarUrl} alt="" referrerPolicy="no-referrer" />
+              ) : (
+                <span className="overlay-message__badge-fallback">{message.platform.slice(0, 1).toUpperCase()}</span>
+              )}
+            </span>
+            <span className="overlay-message__name" style={message.color ? { color: message.color } : undefined}>
+              {message.displayName || message.username || "user"}
+            </span>
+            <span className="overlay-message__separator">:</span>
+            <span className="overlay-message__text">{message.message}</span>
           </div>
         ))}
       </div>
     </div>
   );
 };
+
 
 export default App;
 
@@ -2171,11 +2304,14 @@ const MainApp: React.FC = () => {
   const [moderatorBySource, setModeratorBySource] = useState<Record<string, boolean>>({});
   const [globalEmoteMap, setGlobalEmoteMap] = useState<EmoteMap>({});
   const [kickGlobalEmoteMap, setKickGlobalEmoteMap] = useState<EmoteMap>({});
+  const [overlayChannelAvatarByKey, setOverlayChannelAvatarByKey] = useState<Record<string, string>>({});
   const [channelEmoteMapBySourceId, setChannelEmoteMapBySourceId] = useState<Record<string, EmoteMap>>({});
   const [twitchGlobalBadgeCatalog, setTwitchGlobalBadgeCatalog] = useState<TwitchBadgeCatalog>({});
   const [twitchChannelBadgeCatalogByRoomId, setTwitchChannelBadgeCatalogByRoomId] = useState<Record<string, TwitchBadgeCatalog>>({});
   const [tabMenu, setTabMenu] = useState<TabMenuState | null>(null);
   const [messageMenu, setMessageMenu] = useState<MessageMenuState | null>(null);
+  const [mainMenuOpen, setMainMenuOpen] = useState(false);
+  const [mainMenuPanelStyle, setMainMenuPanelStyle] = useState<React.CSSProperties>();
   const [userLogTarget, setUserLogTarget] = useState<UserLogTarget | null>(null);
   const [sessionHydrated, setSessionHydrated] = useState(false);
   const [newestLocked, setNewestLocked] = useState(true);
@@ -2206,12 +2342,16 @@ const MainApp: React.FC = () => {
 
   const searchRef = useRef<HTMLInputElement | null>(null);
   const channelInputRef = useRef<HTMLInputElement | null>(null);
-  const menuDetailsRef = useRef<HTMLDetailsElement | null>(null);
+  const menuDropdownRef = useRef<HTMLDivElement | null>(null);
+  const menuButtonRef = useRef<HTMLButtonElement | null>(null);
+  const mainMenuPanelRef = useRef<HTMLDivElement | null>(null);
   const importSessionInputRef = useRef<HTMLInputElement | null>(null);
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const composerHistoryIndexRef = useRef(-1);
   const composerHistoryDraftRef = useRef("");
   const recentHistoryBySourceKeyRef = useRef<Record<string, ChatMessage[]>>({});
+  const overlayChannelAvatarByKeyRef = useRef<Record<string, string>>({});
+  const overlayAvatarAttemptedRef = useRef<Set<string>>(new Set());
   const recentHistorySaveTimerRef = useRef<number | null>(null);
   const twitchRemoteHistoryAttemptedRef = useRef<Set<string>>(new Set());
   const backgroundMonitorActiveRef = useRef(false);
@@ -2470,6 +2610,20 @@ const MainApp: React.FC = () => {
     if (links.length === 0) return;
     await navigator.clipboard.writeText(links.join("\n"));
     setAuthMessage(links.length === 1 ? "Channel link copied." : `Copied ${links.length} channel links.`);
+  };
+
+  const syncWithObs = async () => {
+    try {
+      const url = await window.electronAPI.getObsOverlayUrl();
+      try {
+        await navigator.clipboard.writeText(url);
+        setAuthMessage(`OBS Browser Source URL copied: ${url}`);
+      } catch {
+        setAuthMessage(`OBS Browser Source URL: ${url}`);
+      }
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : String(error));
+    }
   };
 
   useEffect(() => {
@@ -2903,12 +3057,64 @@ const MainApp: React.FC = () => {
     const handler = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       closeAllOpenDetailsMenus();
+      setMainMenuOpen(false);
       setTabMenu(null);
       setMessageMenu(null);
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
+
+  useEffect(() => {
+    if (!mainMenuOpen) return;
+    const onMouseDown = (event: MouseEvent) => {
+      const root = menuDropdownRef.current;
+      const panel = mainMenuPanelRef.current;
+      if (!(event.target instanceof Node)) return;
+      if (root && root.contains(event.target)) return;
+      if (panel && panel.contains(event.target)) return;
+      setMainMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown);
+    };
+  }, [mainMenuOpen]);
+
+  useEffect(() => {
+    if (!mainMenuOpen) {
+      setMainMenuPanelStyle(undefined);
+      return;
+    }
+
+    const updatePosition = () => {
+      const trigger = menuButtonRef.current;
+      if (!trigger) return;
+      const rect = trigger.getBoundingClientRect();
+      const viewportWidth = Math.max(window.innerWidth, 320);
+      const viewportHeight = Math.max(window.innerHeight, 320);
+      const width = Math.min(420, viewportWidth - 20);
+      const left = Math.min(Math.max(10, rect.right - width), viewportWidth - width - 10);
+      const top = Math.max(10, Math.min(rect.bottom + 8, viewportHeight - 110));
+
+      setMainMenuPanelStyle({
+        position: "fixed",
+        left,
+        top,
+        width,
+        maxWidth: `calc(100vw - 20px)`,
+        maxHeight: `min(calc(100vh - ${Math.round(top) + 20}px), 760px)`
+      });
+    };
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [mainMenuOpen]);
 
   useEffect(() => {
     return () => {
@@ -2936,6 +3142,15 @@ const MainApp: React.FC = () => {
   useEffect(() => {
     sourceByIdRef.current = sourceById;
   }, [sourceById]);
+  useEffect(() => {
+    overlayChannelAvatarByKeyRef.current = overlayChannelAvatarByKey;
+  }, [overlayChannelAvatarByKey]);
+
+  const emitOverlayFeedEvent = useCallback((payload: OverlayFeedEvent) => {
+    broadcast.postMessage(payload);
+    window.electronAPI.pushObsOverlayEvent(payload);
+  }, []);
+
   const sourceByPlatformChannel = useMemo(
     () => new Map(sources.map((source) => [`${source.platform}:${source.channel}`, source])),
     [sources]
@@ -2949,6 +3164,51 @@ const MainApp: React.FC = () => {
   );
   const activeTabIsMerged = activeTabSources.length > 1;
   const activeSingleSource = activeTabSources.length === 1 ? activeTabSources[0] : null;
+
+  useEffect(() => {
+    emitOverlayFeedEvent({
+      type: "active-sources",
+      sources: activeTabSources.map((source) => ({
+        platform: source.platform,
+        channel: source.channel
+      }))
+    });
+  }, [activeTabSources, emitOverlayFeedEvent]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const pending = sources.filter((source) => {
+      const key = toOverlaySourceKey(source.platform, source.channel);
+      if (overlayChannelAvatarByKeyRef.current[key]) return false;
+      if (overlayAvatarAttemptedRef.current.has(key)) return false;
+      overlayAvatarAttemptedRef.current.add(key);
+      return true;
+    });
+    if (pending.length === 0) return;
+
+    void Promise.all(
+      pending.map(async (source) => {
+        const key = toOverlaySourceKey(source.platform, source.channel);
+        const avatar = await resolveOverlayChannelAvatar(source, settings);
+        return avatar ? { key, avatar } : null;
+      })
+    ).then((entries) => {
+      if (cancelled) return;
+      const resolved = entries.filter((entry): entry is { key: string; avatar: string } => Boolean(entry));
+      if (resolved.length === 0) return;
+      setOverlayChannelAvatarByKey((previous) => {
+        const next = { ...previous };
+        for (const entry of resolved) {
+          next[entry.key] = entry.avatar;
+        }
+        return next;
+      });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [settings, sources]);
   const writableActiveTabSources = useMemo(
     () =>
       activeTabSources.filter((source) => {
@@ -4113,7 +4373,7 @@ const MainApp: React.FC = () => {
         }
       }
 
-      broadcast.postMessage(message);
+      emitOverlayFeedEvent({ type: "chat", message: toOverlayMessage(message, overlayChannelAvatarByKeyRef.current) });
     });
 
     adaptersRef.current.set(source.id, adapter);
@@ -4827,7 +5087,7 @@ const MainApp: React.FC = () => {
         const updated = [...(prev[source.id] ?? []), systemMessage].slice(-800);
         return { ...prev, [source.id]: updated };
       });
-      broadcast.postMessage(systemMessage);
+      emitOverlayFeedEvent({ type: "chat", message: toOverlayMessage(systemMessage, overlayChannelAvatarByKeyRef.current) });
     };
 
     try {
@@ -5184,7 +5444,7 @@ const MainApp: React.FC = () => {
         ...previous,
         [source.id]: [...(previous[source.id] ?? []), auditMessage].slice(-800)
       }));
-      broadcast.postMessage(auditMessage);
+      emitOverlayFeedEvent({ type: "chat", message: toOverlayMessage(auditMessage, overlayChannelAvatarByKeyRef.current) });
     }
 
     setModerationHistory((previous) => [
@@ -6045,11 +6305,9 @@ const MainApp: React.FC = () => {
     }, 0);
   };
   const openMainMenu = () => {
-    const menu = menuDetailsRef.current;
-    if (!menu) return;
-    menu.open = true;
+    setMainMenuOpen(true);
     window.setTimeout(() => {
-      const closeButton = menu.querySelector<HTMLButtonElement>(".menu-close-button");
+      const closeButton = mainMenuPanelRef.current?.querySelector<HTMLButtonElement>(".menu-close-button");
       closeButton?.focus();
     }, 0);
   };
@@ -6064,6 +6322,7 @@ const MainApp: React.FC = () => {
       className={isSimpleMode ? "chat-shell simple" : "chat-shell"}
       style={{ "--chat-text-scale": (chatTextScale / 100).toFixed(2) } as React.CSSProperties}
       onClick={() => {
+        setMainMenuOpen(false);
         setTabMenu(null);
         setMessageMenu(null);
       }}
@@ -6132,15 +6391,35 @@ const MainApp: React.FC = () => {
           <button type="submit">Open Tab</button>
         </form>
         <div className="top-actions">
-          <details className="menu-dropdown" ref={menuDetailsRef}>
-            <summary>Menu</summary>
-            <div className="menu-dropdown-panel">
+          <div className={mainMenuOpen ? "menu-dropdown open" : "menu-dropdown"} ref={menuDropdownRef}>
+            <button
+              ref={menuButtonRef}
+              type="button"
+              className="menu-dropdown-trigger"
+              aria-haspopup="menu"
+              aria-expanded={mainMenuOpen}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                setMainMenuOpen((previous) => !previous);
+              }}
+            >
+              Menu
+            </button>
+            {mainMenuOpen ? createPortal(
+            <div
+              ref={mainMenuPanelRef}
+              className="menu-dropdown-panel menu-dropdown-panel--portal"
+              style={mainMenuPanelStyle}
+              onClick={(event) => event.stopPropagation()}
+              onMouseDown={(event) => event.stopPropagation()}
+            >
               <div className="menu-panel-header">
                 <span>Main menu</span>
                 <button
                   type="button"
                   className="menu-close-button"
-                  onClick={closeClosestDetailsMenu}
+                  onClick={() => setMainMenuOpen(false)}
                   aria-label="Close main menu"
                   title="Close menu (Esc)"
                 >
@@ -6207,6 +6486,9 @@ const MainApp: React.FC = () => {
                 <strong>View</strong>
                 <button type="button" onClick={() => window.electronAPI.openOverlay()}>
                   Open Overlay
+                </button>
+                <button type="button" onClick={() => void syncWithObs()}>
+                  Sync with OBS
                 </button>
                 <button type="button" onClick={() => setQuickTourOpen(true)}>
                   Open Quick Tour
@@ -6812,8 +7094,10 @@ const MainApp: React.FC = () => {
                 </label>
               </div>
               ) : null}
-            </div>
-          </details>
+            </div>,
+            document.body
+            ) : null}
+          </div>
           {isSimpleMode && mentionInboxCount > 0 ? <span className="top-mention-pill">Mentions {mentionInboxCount}</span> : null}
         </div>
       </header>
@@ -7169,6 +7453,9 @@ const MainApp: React.FC = () => {
 	                    <button type="button" className="quick-action-button" onClick={() => window.electronAPI.openOverlay()}>
 	                      Open overlay
 	                    </button>
+                    <button type="button" className="quick-action-button" onClick={() => void syncWithObs()}>
+                      Sync with OBS
+                    </button>
                     <button type="button" className="quick-action-button" onClick={() => void copyActiveTabLinks()}>
                       Copy channel link
                     </button>

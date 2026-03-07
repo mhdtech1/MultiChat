@@ -4,7 +4,8 @@ import type {
   ModerationRequest,
   TikTokRendererEvent,
   UpdateChannel,
-  UpdateStatus
+  UpdateStatus,
+  OverlayFeedEvent
 } from "../shared/types";
 
 type ElectronAPI = {
@@ -15,6 +16,8 @@ type ElectronAPI = {
   openOverlay: () => Promise<void>;
   closeOverlay: () => Promise<void>;
   setOverlayLocked: (locked: boolean) => Promise<{ locked: boolean }>;
+  getObsOverlayUrl: () => Promise<string>;
+  pushObsOverlayEvent: (payload: OverlayFeedEvent) => void;
   signInTwitch: () => Promise<AppSettings>;
   signOutTwitch: () => Promise<AppSettings>;
   signInKick: () => Promise<AppSettings>;

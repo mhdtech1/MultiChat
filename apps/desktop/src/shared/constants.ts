@@ -6,6 +6,8 @@ export const IPC_CHANNELS = {
   OVERLAY_OPEN: "overlay:open",
   OVERLAY_CLOSE: "overlay:close",
   OVERLAY_SET_LOCKED: "overlay:setLocked",
+  OBS_OVERLAY_GET_URL: "overlay:obs:getUrl",
+  OBS_OVERLAY_PUSH_EVENT: "overlay:obs:pushEvent",
   AUTH_TWITCH_SIGN_IN: "auth:twitch:signIn",
   AUTH_TWITCH_SIGN_OUT: "auth:twitch:signOut",
   AUTH_KICK_SIGN_IN: "auth:kick:signIn",

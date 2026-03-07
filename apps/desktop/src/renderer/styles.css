@@ -280,6 +280,8 @@ select {
   border-bottom: 1px solid var(--border-soft);
   background: var(--surface-gradient);
   backdrop-filter: blur(6px);
+  position: relative;
+  z-index: 220;
 }
 
 .top-left {
@@ -383,8 +385,7 @@ select {
   z-index: 60;
 }
 
-.menu-dropdown > summary {
-  list-style: none;
+.menu-dropdown-trigger {
   border: 1px solid var(--border-soft);
   background: var(--btn-solid-bg);
   color: var(--text-main);
@@ -394,11 +395,7 @@ select {
   user-select: none;
 }
 
-.menu-dropdown > summary::-webkit-details-marker {
-  display: none;
-}
-
-.menu-dropdown[open] > summary {
+.menu-dropdown.open .menu-dropdown-trigger {
   border-color: var(--accent);
 }
 
@@ -423,6 +420,11 @@ select {
   scrollbar-gutter: stable;
   -webkit-overflow-scrolling: touch;
   overflow-x: hidden;
+  pointer-events: auto;
+}
+
+.menu-dropdown-panel--portal {
+  z-index: 1200;
 }
 
 .menu-group {
@@ -1743,13 +1745,12 @@ select {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: rgba(8, 14, 18, 0.3);
-  backdrop-filter: blur(2px);
+  background: transparent;
   color: #f5f5f5;
 }
 
 .overlay.locked .overlay-header {
-  border-bottom-color: rgba(226, 176, 75, 0.45);
+  display: none;
 }
 
 .overlay-header {
@@ -1765,8 +1766,8 @@ select {
 
 .overlay-header h1 {
   margin: 0;
-  font-size: 14px;
-  letter-spacing: 0.04em;
+  font-size: 12px;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
@@ -1785,13 +1786,21 @@ select {
   color: #d7e6ef;
 }
 
+.overlay-controls__check {
+  font-weight: 600;
+}
+
+.overlay-controls__check input {
+  accent-color: #6dff2f;
+}
+
 .overlay-controls select,
 .overlay-controls button {
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(9, 17, 22, 0.84);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(10, 10, 10, 0.82);
   color: #f5f5f5;
   border-radius: 8px;
-  padding: 6px 8px;
+  padding: 6px 10px;
 }
 
 .overlay-controls button:disabled {
@@ -1801,14 +1810,72 @@ select {
 
 .overlay-messages {
   flex: 1;
-  padding: 12px;
+  padding: 12px 16px 14px;
   overflow-y: auto;
-  font-size: 22px;
+  font-size: clamp(18px, 2.2vw, 30px);
+  font-weight: 700;
+  line-height: 1.22;
+  text-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.95),
+    0 0 12px rgba(0, 0, 0, 0.85);
 }
 
 .overlay-message {
-  padding: 8px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 4px;
+}
+
+.overlay-message__badge {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.18);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.overlay-message__badge img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.overlay-message__badge-fallback {
+  font-size: 10px;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.overlay-message__name {
+  font-weight: 800;
+}
+
+.overlay-message__separator,
+.overlay-message__text {
+  color: #ffffff;
+}
+
+.overlay-message--twitch .overlay-message__name {
+  color: #bf94ff;
+}
+
+.overlay-message--kick .overlay-message__name {
+  color: #6dff2f;
+}
+
+.overlay-message--youtube .overlay-message__name {
+  color: #ff7a7a;
+}
+
+.overlay-message--tiktok .overlay-message__name {
+  color: #87f0ff;
 }
 
 :root[data-theme="light"] .login-card {
@@ -1985,6 +2052,8 @@ body {
   padding: 10px 14px;
   box-shadow: none;
   overflow: visible;
+  position: relative;
+  z-index: 220;
 }
 
 .brand-block h1 {
@@ -2009,7 +2078,7 @@ body {
 .top-actions button,
 .toolbar input,
 .ghost,
-.menu-dropdown > summary {
+.menu-dropdown > .menu-dropdown-trigger {
   border-radius: var(--ui-radius-sm);
   border-color: color-mix(in srgb, var(--border-soft), white 4%);
   background: color-mix(in srgb, var(--bg-panel), white 1%);
@@ -2024,23 +2093,25 @@ body {
 .channel-form button:hover,
 .top-actions button:hover,
 .tab-refresh-button:hover,
-.menu-dropdown > summary:hover {
+.menu-dropdown-trigger:hover {
   border-color: color-mix(in srgb, var(--accent), white 6%);
 }
 
 .menu-dropdown-panel {
-  position: fixed;
-  top: 72px;
-  right: 12px;
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
   left: auto;
-  width: min(460px, calc(100vw - 24px));
-  max-width: calc(100vw - 24px);
-  max-height: calc(100vh - 84px);
+  z-index: 120;
+  min-width: min(280px, calc(100vw - 20px));
+  width: min(420px, calc(100vw - 20px));
+  max-width: calc(100vw - 20px);
+  max-height: min(calc(100vh - 112px), 760px);
   border-radius: var(--ui-radius-md);
   border-color: color-mix(in srgb, var(--border-soft), white 6%);
   background: var(--bg-soft);
   box-shadow: var(--ui-shadow-1);
-  padding: 12px;
+  padding: 10px;
 }
 
 .menu-group button {

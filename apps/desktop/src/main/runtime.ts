@@ -24,7 +24,8 @@ import type {
   ModerationRequest,
   TikTokRendererEvent,
   UpdateChannel,
-  UpdateStatus
+  UpdateStatus,
+  OverlayFeedEvent
 } from "../shared/types.js";
 import { JsonSettingsStore } from "./services/settingsStore.js";
 import {
@@ -34,6 +35,7 @@ import {
   storeAuthTokens
 } from "./services/secureStorage.js";
 import { openAuthInBrowser as openLoopbackAuthInBrowser } from "./services/loopbackOAuth.js";
+import { ObsOverlayServer } from "./services/obsOverlayServer.js";
 
 const { autoUpdater } = electronUpdater;
 type TikTokConnectorModule = typeof import("tiktok-live-connector");
@@ -2249,6 +2251,7 @@ const writeLog = (message: string) => {
 let mainWindow: BrowserWindow | null = null;
 let overlayWindow: BrowserWindow | null = null;
 let overlayLocked = false;
+let obsOverlayServer: ObsOverlayServer | null = null;
 let store!: JsonSettingsStore;
 let updaterInitialized = false;
 const tiktokConnections = new Map<string, TikTokConnectionRecord>();
@@ -2752,6 +2755,13 @@ const applyOverlayLockState = (locked: boolean) => {
   overlayWindow.setMovable(!locked);
   overlayWindow.setResizable(!locked);
   return { locked: overlayLocked };
+};
+
+const getObsOverlayServer = () => {
+  if (!obsOverlayServer) {
+    obsOverlayServer = new ObsOverlayServer();
+  }
+  return obsOverlayServer;
 };
 
 const createOverlayWindow = () => {
@@ -3785,6 +3795,14 @@ app.whenReady().then(async () => {
   ipcMain.handle(IPC_CHANNELS.OVERLAY_SET_LOCKED, (_event, locked: boolean) => {
     return applyOverlayLockState(Boolean(locked));
   });
+  ipcMain.handle(IPC_CHANNELS.OBS_OVERLAY_GET_URL, async () => {
+    const server = getObsOverlayServer();
+    return server.start();
+  });
+  ipcMain.on(IPC_CHANNELS.OBS_OVERLAY_PUSH_EVENT, (_event, payload: OverlayFeedEvent) => {
+    const server = getObsOverlayServer();
+    server.ingest(payload);
+  });
   ipcMain.handle(IPC_CHANNELS.UPDATES_CHECK, async () => {
     return requestUpdateCheck();
   });
@@ -3835,6 +3853,7 @@ app.on("before-quit", () => {
   appIsQuitting = true;
   clearPendingAutoInstallTimer();
   void disconnectAllTikTokConnections();
+  void obsOverlayServer?.stop();
 });
 
 app.on("activate", () => {

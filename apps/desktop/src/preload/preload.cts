@@ -4,7 +4,8 @@ import type {
   ModerationRequest,
   TikTokRendererEvent,
   UpdateChannel,
-  UpdateStatus
+  UpdateStatus,
+  OverlayFeedEvent
 } from "../shared/types.js";
 
 const { contextBridge, ipcRenderer } = require("electron") as typeof import("electron");
@@ -17,6 +18,8 @@ const IPC_CHANNELS = {
   OVERLAY_OPEN: "overlay:open",
   OVERLAY_CLOSE: "overlay:close",
   OVERLAY_SET_LOCKED: "overlay:setLocked",
+  OBS_OVERLAY_GET_URL: "overlay:obs:getUrl",
+  OBS_OVERLAY_PUSH_EVENT: "overlay:obs:pushEvent",
   AUTH_TWITCH_SIGN_IN: "auth:twitch:signIn",
   AUTH_TWITCH_SIGN_OUT: "auth:twitch:signOut",
   AUTH_KICK_SIGN_IN: "auth:kick:signIn",
@@ -55,6 +58,10 @@ const api = {
   closeOverlay: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.OVERLAY_CLOSE),
   setOverlayLocked: (locked: boolean): Promise<{ locked: boolean }> =>
     ipcRenderer.invoke(IPC_CHANNELS.OVERLAY_SET_LOCKED, locked),
+  getObsOverlayUrl: (): Promise<string> => ipcRenderer.invoke(IPC_CHANNELS.OBS_OVERLAY_GET_URL),
+  pushObsOverlayEvent: (payload: OverlayFeedEvent): void => {
+    ipcRenderer.send(IPC_CHANNELS.OBS_OVERLAY_PUSH_EVENT, payload);
+  },
   signInTwitch: (): Promise<AppSettings> => ipcRenderer.invoke(IPC_CHANNELS.AUTH_TWITCH_SIGN_IN),
   signOutTwitch: (): Promise<AppSettings> => ipcRenderer.invoke(IPC_CHANNELS.AUTH_TWITCH_SIGN_OUT),
   signInKick: (): Promise<AppSettings> => ipcRenderer.invoke(IPC_CHANNELS.AUTH_KICK_SIGN_IN),
