@@ -4,6 +4,15 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+const isSafeExternalUrl = (url: string): boolean => {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+};
+
 type MainWindowOptions = {
   width?: number;
   height?: number;
@@ -30,6 +39,7 @@ export class MainWindowManager {
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,
+        sandbox: true,
         preload: path.join(__dirname, "../preload/preload.cjs")
       }
     });
@@ -40,7 +50,9 @@ export class MainWindowManager {
     void this.window.loadURL(loadUrl);
 
     this.window.webContents.setWindowOpenHandler(({ url }) => {
-      void shell.openExternal(url);
+      if (isSafeExternalUrl(url)) {
+        void shell.openExternal(url);
+      }
       return { action: "deny" };
     });
 

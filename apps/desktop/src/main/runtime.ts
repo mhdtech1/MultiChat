@@ -61,6 +61,16 @@ const TIKTOK_SIGN_KEY_REQUIRED_MESSAGE =
 const TIKTOK_AUTH_PARTITION = "persist:multichat-tiktok-auth";
 const TIKTOK_AUTH_TIMEOUT_MS = AUTH.TIKTOK_AUTH_TIMEOUT_MS;
 const TIKTOK_LOGIN_URL = "https://www.tiktok.com/login";
+
+const isSafeExternalUrl = (url: string): boolean => {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+};
+
 const TIKTOK_SIGN_API_KEY = (process.env.TIKTOK_SIGN_API_KEY ?? "").trim();
 const TWITCH_DEFAULT_REDIRECT_URI = "http://localhost:51730/twitch/callback";
 const KICK_DEFAULT_REDIRECT_URI = "http://localhost:51730/kick/callback";
@@ -386,7 +396,9 @@ const openTikTokSignInWindow = async (): Promise<{ sessionId: string; ttTargetId
     authWindow.once("ready-to-show", onReadyToShow);
     authWindow.once("closed", onClosed);
     authWindow.webContents.setWindowOpenHandler(({ url }) => {
-      void shell.openExternal(url);
+      if (isSafeExternalUrl(url)) {
+        void shell.openExternal(url);
+      }
       return { action: "deny" };
     });
 
@@ -2718,7 +2730,9 @@ const createMainWindow = () => {
   mainWindow.loadURL(app.isPackaged ? `file://${indexUrl}` : indexUrl);
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    if (isSafeExternalUrl(url)) {
+      void shell.openExternal(url);
+    }
     return { action: "deny" };
   });
 

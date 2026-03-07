@@ -12,6 +12,9 @@ type TwitchBadgeCatalog = Record<string, Record<string, TwitchBadgeAsset>>;
 
 const MESSAGE_LINK_REGEX = /(?:https?:\/\/|www\.)[^\s<]+/gi;
 
+const isSafeCssColor = (value: string): boolean =>
+  /^#(?:[0-9a-fA-F]{3,4}){1,2}$|^(?:rgb|hsl)a?\([^)]+\)$|^[a-zA-Z]{1,30}$/.test(value);
+
 type ChatLineProps = {
   message: ChatMessage;
   showTimestamp?: boolean;
@@ -175,7 +178,7 @@ export function ChatLine({
           <button
             type="button"
             className="chat-line__author"
-            style={{ color: message.color || "var(--accent)" }}
+            style={{ color: message.color && isSafeCssColor(message.color) ? message.color : "var(--accent)" }}
             onClick={(event) => {
               event.stopPropagation();
               onUsernameClick?.(message.username, message.platform);

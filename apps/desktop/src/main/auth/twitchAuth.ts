@@ -92,7 +92,7 @@ export class TwitchAuthService {
         }
       });
 
-      this.server.listen(AUTH.OAUTH_HTTP_PORT, () => {
+      this.server.listen(AUTH.OAUTH_HTTP_PORT, "127.0.0.1", () => {
         void shell.openExternal(this.buildAuthUrl(state));
       });
       this.server.on("error", (error) => {

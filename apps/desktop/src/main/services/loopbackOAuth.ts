@@ -166,7 +166,7 @@ export const openAuthInBrowser = async (
       finish(undefined, new Error(`Unable to listen for OAuth callback: ${text}`));
     });
 
-    server.listen(callbackPort, () => {
+    server.listen(callbackPort, "127.0.0.1", () => {
       void shell.openExternal(authUrl).catch((error) => {
         finish(undefined, new Error(`Failed to open default browser: ${String(error)}`));
       });
