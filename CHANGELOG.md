@@ -15,10 +15,18 @@ All notable changes to MultiChat are documented here.
 
 - **ErrorBoundary** – New React `ErrorBoundary` component wraps the entire renderer. Unhandled render errors now show a friendly "Something went wrong" screen with a Reload button instead of leaving users with a blank window.
 - **Renderer entry hardening** – `main.tsx` now throws an explicit error when the `#root` DOM element is missing, rather than silently failing.
+- **Accessibility** – Improved `SettingsPanel` with `aria-label` on toggles, `role="tablist"` / `aria-selected` on tab buttons, `id` / `aria-controls` attributes, and `role="tabpanel"` / `aria-labelledby` on content panels.
+
+### Removed
+
+- **OBS overlay** – Completely removed the OBS overlay server and overlay window. Deleted `obsOverlayServer.ts`, `overlayWindow.ts`, all overlay types (`OverlaySourceRef`, `OverlayMessage`, `OverlayFeedEvent`), overlay IPC channels, preload API, UI components, and associated CSS styles.
 
 ### Security
 
-- **Renderer sandbox** – Added `sandbox: true` to the `webPreferences` of both the main window and the overlay window. This restricts the renderer to Chromium's process sandbox, reducing the attack surface for any code running in those windows.
+- **Renderer sandbox** – Added `sandbox: true` to the main window `webPreferences`, restricting the renderer to Chromium's process sandbox and reducing the attack surface.
+- **URL validation** – Added `isSafeExternalUrl()` gate on all `shell.openExternal()` calls, restricting navigation to `http` / `https` URLs only.
+- **OAuth host binding** – Bound the OAuth loopback server to `127.0.0.1` instead of all interfaces.
+- **CSS color validation** – Added `isSafeCssColor()` to validate user-provided chat colors, with a strict regex that only allows safe characters in `rgb()` / `hsl()` values.
 
 ### Documentation
 
