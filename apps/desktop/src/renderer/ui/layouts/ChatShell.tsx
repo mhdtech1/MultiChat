@@ -35,6 +35,7 @@ import {
   useAuthStore,
   useConnectionStore,
   useTabStore,
+  useUIStore,
 } from "../../store";
 import { VirtualizedMessageList } from "../components/MessageList";
 import { PlatformIcon } from "../components/common/PlatformIcon";
@@ -2506,7 +2507,8 @@ const MainApp: React.FC = () => {
   ] = useState<Record<string, TwitchBadgeCatalog>>({});
   const [tabMenu, setTabMenu] = useState<TabMenuState | null>(null);
   const [messageMenu, setMessageMenu] = useState<MessageMenuState | null>(null);
-  const [mainMenuOpen, setMainMenuOpen] = useState(false);
+  const mainMenuOpen = useUIStore((state) => state.mainMenuOpen);
+  const setMainMenuOpen = useUIStore((state) => state.setMainMenuOpen);
   const [mainMenuPanelStyle, setMainMenuPanelStyle] =
     useState<React.CSSProperties>();
   const [userLogTarget, setUserLogTarget] = useState<UserLogTarget | null>(
@@ -2518,8 +2520,10 @@ const MainApp: React.FC = () => {
     null,
   );
   const [refreshingActiveTab, setRefreshingActiveTab] = useState(false);
-  const [quickTourOpen, setQuickTourOpen] = useState(false);
-  const [setupWizardOpen, setSetupWizardOpen] = useState(false);
+  const quickTourOpen = useUIStore((state) => state.quickTourOpen);
+  const setQuickTourOpen = useUIStore((state) => state.setQuickTourOpen);
+  const setupWizardOpen = useUIStore((state) => state.setupWizardOpen);
+  const setSetupWizardOpen = useUIStore((state) => state.setSetupWizardOpen);
   const [setupWizardStep, setSetupWizardStep] = useState(0);
   const [setupWizardDismissed, setSetupWizardDismissed] = useState(false);
   const [tabUnreadCounts, setTabUnreadCounts] = useState<
@@ -2548,7 +2552,10 @@ const MainApp: React.FC = () => {
   const [adaptivePerformanceMode, setAdaptivePerformanceMode] = useState(false);
   const [tabGroupDraft, setTabGroupDraft] = useState("");
   const [newAccountProfileName, setNewAccountProfileName] = useState("");
-  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const commandPaletteOpen = useUIStore((state) => state.commandPaletteOpen);
+  const setCommandPaletteOpen = useUIStore(
+    (state) => state.setCommandPaletteOpen,
+  );
   const [deckComposerByTabId, setDeckComposerByTabId] = useState<
     Record<string, string>
   >({});
