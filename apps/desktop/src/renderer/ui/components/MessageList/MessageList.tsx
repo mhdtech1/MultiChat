@@ -9,7 +9,11 @@ type MessageListProps = {
   onMessageClick?: (message: ChatMessage) => void;
 };
 
-export function MessageList({ messages, onUsernameClick, onMessageClick }: MessageListProps) {
+export function MessageList({
+  messages,
+  onUsernameClick,
+  onMessageClick,
+}: MessageListProps) {
   const showTimestamps = useSettingsStore((state) => state.showTimestamps);
   const showBadges = useSettingsStore((state) => state.showBadges);
 

@@ -1,5 +1,9 @@
 import { shell } from "electron";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import {
+  createServer,
+  type IncomingMessage,
+  type ServerResponse,
+} from "node:http";
 
 const normalizePathname = (pathname: string) => {
   const normalized = pathname.replace(/\/+$/, "");
@@ -8,13 +12,22 @@ const normalizePathname = (pathname: string) => {
 
 const isLoopbackHost = (hostname: string) => {
   const normalized = hostname.trim().toLowerCase();
-  return normalized === "localhost" || normalized === "127.0.0.1" || normalized === "::1" || normalized === "[::1]";
+  return (
+    normalized === "localhost" ||
+    normalized === "127.0.0.1" ||
+    normalized === "::1" ||
+    normalized === "[::1]"
+  );
 };
 
-const sendAuthHtml = (response: ServerResponse<IncomingMessage>, statusCode: number, html: string) => {
+const sendAuthHtml = (
+  response: ServerResponse<IncomingMessage>,
+  statusCode: number,
+  html: string,
+) => {
   response.writeHead(statusCode, {
     "Content-Type": "text/html; charset=utf-8",
-    "Cache-Control": "no-store, max-age=0"
+    "Cache-Control": "no-store, max-age=0",
   });
   response.end(html);
 };
@@ -91,7 +104,7 @@ type OpenAuthInBrowserOptions = {
 export const openAuthInBrowser = async (
   authUrl: string,
   redirectUri: string,
-  options: OpenAuthInBrowserOptions
+  options: OpenAuthInBrowserOptions,
 ): Promise<string> => {
   const redirect = new URL(redirectUri);
 
@@ -99,7 +112,9 @@ export const openAuthInBrowser = async (
     throw new Error("OAuth redirect URI must use http:// for desktop sign-in.");
   }
   if (!isLoopbackHost(redirect.hostname)) {
-    throw new Error("OAuth redirect URI must use localhost or loopback for desktop sign-in.");
+    throw new Error(
+      "OAuth redirect URI must use localhost or loopback for desktop sign-in.",
+    );
   }
 
   const callbackPath = normalizePathname(redirect.pathname);
@@ -117,7 +132,9 @@ export const openAuthInBrowser = async (
         incoming.searchParams.has("error") ||
         incoming.searchParams.has("state");
       const isExpectedPath = incomingPath === callbackPath;
-      const hasOAuthPayload = Boolean(oauthFragment && oauthFragment.length > 0) || hasDirectCallbackParams;
+      const hasOAuthPayload =
+        Boolean(oauthFragment && oauthFragment.length > 0) ||
+        hasDirectCallbackParams;
 
       if (!isExpectedPath && !hasOAuthPayload) {
         sendAuthHtml(response, 404, "<h1>Not found</h1>");
@@ -136,7 +153,14 @@ export const openAuthInBrowser = async (
         return;
       }
 
-      sendAuthHtml(response, 200, authHashBridgePage(incoming.pathname).replaceAll('"__PATHNAME__"', JSON.stringify(incoming.pathname)));
+      sendAuthHtml(
+        response,
+        200,
+        authHashBridgePage(incoming.pathname).replaceAll(
+          '"__PATHNAME__"',
+          JSON.stringify(incoming.pathname),
+        ),
+      );
     });
 
     const timeout = setTimeout(() => {
@@ -163,12 +187,18 @@ export const openAuthInBrowser = async (
 
     server.on("error", (error) => {
       const text = error instanceof Error ? error.message : String(error);
-      finish(undefined, new Error(`Unable to listen for OAuth callback: ${text}`));
+      finish(
+        undefined,
+        new Error(`Unable to listen for OAuth callback: ${text}`),
+      );
     });
 
     server.listen(callbackPort, "127.0.0.1", () => {
       void shell.openExternal(authUrl).catch((error) => {
-        finish(undefined, new Error(`Failed to open default browser: ${String(error)}`));
+        finish(
+          undefined,
+          new Error(`Failed to open default browser: ${String(error)}`),
+        );
       });
     });
   });

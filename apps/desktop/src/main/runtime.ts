@@ -9,7 +9,7 @@ import {
   session,
   type Session,
   type MenuItemConstructorOptions,
-  type MessageBoxOptions
+  type MessageBoxOptions,
 } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,38 +24,51 @@ import type {
   ModerationRequest,
   TikTokRendererEvent,
   UpdateChannel,
-  UpdateStatus
+  UpdateStatus,
 } from "../shared/types.js";
 import { JsonSettingsStore } from "./services/settingsStore.js";
 import {
   clearAuthTokens,
   hydrateTokenStateFromSecureStorage,
   migrateLegacySettingsTokens,
-  storeAuthTokens
+  storeAuthTokens,
 } from "./services/secureStorage.js";
 import { openAuthInBrowser as openLoopbackAuthInBrowser } from "./services/loopbackOAuth.js";
+import { fetchJsonOrThrow } from "./utils/http.js";
+import { registerIpcHandlers } from "./ipc/handlers.js";
 
 const { autoUpdater } = electronUpdater;
 type TikTokConnectorModule = typeof import("tiktok-live-connector");
-const tikTokLiveConnector = ((tikTokLiveConnectorCjs as unknown as { default?: TikTokConnectorModule }).default ??
+const tikTokLiveConnector = ((
+  tikTokLiveConnectorCjs as unknown as { default?: TikTokConnectorModule }
+).default ??
   (tikTokLiveConnectorCjs as unknown as TikTokConnectorModule)) as TikTokConnectorModule;
-const { TikTokLiveConnection, WebcastEvent, ControlEvent } = tikTokLiveConnector;
+const { TikTokLiveConnection, WebcastEvent, ControlEvent } =
+  tikTokLiveConnector;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const DEV_UPDATE_MESSAGE = "Auto updates are available in packaged builds only.";
+const DEV_UPDATE_MESSAGE =
+  "Auto updates are available in packaged builds only.";
 const DEFAULT_UPDATE_MESSAGE = "Checking for updates shortly...";
 const LEGACY_SIGNATURE_UPDATE_MESSAGE =
   "Updater could not apply this update due to a legacy app signature. Download and install the latest MultiChat release once from GitHub; future restart updates will then work.";
-const KICK_REAUTH_REQUIRED_MESSAGE = "Kick session expired. Sign in to Kick again.";
+const KICK_REAUTH_REQUIRED_MESSAGE =
+  "Kick session expired. Sign in to Kick again.";
 const YOUTUBE_MISSING_OAUTH_MESSAGE =
   "YouTube sign-in is not configured in this build. Configure a YouTube OAuth Client ID (secret optional) and try again.";
-const YOUTUBE_READONLY_UNAVAILABLE_MESSAGE = "YouTube read-only is not configured in this build.";
-const YOUTUBE_ALPHA_DISABLED_MESSAGE = "YouTube is an alpha-only feature and is disabled in this beta build.";
-const TIKTOK_ALPHA_DISABLED_MESSAGE = "TikTok LIVE is an alpha-only feature and is disabled in this beta build.";
-const TIKTOK_SIGN_IN_CANCELLED_MESSAGE = "TikTok sign-in was cancelled before completion.";
-const TIKTOK_SIGN_IN_TIMEOUT_MESSAGE = "TikTok sign-in timed out. Please try again.";
-const TIKTOK_SIGN_IN_REQUIRED_MESSAGE = "Sign in with TikTok before sending messages.";
+const YOUTUBE_READONLY_UNAVAILABLE_MESSAGE =
+  "YouTube read-only is not configured in this build.";
+const YOUTUBE_ALPHA_DISABLED_MESSAGE =
+  "YouTube is an alpha-only feature and is disabled in this beta build.";
+const TIKTOK_ALPHA_DISABLED_MESSAGE =
+  "TikTok LIVE is an alpha-only feature and is disabled in this beta build.";
+const TIKTOK_SIGN_IN_CANCELLED_MESSAGE =
+  "TikTok sign-in was cancelled before completion.";
+const TIKTOK_SIGN_IN_TIMEOUT_MESSAGE =
+  "TikTok sign-in timed out. Please try again.";
+const TIKTOK_SIGN_IN_REQUIRED_MESSAGE =
+  "Sign in with TikTok before sending messages.";
 const TIKTOK_SIGN_KEY_REQUIRED_MESSAGE =
   "TikTok sending is not configured in this build.";
 const TIKTOK_AUTH_PARTITION = "persist:multichat-tiktok-auth";
@@ -78,7 +91,8 @@ const YOUTUBE_DEFAULT_REDIRECT_URI = "http://localhost:51730/youtube/callback";
 const TWITCH_MANAGED_CLIENT_ID = "syeui9mom7i5f9060j03tydgpdywbh";
 const KICK_MANAGED_CLIENT_ID = "01KGRFF03VYRJMB3W4369Y07CS";
 const KICK_MANAGED_CLIENT_SECRET = "";
-const YOUTUBE_MANAGED_CLIENT_ID = "1008732662207-rufcsa7rafob02h29docduk7pboim0s8.apps.googleusercontent.com";
+const YOUTUBE_MANAGED_CLIENT_ID =
+  "1008732662207-rufcsa7rafob02h29docduk7pboim0s8.apps.googleusercontent.com";
 const YOUTUBE_MANAGED_CLIENT_SECRET = "";
 const YOUTUBE_MANAGED_API_KEY = "";
 const TWITCH_SCOPE_VERSION = 2;
@@ -87,9 +101,15 @@ const TWITCH_SCOPES = [
   "chat:edit",
   "moderator:manage:banned_users",
   "moderator:manage:chat_messages",
-  "moderator:read:moderators"
+  "moderator:read:moderators",
 ];
-const KICK_SCOPES = ["user:read", "channel:read", "chat:write", "moderation:ban", "moderation:chat_message:manage"];
+const KICK_SCOPES = [
+  "user:read",
+  "channel:read",
+  "chat:write",
+  "moderation:ban",
+  "moderation:chat_message:manage",
+];
 const YOUTUBE_SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl"];
 const KICK_SCOPE_VERSION = 3;
 const YOUTUBE_ALPHA_ENABLED = true;
@@ -97,28 +117,8 @@ const TIKTOK_ALPHA_ENABLED = true;
 const DEFAULT_UPDATE_CHANNEL: UpdateChannel = "stable";
 const FORCE_APP_RESET_VERSION = "0.1.35";
 
-const randomToken = (bytes = 32) => crypto.randomBytes(bytes).toString("base64url");
-
-const fetchJsonOrThrow = async <T>(response: Response, source: string): Promise<T> => {
-  const text = await response.text();
-  let parsed: Record<string, unknown> = {};
-  if (text) {
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      parsed = {};
-    }
-  }
-  if (!response.ok) {
-    const message =
-      (typeof parsed?.message === "string" && parsed.message) ||
-      (typeof parsed?.error?.message === "string" && parsed.error.message) ||
-      (typeof parsed?.error_description === "string" && parsed.error_description) ||
-      `${source} request failed (${response.status}).`;
-    throw new Error(message);
-  }
-  return parsed as T;
-};
+const randomToken = (bytes = 32) =>
+  crypto.randomBytes(bytes).toString("base64url");
 
 const AUTH_CALLBACK_TIMEOUT_MS = AUTH.OAUTH_CALLBACK_TIMEOUT_MS;
 
@@ -137,10 +137,14 @@ function bringAppToFrontAfterOAuth() {
   }
 }
 
-const openAuthInBrowser = (authUrl: string, redirectUri: string, timeoutMs = AUTH_CALLBACK_TIMEOUT_MS) =>
+const openAuthInBrowser = (
+  authUrl: string,
+  redirectUri: string,
+  timeoutMs = AUTH_CALLBACK_TIMEOUT_MS,
+) =>
   openLoopbackAuthInBrowser(authUrl, redirectUri, {
     timeoutMs,
-    onComplete: bringAppToFrontAfterOAuth
+    onComplete: bringAppToFrontAfterOAuth,
   });
 
 const attemptTikTokBrowserSignIn = () => {
@@ -159,14 +163,19 @@ const parseKickUserName = (response: unknown): string | undefined => {
   if (!user || typeof user !== "object") return undefined;
   const record = user as Record<string, unknown>;
 
-  if (typeof record.username === "string" && record.username.length > 0) return record.username;
-  if (typeof record.name === "string" && record.name.length > 0) return record.name;
-  if (typeof record.slug === "string" && record.slug.length > 0) return record.slug;
+  if (typeof record.username === "string" && record.username.length > 0)
+    return record.username;
+  if (typeof record.name === "string" && record.name.length > 0)
+    return record.name;
+  if (typeof record.slug === "string" && record.slug.length > 0)
+    return record.slug;
 
   return undefined;
 };
 
-const hydrateAccountIdentityFromStoredTokens = async (settingsStore: JsonSettingsStore) => {
+const hydrateAccountIdentityFromStoredTokens = async (
+  settingsStore: JsonSettingsStore,
+) => {
   const updates: Partial<AppSettings> = {};
 
   const twitchToken = settingsStore.get("twitchToken")?.trim() ?? "";
@@ -175,17 +184,23 @@ const hydrateAccountIdentityFromStoredTokens = async (settingsStore: JsonSetting
     try {
       const response = await fetch("https://id.twitch.tv/oauth2/validate", {
         headers: {
-          Authorization: `OAuth ${twitchToken}`
-        }
+          Authorization: `OAuth ${twitchToken}`,
+        },
       });
-      const payload = await fetchJsonOrThrow<{ login?: string }>(response, "Twitch token validation");
+      const payload = await fetchJsonOrThrow<{ login?: string }>(
+        response,
+        "Twitch token validation",
+      );
       const login = payload.login?.trim() ?? "";
       if (login) {
         updates.twitchUsername = login;
         updates.twitchGuest = false;
       }
     } catch (error) {
-      console.warn("[auth] unable to restore Twitch username from stored token", error);
+      console.warn(
+        "[auth] unable to restore Twitch username from stored token",
+        error,
+      );
     }
   }
 
@@ -196,17 +211,23 @@ const hydrateAccountIdentityFromStoredTokens = async (settingsStore: JsonSetting
       const response = await fetch("https://api.kick.com/public/v1/users", {
         headers: {
           Authorization: `Bearer ${kickAccessToken}`,
-          Accept: "application/json"
-        }
+          Accept: "application/json",
+        },
       });
-      const payload = await fetchJsonOrThrow<unknown>(response, "Kick user profile");
+      const payload = await fetchJsonOrThrow<unknown>(
+        response,
+        "Kick user profile",
+      );
       const restoredKickUsername = parseKickUserName(payload)?.trim() ?? "";
       if (restoredKickUsername) {
         updates.kickUsername = restoredKickUsername;
         updates.kickGuest = false;
       }
     } catch (error) {
-      console.warn("[auth] unable to restore Kick username from stored token", error);
+      console.warn(
+        "[auth] unable to restore Kick username from stored token",
+        error,
+      );
     }
   }
 
@@ -255,17 +276,25 @@ const isTikTokCookie = (cookie: Cookie) => {
 
 const pickCookieValue = (cookies: Cookie[]): string => {
   const valid = cookies
-    .filter((cookie) => isTikTokCookie(cookie) && typeof cookie.value === "string" && cookie.value.trim().length > 0)
-    .sort((left, right) => Number(right.expirationDate ?? 0) - Number(left.expirationDate ?? 0));
+    .filter(
+      (cookie) =>
+        isTikTokCookie(cookie) &&
+        typeof cookie.value === "string" &&
+        cookie.value.trim().length > 0,
+    )
+    .sort(
+      (left, right) =>
+        Number(right.expirationDate ?? 0) - Number(left.expirationDate ?? 0),
+    );
   return valid[0]?.value.trim() ?? "";
 };
 
 const readTikTokAuthFromSession = async (
-  authSession: Session
+  authSession: Session,
 ): Promise<{ sessionId: string; ttTargetIdc: string } | null> => {
   const [sessionCookies, idcCookies] = await Promise.all([
     authSession.cookies.get({ name: "sessionid" }),
-    authSession.cookies.get({ name: "tt-target-idc" })
+    authSession.cookies.get({ name: "tt-target-idc" }),
   ]);
   const sessionId = pickCookieValue(sessionCookies);
   const ttTargetIdc = pickCookieValue(idcCookies);
@@ -296,11 +325,14 @@ const clearTikTokAuthSession = async (authSession: Session): Promise<void> => {
       } catch {
         // best effort cleanup only
       }
-    })
+    }),
   );
 };
 
-const openTikTokSignInWindow = async (): Promise<{ sessionId: string; ttTargetIdc: string }> => {
+const openTikTokSignInWindow = async (): Promise<{
+  sessionId: string;
+  ttTargetIdc: string;
+}> => {
   const authSession = session.fromPartition(TIKTOK_AUTH_PARTITION);
   const existing = await readTikTokAuthFromSession(authSession);
   if (existing) return existing;
@@ -320,13 +352,14 @@ const openTikTokSignInWindow = async (): Promise<{ sessionId: string; ttTargetId
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,
-        partition: TIKTOK_AUTH_PARTITION
-      }
+        partition: TIKTOK_AUTH_PARTITION,
+      },
     });
 
     const onCookieChanged = (_event: unknown, cookie: Cookie) => {
       if (!isTikTokCookie(cookie)) return;
-      if (cookie.name !== "sessionid" && cookie.name !== "tt-target-idc") return;
+      if (cookie.name !== "sessionid" && cookie.name !== "tt-target-idc")
+        return;
       void tryCaptureAuthCookies();
     };
 
@@ -355,12 +388,24 @@ const openTikTokSignInWindow = async (): Promise<{ sessionId: string; ttTargetId
       authSession.cookies.removeListener("changed", onCookieChanged);
       authWindow.removeListener("ready-to-show", onReadyToShow);
       authWindow.removeListener("closed", onClosed);
-      authWindow.webContents.removeListener("did-finish-load", onDidChangeNavigation);
-      authWindow.webContents.removeListener("did-navigate", onDidChangeNavigation);
-      authWindow.webContents.removeListener("did-navigate-in-page", onDidChangeNavigation);
+      authWindow.webContents.removeListener(
+        "did-finish-load",
+        onDidChangeNavigation,
+      );
+      authWindow.webContents.removeListener(
+        "did-navigate",
+        onDidChangeNavigation,
+      );
+      authWindow.webContents.removeListener(
+        "did-navigate-in-page",
+        onDidChangeNavigation,
+      );
     };
 
-    const finish = (result?: { sessionId: string; ttTargetIdc: string }, error?: Error) => {
+    const finish = (
+      result?: { sessionId: string; ttTargetIdc: string },
+      error?: Error,
+    ) => {
       if (settled) return;
       settled = true;
       cleanup();
@@ -420,7 +465,8 @@ const asString = (value: unknown) => {
   return "";
 };
 
-const normalizeTikTokChannel = (input: string) => input.trim().replace(/^@+/, "").toLowerCase();
+const normalizeTikTokChannel = (input: string) =>
+  input.trim().replace(/^@+/, "").toLowerCase();
 
 const isLikelyTikTokOfflineError = (value: string) => {
   const text = value.toLowerCase();
@@ -451,7 +497,9 @@ type NormalizedTikTokChatMessage = {
 };
 
 type TikTokConnection = {
-  connect: () => Promise<{ roomId?: string | number } | Record<string, unknown>>;
+  connect: () => Promise<
+    { roomId?: string | number } | Record<string, unknown>
+  >;
   disconnect: () => Promise<void>;
   sendMessage?: (content: string) => Promise<unknown>;
   on: (event: string, listener: (...args: unknown[]) => void) => unknown;
@@ -484,16 +532,26 @@ const parseTikTokBadges = (rawBadges: unknown): string[] => {
   return parsed;
 };
 
-const normalizeTikTokChatMessage = (channel: string, payload: unknown): NormalizedTikTokChatMessage | null => {
+const normalizeTikTokChatMessage = (
+  channel: string,
+  payload: unknown,
+): NormalizedTikTokChatMessage | null => {
   const record = asUnknownRecord(payload);
   if (!record) return null;
 
-  const comment = asString(record.comment).trim() || asString(record.message).trim();
+  const comment =
+    asString(record.comment).trim() || asString(record.message).trim();
   if (!comment) return null;
 
   const user = asUnknownRecord(record.user) ?? {};
-  const username = asString(user.uniqueId).trim() || asString(user.username).trim() || "tiktok-user";
-  const displayName = asString(user.nickname).trim() || asString(user.displayName).trim() || username;
+  const username =
+    asString(user.uniqueId).trim() ||
+    asString(user.username).trim() ||
+    "tiktok-user";
+  const displayName =
+    asString(user.nickname).trim() ||
+    asString(user.displayName).trim() ||
+    username;
   const messageId =
     asString(record.msgId).trim() ||
     asString(record.messageId).trim() ||
@@ -507,9 +565,12 @@ const normalizeTikTokChatMessage = (channel: string, payload: unknown): Normaliz
         : createdEpochRaw
       : 0;
   const createdAt =
-    createdEpochMillis > 0 ? new Date(createdEpochMillis).toISOString() : new Date().toISOString();
+    createdEpochMillis > 0
+      ? new Date(createdEpochMillis).toISOString()
+      : new Date().toISOString();
 
-  const color = asString(user.nameColor).trim() || asString(user.color).trim() || undefined;
+  const color =
+    asString(user.nameColor).trim() || asString(user.color).trim() || undefined;
   const badges = parseTikTokBadges(user.badges);
 
   return {
@@ -522,17 +583,26 @@ const normalizeTikTokChatMessage = (channel: string, payload: unknown): Normaliz
     timestamp: createdAt,
     badges: badges.length > 0 ? badges : undefined,
     color,
-    raw: record
+    raw: record,
   };
 };
 
-const normalizeTikTokFollowMessage = (channel: string, payload: unknown): NormalizedTikTokChatMessage | null => {
+const normalizeTikTokFollowMessage = (
+  channel: string,
+  payload: unknown,
+): NormalizedTikTokChatMessage | null => {
   const record = asUnknownRecord(payload);
   if (!record) return null;
 
   const user = asUnknownRecord(record.user) ?? {};
-  const username = asString(user.uniqueId).trim() || asString(user.username).trim() || "tiktok-user";
-  const displayName = asString(user.nickname).trim() || asString(user.displayName).trim() || username;
+  const username =
+    asString(user.uniqueId).trim() ||
+    asString(user.username).trim() ||
+    "tiktok-user";
+  const displayName =
+    asString(user.nickname).trim() ||
+    asString(user.displayName).trim() ||
+    username;
   const messageId =
     asString(record.msgId).trim() ||
     asString(record.messageId).trim() ||
@@ -545,7 +615,9 @@ const normalizeTikTokFollowMessage = (channel: string, payload: unknown): Normal
         : createdEpochRaw
       : 0;
   const createdAt =
-    createdEpochMillis > 0 ? new Date(createdEpochMillis).toISOString() : new Date().toISOString();
+    createdEpochMillis > 0
+      ? new Date(createdEpochMillis).toISOString()
+      : new Date().toISOString();
 
   return {
     id: messageId,
@@ -557,8 +629,8 @@ const normalizeTikTokFollowMessage = (channel: string, payload: unknown): Normal
     timestamp: createdAt,
     raw: {
       ...record,
-      eventType: "follow"
-    }
+      eventType: "follow",
+    },
   };
 };
 
@@ -581,7 +653,9 @@ const parseKickChatroomId = (payload: unknown): number | null => {
 
   const chatroom = record.chatroom;
   if (chatroom && typeof chatroom === "object") {
-    const chatroomId = parsePositiveInteger((chatroom as Record<string, unknown>).id);
+    const chatroomId = parsePositiveInteger(
+      (chatroom as Record<string, unknown>).id,
+    );
     if (chatroomId) return chatroomId;
   }
 
@@ -605,7 +679,11 @@ const parseKickUserId = (payload: unknown): number | null => {
   if (!payload || typeof payload !== "object") return null;
   const record = payload as Record<string, unknown>;
 
-  for (const direct of [record.broadcaster_user_id, record.user_id, record.id]) {
+  for (const direct of [
+    record.broadcaster_user_id,
+    record.user_id,
+    record.id,
+  ]) {
     const parsed = parsePositiveInteger(direct);
     if (parsed) return parsed;
   }
@@ -719,7 +797,8 @@ const normalizeYouTubeInput = (input: string) => {
       if (parts[0] === "c" && parts[1]) return parts[1].replace(/^@/, "");
       if (parts[0] === "user" && parts[1]) return parts[1].replace(/^@/, "");
       if (parts[0]?.startsWith("@")) return parts[0].slice(1);
-      if ((parts[0] === "shorts" || parts[0] === "live") && parts[1]) return parts[1];
+      if ((parts[0] === "shorts" || parts[0] === "live") && parts[1])
+        return parts[1];
     }
   } catch {
     // Not a URL; fall back to plain-channel parsing.
@@ -762,10 +841,18 @@ const extractYouTubeVideoId = (input: string): string => {
         return watchId;
       }
       const pathParts = url.pathname.split("/").filter(Boolean);
-      if (pathParts[0] === "shorts" && pathParts[1] && YOUTUBE_VIDEO_ID_REGEX.test(pathParts[1])) {
+      if (
+        pathParts[0] === "shorts" &&
+        pathParts[1] &&
+        YOUTUBE_VIDEO_ID_REGEX.test(pathParts[1])
+      ) {
         return pathParts[1];
       }
-      if (pathParts[0] === "live" && pathParts[1] && YOUTUBE_VIDEO_ID_REGEX.test(pathParts[1])) {
+      if (
+        pathParts[0] === "live" &&
+        pathParts[1] &&
+        YOUTUBE_VIDEO_ID_REGEX.test(pathParts[1])
+      ) {
         return pathParts[1];
       }
     }
@@ -788,7 +875,9 @@ const htmlEntityDecode = (value: string) =>
 
 const matchFromHtml = (html: string, regex: RegExp): string => {
   const match = html.match(regex);
-  return typeof match?.[1] === "string" ? htmlEntityDecode(match[1]).trim() : "";
+  return typeof match?.[1] === "string"
+    ? htmlEntityDecode(match[1]).trim()
+    : "";
 };
 
 const parseYouTubeTextRuns = (runs: unknown): string => {
@@ -806,7 +895,13 @@ const parseYouTubeTextRuns = (runs: unknown): string => {
     .join("");
 };
 
-const parseYouTubeAuthorBadges = (badges: unknown): { isChatOwner?: boolean; isChatModerator?: boolean; isChatSponsor?: boolean } => {
+const parseYouTubeAuthorBadges = (
+  badges: unknown,
+): {
+  isChatOwner?: boolean;
+  isChatModerator?: boolean;
+  isChatSponsor?: boolean;
+} => {
   if (!Array.isArray(badges)) return {};
   let isChatOwner = false;
   let isChatModerator = false;
@@ -828,7 +923,10 @@ const parseYouTubeAuthorBadges = (badges: unknown): { isChatOwner?: boolean; isC
     ) {
       isChatOwner = true;
       isChatModerator = true;
-    } else if (iconType.includes("moderator") || tooltip.includes("moderator")) {
+    } else if (
+      iconType.includes("moderator") ||
+      tooltip.includes("moderator")
+    ) {
       isChatModerator = true;
     }
 
@@ -845,7 +943,9 @@ const parseYouTubeAuthorBadges = (badges: unknown): { isChatOwner?: boolean; isC
   return { isChatOwner, isChatModerator, isChatSponsor };
 };
 
-const normalizeYouTubeWebActions = (actions: unknown): Array<{
+const normalizeYouTubeWebActions = (
+  actions: unknown,
+): Array<{
   id: string;
   snippet: { displayMessage: string; publishedAt: string };
   authorDetails: {
@@ -877,10 +977,14 @@ const normalizeYouTubeWebActions = (actions: unknown): Array<{
     if (!renderer) continue;
 
     const id = asString(renderer.id).trim();
-    const message = parseYouTubeTextRuns(asUnknownRecord(renderer.message)?.runs);
+    const message = parseYouTubeTextRuns(
+      asUnknownRecord(renderer.message)?.runs,
+    );
     if (!id || !message) continue;
 
-    const authorName = asString(asUnknownRecord(renderer.authorName)?.simpleText).trim() || "YouTube user";
+    const authorName =
+      asString(asUnknownRecord(renderer.authorName)?.simpleText).trim() ||
+      "YouTube user";
     const channelId = asString(renderer.authorExternalChannelId).trim();
     const timestampUsecRaw = Number(asString(renderer.timestampUsec));
     const publishedAt =
@@ -893,24 +997,30 @@ const normalizeYouTubeWebActions = (actions: unknown): Array<{
       id,
       snippet: {
         displayMessage: message,
-        publishedAt
+        publishedAt,
       },
       authorDetails: {
         channelId,
         displayName: authorName,
-        ...badges
-      }
+        ...badges,
+      },
     });
   }
 
   return items;
 };
 
-const extractYouTubeWebContinuation = (payload: unknown): { continuation?: string; pollingIntervalMillis?: number } => {
+const extractYouTubeWebContinuation = (
+  payload: unknown,
+): { continuation?: string; pollingIntervalMillis?: number } => {
   const root = asUnknownRecord(payload);
   const continuationContents = asUnknownRecord(root?.continuationContents);
-  const liveChatContinuation = asUnknownRecord(continuationContents?.liveChatContinuation);
-  const continuations = Array.isArray(liveChatContinuation?.continuations) ? liveChatContinuation.continuations : [];
+  const liveChatContinuation = asUnknownRecord(
+    continuationContents?.liveChatContinuation,
+  );
+  const continuations = Array.isArray(liveChatContinuation?.continuations)
+    ? liveChatContinuation.continuations
+    : [];
 
   for (const entry of continuations) {
     const record = asUnknownRecord(entry);
@@ -920,7 +1030,10 @@ const extractYouTubeWebContinuation = (payload: unknown): { continuation?: strin
       const timeoutMs = Number(asString(timed.timeoutMs));
       return {
         continuation: continuation || undefined,
-        pollingIntervalMillis: Number.isFinite(timeoutMs) && timeoutMs > 0 ? Math.max(1000, Math.min(15000, timeoutMs)) : undefined
+        pollingIntervalMillis:
+          Number.isFinite(timeoutMs) && timeoutMs > 0
+            ? Math.max(1000, Math.min(15000, timeoutMs))
+            : undefined,
       };
     }
     const invalidation = asUnknownRecord(record?.invalidationContinuationData);
@@ -929,7 +1042,10 @@ const extractYouTubeWebContinuation = (payload: unknown): { continuation?: strin
       const timeoutMs = Number(asString(invalidation.invalidationTimeoutMs));
       return {
         continuation: continuation || undefined,
-        pollingIntervalMillis: Number.isFinite(timeoutMs) && timeoutMs > 0 ? Math.max(1000, Math.min(15000, timeoutMs)) : undefined
+        pollingIntervalMillis:
+          Number.isFinite(timeoutMs) && timeoutMs > 0
+            ? Math.max(1000, Math.min(15000, timeoutMs))
+            : undefined,
       };
     }
     const reload = asUnknownRecord(record?.reloadContinuationData);
@@ -969,28 +1085,37 @@ const fetchYouTubeHtml = async (url: string, source: string) => {
   const response = await fetch(url, {
     headers: {
       Accept: "text/html",
-      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
-    }
+      "User-Agent":
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+    },
   });
   if (!response.ok) {
     throw new Error(`${source} failed (${response.status}).`);
   }
   return {
     html: await response.text(),
-    finalUrl: response.url
+    finalUrl: response.url,
   };
 };
 
-const findYouTubeLiveVideoViaSearch = async (rawInput: string): Promise<string> => {
+const findYouTubeLiveVideoViaSearch = async (
+  rawInput: string,
+): Promise<string> => {
   const query = normalizeYouTubeInput(rawInput) || rawInput.trim();
   if (!query) return "";
   const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}&sp=EgJAAQ%253D%253D`;
-  const { html } = await fetchYouTubeHtml(searchUrl, "YouTube live search lookup");
+  const { html } = await fetchYouTubeHtml(
+    searchUrl,
+    "YouTube live search lookup",
+  );
   const fromVideoId = matchFromHtml(html, /"videoId":"([A-Za-z0-9_-]{11})"/);
   if (fromVideoId && YOUTUBE_VIDEO_ID_REGEX.test(fromVideoId)) {
     return fromVideoId;
   }
-  const fromWatchLink = matchFromHtml(html, /"url":"\\\/watch\?v=([A-Za-z0-9_-]{11})/);
+  const fromWatchLink = matchFromHtml(
+    html,
+    /"url":"\\\/watch\?v=([A-Za-z0-9_-]{11})/,
+  );
   if (fromWatchLink && YOUTUBE_VIDEO_ID_REGEX.test(fromWatchLink)) {
     return fromWatchLink;
   }
@@ -1003,7 +1128,10 @@ const resolveYouTubeLiveChatViaWeb = async (rawInput: string) => {
   let liveHtml = "";
   let liveFinalUrl = liveUrl;
   try {
-    const livePage = await fetchYouTubeHtml(liveUrl, "YouTube live page lookup");
+    const livePage = await fetchYouTubeHtml(
+      liveUrl,
+      "YouTube live page lookup",
+    );
     liveHtml = livePage.html;
     liveFinalUrl = livePage.finalUrl;
   } catch (error) {
@@ -1016,7 +1144,10 @@ const resolveYouTubeLiveChatViaWeb = async (rawInput: string) => {
   const redirectedVideoId = extractYouTubeVideoId(liveFinalUrl);
   const pageVideoId =
     redirectedVideoId ||
-    matchFromHtml(liveHtml, /"canonicalBaseUrl":"\\\/watch\?v=([A-Za-z0-9_-]{11})"/) ||
+    matchFromHtml(
+      liveHtml,
+      /"canonicalBaseUrl":"\\\/watch\?v=([A-Za-z0-9_-]{11})"/,
+    ) ||
     matchFromHtml(liveHtml, /"videoId":"([A-Za-z0-9_-]{11})"/) ||
     (await findYouTubeLiveVideoViaSearch(rawInput));
   if (!pageVideoId) {
@@ -1025,17 +1156,31 @@ const resolveYouTubeLiveChatViaWeb = async (rawInput: string) => {
 
   const watchUrl = `https://www.youtube.com/watch?v=${pageVideoId}`;
   const watchHtml =
-    liveFinalUrl.includes("/watch") && redirectedVideoId === pageVideoId && liveHtml
+    liveFinalUrl.includes("/watch") &&
+    redirectedVideoId === pageVideoId &&
+    liveHtml
       ? liveHtml
       : (await fetchYouTubeHtml(watchUrl, "YouTube watch page lookup")).html;
 
   const apiKey = matchFromHtml(watchHtml, /"INNERTUBE_API_KEY":"([^"]+)"/);
-  const clientVersion = matchFromHtml(watchHtml, /"INNERTUBE_CLIENT_VERSION":"([^"]+)"/);
+  const clientVersion = matchFromHtml(
+    watchHtml,
+    /"INNERTUBE_CLIENT_VERSION":"([^"]+)"/,
+  );
   const visitorData = matchFromHtml(watchHtml, /"VISITOR_DATA":"([^"]+)"/);
   const continuation =
-    matchFromHtml(watchHtml, /"reloadContinuationData":\{"continuation":"([^"]+)"/) ||
-    matchFromHtml(watchHtml, /"timedContinuationData":\{"timeoutMs":[0-9]+,"continuation":"([^"]+)"/) ||
-    matchFromHtml(watchHtml, /"invalidationContinuationData":\{"invalidationId":"[^"]+","invalidationTimeoutMs":[0-9]+,"continuation":"([^"]+)"/);
+    matchFromHtml(
+      watchHtml,
+      /"reloadContinuationData":\{"continuation":"([^"]+)"/,
+    ) ||
+    matchFromHtml(
+      watchHtml,
+      /"timedContinuationData":\{"timeoutMs":[0-9]+,"continuation":"([^"]+)"/,
+    ) ||
+    matchFromHtml(
+      watchHtml,
+      /"invalidationContinuationData":\{"invalidationId":"[^"]+","invalidationTimeoutMs":[0-9]+,"continuation":"([^"]+)"/,
+    );
   const channelId = matchFromHtml(watchHtml, /"channelId":"(UC[^"]+)"/);
   const channelTitle =
     matchFromHtml(watchHtml, /"ownerChannelName":"([^"]+)"/) ||
@@ -1043,7 +1188,9 @@ const resolveYouTubeLiveChatViaWeb = async (rawInput: string) => {
     normalizeYouTubeInput(rawInput);
 
   if (!apiKey || !clientVersion || !continuation) {
-    throw new Error("YouTube read-only web fallback could not extract live chat metadata for this stream.");
+    throw new Error(
+      "YouTube read-only web fallback could not extract live chat metadata for this stream.",
+    );
   }
 
   const liveChatId = `web:${pageVideoId}`;
@@ -1056,25 +1203,32 @@ const resolveYouTubeLiveChatViaWeb = async (rawInput: string) => {
     clientVersion,
     visitorData: visitorData || undefined,
     continuation,
-    updatedAt: Date.now()
+    updatedAt: Date.now(),
   });
 
   return {
     channelId: channelId || normalizeYouTubeInput(rawInput),
     channelTitle,
     videoId: pageVideoId,
-    liveChatId
+    liveChatId,
   };
 };
 
-const fetchYouTubeWebLiveMessages = async (payload: { liveChatId: string; pageToken?: string }) => {
+const fetchYouTubeWebLiveMessages = async (payload: {
+  liveChatId: string;
+  pageToken?: string;
+}) => {
   cleanupYouTubeWebSessions();
   const session = youtubeWebChatSessions.get(payload.liveChatId);
   if (!session) {
-    throw new Error("YouTube web chat session expired. Re-open the YouTube tab.");
+    throw new Error(
+      "YouTube web chat session expired. Re-open the YouTube tab.",
+    );
   }
 
-  const continuation = (payload.pageToken?.trim() || session.continuation).trim();
+  const continuation = (
+    payload.pageToken?.trim() || session.continuation
+  ).trim();
   if (!continuation) {
     throw new Error("YouTube web chat continuation token is missing.");
   }
@@ -1087,10 +1241,10 @@ const fetchYouTubeWebLiveMessages = async (payload: { liveChatId: string; pageTo
         clientVersion: session.clientVersion,
         hl: "en",
         gl: "US",
-        ...(session.visitorData ? { visitorData: session.visitorData } : {})
-      }
+        ...(session.visitorData ? { visitorData: session.visitorData } : {}),
+      },
     },
-    continuation
+    continuation,
   };
 
   const response = await fetch(endpoint, {
@@ -1100,16 +1254,19 @@ const fetchYouTubeWebLiveMessages = async (payload: { liveChatId: string; pageTo
       Accept: "application/json",
       Origin: "https://www.youtube.com",
       Referer: `https://www.youtube.com/watch?v=${session.videoId}`,
-      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+      "User-Agent":
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
   });
   if (!response.ok) {
     throw new Error(`YouTube web chat polling failed (${response.status}).`);
   }
   const parsed = (await response.json()) as unknown;
   const root = asUnknownRecord(parsed);
-  const liveChatContinuation = asUnknownRecord(asUnknownRecord(root?.continuationContents)?.liveChatContinuation);
+  const liveChatContinuation = asUnknownRecord(
+    asUnknownRecord(root?.continuationContents)?.liveChatContinuation,
+  );
   const actions = liveChatContinuation?.actions;
   const normalizedItems = normalizeYouTubeWebActions(actions);
   const continuationInfo = extractYouTubeWebContinuation(parsed);
@@ -1122,14 +1279,15 @@ const fetchYouTubeWebLiveMessages = async (payload: { liveChatId: string; pageTo
   return {
     nextPageToken: continuationInfo.continuation ?? session.continuation,
     pollingIntervalMillis: continuationInfo.pollingIntervalMillis ?? 3000,
-    items: normalizedItems
+    items: normalizedItems,
   };
 };
 
 const youtubeConfig = () => ({
   clientId: store.get("youtubeClientId")?.trim() ?? "",
   clientSecret: store.get("youtubeClientSecret")?.trim() ?? "",
-  redirectUri: store.get("youtubeRedirectUri")?.trim() || YOUTUBE_DEFAULT_REDIRECT_URI
+  redirectUri:
+    store.get("youtubeRedirectUri")?.trim() || YOUTUBE_DEFAULT_REDIRECT_URI,
 });
 
 const decodeJwtExp = (token: string): number | null => {
@@ -1140,7 +1298,8 @@ const decodeJwtExp = (token: string): number | null => {
   try {
     const json = Buffer.from(payload, "base64url").toString("utf8");
     const parsed = JSON.parse(json) as { exp?: unknown };
-    if (typeof parsed.exp !== "number" || !Number.isFinite(parsed.exp)) return null;
+    if (typeof parsed.exp !== "number" || !Number.isFinite(parsed.exp))
+      return null;
     return Math.max(0, parsed.exp * 1000);
   } catch {
     return null;
@@ -1160,32 +1319,40 @@ const testTwitchPermissions = async (): Promise<AuthPermissionSnapshot> => {
       canSend: false,
       canModerate: false,
       tokenExpiry: null,
-      lastCheckedAt: now
+      lastCheckedAt: now,
     };
   }
 
   try {
     const response = await fetch("https://id.twitch.tv/oauth2/validate", {
       headers: {
-        Authorization: `OAuth ${token}`
-      }
+        Authorization: `OAuth ${token}`,
+      },
     });
-    const payload = await fetchJsonOrThrow<{ login?: string; expires_in?: number; scopes?: unknown }>(
-      response,
-      "Twitch token validation"
-    );
-    const expiresIn = typeof payload.expires_in === "number" ? payload.expires_in : 0;
+    const payload = await fetchJsonOrThrow<{
+      login?: string;
+      expires_in?: number;
+      scopes?: unknown;
+    }>(response, "Twitch token validation");
+    const expiresIn =
+      typeof payload.expires_in === "number" ? payload.expires_in : 0;
     const scopes = new Set(
-      Array.isArray(payload.scopes) ? payload.scopes.filter((scope): scope is string => typeof scope === "string") : []
+      Array.isArray(payload.scopes)
+        ? payload.scopes.filter(
+            (scope): scope is string => typeof scope === "string",
+          )
+        : [],
     );
     return {
       platform: "twitch",
       signedIn: true,
       username: payload.login?.trim() || username,
       canSend: true,
-      canModerate: scopes.has("moderator:manage:banned_users") && scopes.has("moderator:manage:chat_messages"),
+      canModerate:
+        scopes.has("moderator:manage:banned_users") &&
+        scopes.has("moderator:manage:chat_messages"),
       tokenExpiry: expiresIn > 0 ? now + expiresIn * 1000 : null,
-      lastCheckedAt: now
+      lastCheckedAt: now,
     };
   } catch (error) {
     return {
@@ -1196,7 +1363,7 @@ const testTwitchPermissions = async (): Promise<AuthPermissionSnapshot> => {
       canModerate: false,
       tokenExpiry: null,
       lastCheckedAt: now,
-      error: error instanceof Error ? error.message : String(error)
+      error: error instanceof Error ? error.message : String(error),
     };
   }
 };
@@ -1214,7 +1381,7 @@ const testKickPermissions = async (): Promise<AuthPermissionSnapshot> => {
       canSend: false,
       canModerate: false,
       tokenExpiry: null,
-      lastCheckedAt: now
+      lastCheckedAt: now,
     };
   }
 
@@ -1222,8 +1389,8 @@ const testKickPermissions = async (): Promise<AuthPermissionSnapshot> => {
     const response = await fetch("https://api.kick.com/public/v1/users", {
       headers: {
         Authorization: `Bearer ${token}`,
-        Accept: "application/json"
-      }
+        Accept: "application/json",
+      },
     });
     await fetchJsonOrThrow<unknown>(response, "Kick user profile");
     return {
@@ -1233,7 +1400,7 @@ const testKickPermissions = async (): Promise<AuthPermissionSnapshot> => {
       canSend: true,
       canModerate: false,
       tokenExpiry: decodeJwtExp(token),
-      lastCheckedAt: now
+      lastCheckedAt: now,
     };
   } catch (error) {
     return {
@@ -1244,19 +1411,25 @@ const testKickPermissions = async (): Promise<AuthPermissionSnapshot> => {
       canModerate: false,
       tokenExpiry: decodeJwtExp(token),
       lastCheckedAt: now,
-      error: error instanceof Error ? error.message : String(error)
+      error: error instanceof Error ? error.message : String(error),
     };
   }
 };
 
 const getAuthHealthSnapshot = async (): Promise<AuthHealthSnapshot> => {
-  const [twitch, kick] = await Promise.all([testTwitchPermissions(), testKickPermissions()]);
+  const [twitch, kick] = await Promise.all([
+    testTwitchPermissions(),
+    testKickPermissions(),
+  ]);
   const youtubeTokenExpiry = Number(store.get("youtubeTokenExpiry") ?? 0);
   return {
     twitch,
     kick,
-    youtubeTokenExpiry: Number.isFinite(youtubeTokenExpiry) && youtubeTokenExpiry > 0 ? youtubeTokenExpiry : null,
-    updateChannel: resolveConfiguredUpdateChannel()
+    youtubeTokenExpiry:
+      Number.isFinite(youtubeTokenExpiry) && youtubeTokenExpiry > 0
+        ? youtubeTokenExpiry
+        : null,
+    updateChannel: resolveConfiguredUpdateChannel(),
   };
 };
 
@@ -1273,7 +1446,7 @@ const refreshKickAccessToken = async (): Promise<string> => {
     const tokenParams = new URLSearchParams({
       client_id: clientId,
       grant_type: "refresh_token",
-      refresh_token: refreshToken
+      refresh_token: refreshToken,
     });
     if (clientSecret) {
       tokenParams.set("client_secret", clientSecret);
@@ -1282,11 +1455,14 @@ const refreshKickAccessToken = async (): Promise<string> => {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
-        Accept: "application/json"
+        Accept: "application/json",
       },
-      body: tokenParams
+      body: tokenParams,
     });
-    tokens = await fetchJsonOrThrow<KickOAuthTokenResponse>(response, "Kick token refresh");
+    tokens = await fetchJsonOrThrow<KickOAuthTokenResponse>(
+      response,
+      "Kick token refresh",
+    );
   } catch {
     throw new Error(KICK_REAUTH_REQUIRED_MESSAGE);
   }
@@ -1300,34 +1476,41 @@ const refreshKickAccessToken = async (): Promise<string> => {
   store.set({
     kickAccessToken: accessToken,
     kickRefreshToken: nextRefreshToken,
-    kickGuest: false
+    kickGuest: false,
   });
   await storeAuthTokens("kick", {
     accessToken,
-    refreshToken: nextRefreshToken
+    refreshToken: nextRefreshToken,
   });
 
   return accessToken;
 };
 
 const getYouTubePublicApiKey = () =>
-  (store.get("youtubeApiKey")?.trim() ?? "") || (process.env.YOUTUBE_API_KEY ?? YOUTUBE_MANAGED_API_KEY).trim();
+  (store.get("youtubeApiKey")?.trim() ?? "") ||
+  (process.env.YOUTUBE_API_KEY ?? YOUTUBE_MANAGED_API_KEY).trim();
 
-const saveYouTubeTokens = async (tokens: { accessToken: string; refreshToken?: string; expiresIn?: number }) => {
+const saveYouTubeTokens = async (tokens: {
+  accessToken: string;
+  refreshToken?: string;
+  expiresIn?: number;
+}) => {
   const currentRefresh = store.get("youtubeRefreshToken")?.trim() ?? "";
   const refreshToken = (tokens.refreshToken ?? currentRefresh).trim();
   const expiresIn = Number(tokens.expiresIn ?? 0);
   const expiry =
-    Number.isFinite(expiresIn) && expiresIn > 0 ? Date.now() + Math.max(30, expiresIn - 30) * 1000 : Date.now() + 55 * 60 * 1000;
+    Number.isFinite(expiresIn) && expiresIn > 0
+      ? Date.now() + Math.max(30, expiresIn - 30) * 1000
+      : Date.now() + 55 * 60 * 1000;
 
   store.set({
     youtubeAccessToken: tokens.accessToken.trim(),
     youtubeRefreshToken: refreshToken,
-    youtubeTokenExpiry: expiry
+    youtubeTokenExpiry: expiry,
   });
   await storeAuthTokens("youtube", {
     accessToken: tokens.accessToken.trim(),
-    refreshToken
+    refreshToken,
   });
 };
 
@@ -1341,7 +1524,7 @@ const refreshYouTubeAccessToken = async (): Promise<string> => {
   const tokenParams = new URLSearchParams({
     client_id: clientId,
     grant_type: "refresh_token",
-    refresh_token: refreshToken
+    refresh_token: refreshToken,
   });
   if (clientSecret) {
     tokenParams.set("client_secret", clientSecret);
@@ -1351,18 +1534,21 @@ const refreshYouTubeAccessToken = async (): Promise<string> => {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
-      Accept: "application/json"
+      Accept: "application/json",
     },
-    body: tokenParams
+    body: tokenParams,
   });
-  const tokens = await fetchJsonOrThrow<YouTubeTokenResponse>(response, "YouTube token refresh");
+  const tokens = await fetchJsonOrThrow<YouTubeTokenResponse>(
+    response,
+    "YouTube token refresh",
+  );
   if (!tokens.access_token) {
     throw new Error("YouTube token refresh did not return an access token.");
   }
   await saveYouTubeTokens({
     accessToken: tokens.access_token,
     refreshToken: tokens.refresh_token,
-    expiresIn: tokens.expires_in
+    expiresIn: tokens.expires_in,
   });
   return tokens.access_token;
 };
@@ -1379,7 +1565,11 @@ const ensureYouTubeAccessToken = async (): Promise<string> => {
   return refreshYouTubeAccessToken();
 };
 
-const youtubeFetchWithAuth = async (input: string | URL, init: RequestInit = {}, allowRetry = true): Promise<Response> => {
+const youtubeFetchWithAuth = async (
+  input: string | URL,
+  init: RequestInit = {},
+  allowRetry = true,
+): Promise<Response> => {
   const token = await ensureYouTubeAccessToken();
   const headers = new Headers(init.headers ?? {});
   headers.set("Authorization", `Bearer ${token}`);
@@ -1389,18 +1579,28 @@ const youtubeFetchWithAuth = async (input: string | URL, init: RequestInit = {},
 
   const response = await fetch(input, {
     ...init,
-    headers
+    headers,
   });
 
-  if (response.status === 401 && allowRetry && (store.get("youtubeRefreshToken")?.trim() ?? "").length > 0) {
+  if (
+    response.status === 401 &&
+    allowRetry &&
+    (store.get("youtubeRefreshToken")?.trim() ?? "").length > 0
+  ) {
     await refreshYouTubeAccessToken();
     return youtubeFetchWithAuth(input, init, false);
   }
   return response;
 };
 
-const youtubeFetchReadOnly = async (input: string | URL, init: RequestInit = {}): Promise<Response> => {
-  const hasOAuthSession = Boolean((store.get("youtubeAccessToken")?.trim() ?? "") || (store.get("youtubeRefreshToken")?.trim() ?? ""));
+const youtubeFetchReadOnly = async (
+  input: string | URL,
+  init: RequestInit = {},
+): Promise<Response> => {
+  const hasOAuthSession = Boolean(
+    (store.get("youtubeAccessToken")?.trim() ?? "") ||
+    (store.get("youtubeRefreshToken")?.trim() ?? ""),
+  );
   if (hasOAuthSession) {
     try {
       const authedResponse = await youtubeFetchWithAuth(input, init);
@@ -1429,11 +1629,13 @@ const youtubeFetchReadOnly = async (input: string | URL, init: RequestInit = {})
 
   return fetch(url, {
     ...init,
-    headers
+    headers,
   });
 };
 
-const parseYouTubeChannelFromInput = async (rawInput: string): Promise<{ channelId: string; channelTitle: string }> => {
+const parseYouTubeChannelFromInput = async (
+  rawInput: string,
+): Promise<{ channelId: string; channelTitle: string }> => {
   const input = normalizeYouTubeInput(rawInput);
   if (!input) {
     throw new Error("YouTube channel is required.");
@@ -1445,12 +1647,15 @@ const parseYouTubeChannelFromInput = async (rawInput: string): Promise<{ channel
     byId.searchParams.set("id", input);
     byId.searchParams.set("maxResults", "1");
     const response = await youtubeFetchReadOnly(byId);
-    const payload = await fetchJsonOrThrow<YouTubeChannelsResponse>(response, "YouTube channel lookup");
+    const payload = await fetchJsonOrThrow<YouTubeChannelsResponse>(
+      response,
+      "YouTube channel lookup",
+    );
     const first = Array.isArray(payload.items) ? payload.items[0] : undefined;
     if (first?.id) {
       return {
         channelId: first.id,
-        channelTitle: first.snippet?.title?.trim() || input
+        channelTitle: first.snippet?.title?.trim() || input,
       };
     }
   }
@@ -1462,12 +1667,15 @@ const parseYouTubeChannelFromInput = async (rawInput: string): Promise<{ channel
     byHandle.searchParams.set("forHandle", handle);
     byHandle.searchParams.set("maxResults", "1");
     const response = await youtubeFetchReadOnly(byHandle);
-    const payload = await fetchJsonOrThrow<YouTubeChannelsResponse>(response, "YouTube handle lookup");
+    const payload = await fetchJsonOrThrow<YouTubeChannelsResponse>(
+      response,
+      "YouTube handle lookup",
+    );
     const first = Array.isArray(payload.items) ? payload.items[0] : undefined;
     if (first?.id) {
       return {
         channelId: first.id,
-        channelTitle: first.snippet?.title?.trim() || handle
+        channelTitle: first.snippet?.title?.trim() || handle,
       };
     }
   }
@@ -1478,7 +1686,10 @@ const parseYouTubeChannelFromInput = async (rawInput: string): Promise<{ channel
   search.searchParams.set("q", input);
   search.searchParams.set("maxResults", "1");
   const response = await youtubeFetchReadOnly(search);
-  const payload = await fetchJsonOrThrow<YouTubeSearchChannelsResponse>(response, "YouTube channel search");
+  const payload = await fetchJsonOrThrow<YouTubeSearchChannelsResponse>(
+    response,
+    "YouTube channel search",
+  );
   const first = Array.isArray(payload.items) ? payload.items[0] : undefined;
   const channelId = first?.id?.channelId?.trim();
   if (!channelId) {
@@ -1486,7 +1697,10 @@ const parseYouTubeChannelFromInput = async (rawInput: string): Promise<{ channel
   }
   return {
     channelId,
-    channelTitle: first?.snippet?.channelTitle?.trim() || first?.snippet?.title?.trim() || rawInput
+    channelTitle:
+      first?.snippet?.channelTitle?.trim() ||
+      first?.snippet?.title?.trim() ||
+      rawInput,
   };
 };
 
@@ -1497,7 +1711,10 @@ const resolveYouTubeLiveChat = async (rawInput: string) => {
     return resolveYouTubeLiveChatViaWeb(rawInput);
   }
 
-  const hasOAuthSession = Boolean((store.get("youtubeAccessToken")?.trim() ?? "") || (store.get("youtubeRefreshToken")?.trim() ?? ""));
+  const hasOAuthSession = Boolean(
+    (store.get("youtubeAccessToken")?.trim() ?? "") ||
+    (store.get("youtubeRefreshToken")?.trim() ?? ""),
+  );
   const hasApiKey = Boolean(getYouTubePublicApiKey());
   const canUseDataApi = hasOAuthSession || hasApiKey;
 
@@ -1516,37 +1733,63 @@ const resolveYouTubeLiveChat = async (rawInput: string) => {
     liveSearch.searchParams.set("maxResults", "1");
     liveSearch.searchParams.set("order", "date");
     const searchResponse = await youtubeFetchReadOnly(liveSearch);
-    const searchPayload = await fetchJsonOrThrow<YouTubeSearchChannelsResponse>(searchResponse, "YouTube live stream lookup");
-    const firstVideo = Array.isArray(searchPayload.items) ? searchPayload.items[0] : undefined;
+    const searchPayload = await fetchJsonOrThrow<YouTubeSearchChannelsResponse>(
+      searchResponse,
+      "YouTube live stream lookup",
+    );
+    const firstVideo = Array.isArray(searchPayload.items)
+      ? searchPayload.items[0]
+      : undefined;
     const videoId = firstVideo?.id?.videoId?.trim() ?? "";
     if (!videoId) {
-      throw new Error(`No active live stream found for ${channel.channelTitle}.`);
+      throw new Error(
+        `No active live stream found for ${channel.channelTitle}.`,
+      );
     }
 
-    const videoDetails = new URL("https://www.googleapis.com/youtube/v3/videos");
+    const videoDetails = new URL(
+      "https://www.googleapis.com/youtube/v3/videos",
+    );
     videoDetails.searchParams.set("part", "liveStreamingDetails,snippet");
     videoDetails.searchParams.set("id", videoId);
     const videoResponse = await youtubeFetchReadOnly(videoDetails);
-    const videoPayload = await fetchJsonOrThrow<YouTubeVideosResponse>(videoResponse, "YouTube live chat lookup");
-    const video = Array.isArray(videoPayload.items) ? videoPayload.items[0] : undefined;
-    const liveChatId = video?.liveStreamingDetails?.activeLiveChatId?.trim() ?? "";
+    const videoPayload = await fetchJsonOrThrow<YouTubeVideosResponse>(
+      videoResponse,
+      "YouTube live chat lookup",
+    );
+    const video = Array.isArray(videoPayload.items)
+      ? videoPayload.items[0]
+      : undefined;
+    const liveChatId =
+      video?.liveStreamingDetails?.activeLiveChatId?.trim() ?? "";
     if (!liveChatId) {
-      throw new Error(`Live chat is not available for the current stream on ${channel.channelTitle}.`);
+      throw new Error(
+        `Live chat is not available for the current stream on ${channel.channelTitle}.`,
+      );
     }
 
     return {
       channelId: channel.channelId,
-      channelTitle: video?.snippet?.channelTitle?.trim() || channel.channelTitle,
+      channelTitle:
+        video?.snippet?.channelTitle?.trim() || channel.channelTitle,
       videoId,
-      liveChatId
+      liveChatId,
     };
   } catch (primaryError) {
     try {
       return await resolveYouTubeLiveChatViaWeb(rawInput);
     } catch (fallbackError) {
-      const primaryText = primaryError instanceof Error ? primaryError.message : String(primaryError);
-      const fallbackText = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
-      throw new Error(`${primaryText} (web fallback also failed: ${fallbackText})`);
+      const primaryText =
+        primaryError instanceof Error
+          ? primaryError.message
+          : String(primaryError);
+      const fallbackText =
+        fallbackError instanceof Error
+          ? fallbackError.message
+          : String(fallbackError);
+      throw new Error(
+        `${primaryText} (web fallback also failed: ${fallbackText})`,
+      );
     }
   }
 };
@@ -1566,20 +1809,27 @@ const parseUnknownJson = (text: string): unknown => {
   }
 };
 
-const resolveKickChannelViaHttp = async (slug: string): Promise<KickLookupResult> => {
-  const response = await fetch(`https://kick.com/api/v2/channels/${encodeURIComponent(slug)}`, {
-    headers: {
-      Accept: "application/json, text/plain, */*",
-      "User-Agent":
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-      Referer: `https://kick.com/${slug}`
-    }
-  });
+const resolveKickChannelViaHttp = async (
+  slug: string,
+): Promise<KickLookupResult> => {
+  const response = await fetch(
+    `https://kick.com/api/v2/channels/${encodeURIComponent(slug)}`,
+    {
+      headers: {
+        Accept: "application/json, text/plain, */*",
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        Referer: `https://kick.com/${slug}`,
+      },
+    },
+  );
 
   const text = await response.text();
   const payload = text ? parseUnknownJson(text) : {};
   const message =
-    payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).message === "string"
+    payload &&
+    typeof payload === "object" &&
+    typeof (payload as Record<string, unknown>).message === "string"
       ? ((payload as Record<string, unknown>).message as string)
       : `Kick lookup failed (${response.status}).`;
 
@@ -1587,11 +1837,13 @@ const resolveKickChannelViaHttp = async (slug: string): Promise<KickLookupResult
     ok: response.ok,
     status: response.status,
     payload,
-    message
+    message,
   };
 };
 
-const resolveKickChannelViaBrowser = async (slug: string): Promise<KickLookupResult> => {
+const resolveKickChannelViaBrowser = async (
+  slug: string,
+): Promise<KickLookupResult> => {
   return new Promise((resolve) => {
     const authWindow = new BrowserWindow({
       show: false,
@@ -1600,8 +1852,8 @@ const resolveKickChannelViaBrowser = async (slug: string): Promise<KickLookupRes
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,
-        sandbox: true
-      }
+        sandbox: true,
+      },
     });
 
     let settled = false;
@@ -1622,7 +1874,7 @@ const resolveKickChannelViaBrowser = async (slug: string): Promise<KickLookupRes
         ok: false,
         status: 0,
         payload: {},
-        message: "Kick browser lookup timed out."
+        message: "Kick browser lookup timed out.",
       });
     }, 25_000);
 
@@ -1631,7 +1883,7 @@ const resolveKickChannelViaBrowser = async (slug: string): Promise<KickLookupRes
         ok: false,
         status: 0,
         payload: {},
-        message: "Kick browser lookup window closed before completion."
+        message: "Kick browser lookup window closed before completion.",
       });
     });
 
@@ -1663,7 +1915,9 @@ const resolveKickChannelViaBrowser = async (slug: string): Promise<KickLookupRes
           })()
         `;
 
-        const result = (await authWindow.webContents.executeJavaScript(script)) as {
+        const result = (await authWindow.webContents.executeJavaScript(
+          script,
+        )) as {
           ok?: boolean;
           status?: number;
           text?: string;
@@ -1671,7 +1925,9 @@ const resolveKickChannelViaBrowser = async (slug: string): Promise<KickLookupRes
 
         const payload = result?.text ? parseUnknownJson(result.text) : {};
         const message =
-          payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).message === "string"
+          payload &&
+          typeof payload === "object" &&
+          typeof (payload as Record<string, unknown>).message === "string"
             ? ((payload as Record<string, unknown>).message as string)
             : `Kick browser lookup failed (${result?.status ?? 0}).`;
 
@@ -1679,34 +1935,44 @@ const resolveKickChannelViaBrowser = async (slug: string): Promise<KickLookupRes
           ok: Boolean(result?.ok),
           status: result?.status ?? 0,
           payload,
-          message
+          message,
         });
       } catch (error) {
         finalize({
           ok: false,
           status: 0,
           payload: {},
-          message: error instanceof Error ? error.message : String(error)
+          message: error instanceof Error ? error.message : String(error),
         });
       }
     });
 
-    authWindow.loadURL(`https://kick.com/${encodeURIComponent(slug)}`).catch((error) => {
-      finalize({
-        ok: false,
-        status: 0,
-        payload: {},
-        message: `Failed to open Kick channel page: ${String(error)}`
+    authWindow
+      .loadURL(`https://kick.com/${encodeURIComponent(slug)}`)
+      .catch((error) => {
+        finalize({
+          ok: false,
+          status: 0,
+          payload: {},
+          message: `Failed to open Kick channel page: ${String(error)}`,
+        });
       });
-    });
   });
 };
 
-const normalizeLogin = (value: string) => value.trim().replace(/^@+/, "").toLowerCase();
+const normalizeLogin = (value: string) =>
+  value.trim().replace(/^@+/, "").toLowerCase();
 
-const resolveKickChannelLookup = async (slug: string): Promise<KickLookupResult> => {
+const resolveKickChannelLookup = async (
+  slug: string,
+): Promise<KickLookupResult> => {
   let lookup = await resolveKickChannelViaHttp(slug);
-  if ((!lookup.ok || (!parseKickChatroomId(lookup.payload) && !parseKickUserId(lookup.payload))) && lookup.status === 403) {
+  if (
+    (!lookup.ok ||
+      (!parseKickChatroomId(lookup.payload) &&
+        !parseKickUserId(lookup.payload))) &&
+    lookup.status === 403
+  ) {
     lookup = await resolveKickChannelViaBrowser(slug);
   }
   return lookup;
@@ -1730,28 +1996,37 @@ const getTwitchAuthContext = async (): Promise<TwitchAuthContext> => {
   const accessToken = store.get("twitchToken")?.trim() ?? "";
   const clientId = store.get("twitchClientId")?.trim() ?? "";
   if (!accessToken || !clientId) {
-    throw new Error("Twitch sign-in required. Sign in again to use moderation.");
+    throw new Error(
+      "Twitch sign-in required. Sign in again to use moderation.",
+    );
   }
   const response = await fetch("https://id.twitch.tv/oauth2/validate", {
     headers: {
-      Authorization: `OAuth ${accessToken}`
-    }
+      Authorization: `OAuth ${accessToken}`,
+    },
   });
-  const payload = await fetchJsonOrThrow<TwitchValidatePayload>(response, "Twitch token validation");
+  const payload = await fetchJsonOrThrow<TwitchValidatePayload>(
+    response,
+    "Twitch token validation",
+  );
   const login = payload.login?.trim() ?? "";
   const userId = payload.user_id?.trim() ?? "";
   if (!login || !userId) {
     throw new Error("Twitch token validation did not return account details.");
   }
   const scopes = new Set(
-    Array.isArray(payload.scopes) ? payload.scopes.filter((scope): scope is string => typeof scope === "string") : []
+    Array.isArray(payload.scopes)
+      ? payload.scopes.filter(
+          (scope): scope is string => typeof scope === "string",
+        )
+      : [],
   );
   return {
     accessToken,
     clientId,
     login,
     userId,
-    scopes
+    scopes,
   };
 };
 
@@ -1759,7 +2034,7 @@ const twitchApiFetchJson = async <T>(
   context: TwitchAuthContext,
   input: string | URL,
   init: RequestInit = {},
-  source = "Twitch API"
+  source = "Twitch API",
 ): Promise<T> => {
   const headers = new Headers(init.headers ?? {});
   headers.set("Client-ID", context.clientId);
@@ -1769,22 +2044,33 @@ const twitchApiFetchJson = async <T>(
   }
   const response = await fetch(input, {
     ...init,
-    headers
+    headers,
   });
-  if ((response.status === 401 || response.status === 403) && source.toLowerCase().includes("moderat")) {
-    throw new Error("Twitch moderation is unauthorized for this account. Re-sign in to Twitch to grant mod scopes.");
+  if (
+    (response.status === 401 || response.status === 403) &&
+    source.toLowerCase().includes("moderat")
+  ) {
+    throw new Error(
+      "Twitch moderation is unauthorized for this account. Re-sign in to Twitch to grant mod scopes.",
+    );
   }
   return fetchJsonOrThrow<T>(response, source);
 };
 
-const getTwitchUserByLogin = async (context: TwitchAuthContext, login: string, source: string) => {
+const getTwitchUserByLogin = async (
+  context: TwitchAuthContext,
+  login: string,
+  source: string,
+) => {
   const normalized = normalizeLogin(login);
   if (!normalized) {
     throw new Error("Twitch username is required.");
   }
   const requestUrl = new URL("https://api.twitch.tv/helix/users");
   requestUrl.searchParams.set("login", normalized);
-  const payload = await twitchApiFetchJson<{ data?: Array<{ id?: string; login?: string }> }>(context, requestUrl, {}, source);
+  const payload = await twitchApiFetchJson<{
+    data?: Array<{ id?: string; login?: string }>;
+  }>(context, requestUrl, {}, source);
   const first = Array.isArray(payload.data) ? payload.data[0] : undefined;
   const id = first?.id?.trim() ?? "";
   if (!id) {
@@ -1792,7 +2078,7 @@ const getTwitchUserByLogin = async (context: TwitchAuthContext, login: string, s
   }
   return {
     id,
-    login: first?.login?.trim() ?? normalized
+    login: first?.login?.trim() ?? normalized,
   };
 };
 
@@ -1806,11 +2092,22 @@ const canModerateTwitchChannel = async (channel: string): Promise<boolean> => {
   if (!context.scopes.has("moderator:read:moderators")) {
     return false;
   }
-  const broadcaster = await getTwitchUserByLogin(context, normalizedChannel, "Twitch channel lookup");
-  const requestUrl = new URL("https://api.twitch.tv/helix/moderation/moderators");
+  const broadcaster = await getTwitchUserByLogin(
+    context,
+    normalizedChannel,
+    "Twitch channel lookup",
+  );
+  const requestUrl = new URL(
+    "https://api.twitch.tv/helix/moderation/moderators",
+  );
   requestUrl.searchParams.set("broadcaster_id", broadcaster.id);
   requestUrl.searchParams.set("user_id", context.userId);
-  const payload = await twitchApiFetchJson<{ data?: unknown[] }>(context, requestUrl, {}, "Twitch moderator lookup");
+  const payload = await twitchApiFetchJson<{ data?: unknown[] }>(
+    context,
+    requestUrl,
+    {},
+    "Twitch moderator lookup",
+  );
   return Array.isArray(payload.data) && payload.data.length > 0;
 };
 
@@ -1824,11 +2121,17 @@ const moderateTwitch = async (request: ModerationRequest): Promise<void> => {
     throw new Error("Twitch channel is required for moderation.");
   }
   const context = await getTwitchAuthContext();
-  const broadcaster = await getTwitchUserByLogin(context, normalizedChannel, "Twitch channel lookup");
+  const broadcaster = await getTwitchUserByLogin(
+    context,
+    normalizedChannel,
+    "Twitch channel lookup",
+  );
 
   if (action === "delete") {
     if (!context.scopes.has("moderator:manage:chat_messages")) {
-      throw new Error("Missing Twitch scope moderator:manage:chat_messages. Re-sign in to Twitch.");
+      throw new Error(
+        "Missing Twitch scope moderator:manage:chat_messages. Re-sign in to Twitch.",
+      );
     }
     const messageId = (request.messageId ?? "").trim();
     if (!messageId) {
@@ -1842,21 +2145,27 @@ const moderateTwitch = async (request: ModerationRequest): Promise<void> => {
       context,
       requestUrl,
       {
-        method: "DELETE"
+        method: "DELETE",
       },
-      "Twitch delete message"
+      "Twitch delete message",
     );
     return;
   }
 
   if (!context.scopes.has("moderator:manage:banned_users")) {
-    throw new Error("Missing Twitch scope moderator:manage:banned_users. Re-sign in to Twitch.");
+    throw new Error(
+      "Missing Twitch scope moderator:manage:banned_users. Re-sign in to Twitch.",
+    );
   }
   const normalizedUser = normalizeLogin(request.username ?? "");
   if (!normalizedUser) {
     throw new Error("Twitch username is required for this moderation action.");
   }
-  const target = await getTwitchUserByLogin(context, normalizedUser, "Twitch target user lookup");
+  const target = await getTwitchUserByLogin(
+    context,
+    normalizedUser,
+    "Twitch target user lookup",
+  );
   if (action === "unban") {
     const requestUrl = new URL("https://api.twitch.tv/helix/moderation/bans");
     requestUrl.searchParams.set("broadcaster_id", broadcaster.id);
@@ -1866,19 +2175,20 @@ const moderateTwitch = async (request: ModerationRequest): Promise<void> => {
       context,
       requestUrl,
       {
-        method: "DELETE"
+        method: "DELETE",
       },
-      "Twitch unban user"
+      "Twitch unban user",
     );
     return;
   }
 
-  const durationSeconds = action === "timeout_60" ? 60 : action === "timeout_600" ? 600 : 0;
+  const durationSeconds =
+    action === "timeout_60" ? 60 : action === "timeout_600" ? 600 : 0;
   const body = {
     data: {
       user_id: target.id,
-      ...(durationSeconds > 0 ? { duration: durationSeconds } : {})
-    }
+      ...(durationSeconds > 0 ? { duration: durationSeconds } : {}),
+    },
   };
   const requestUrl = new URL("https://api.twitch.tv/helix/moderation/bans");
   requestUrl.searchParams.set("broadcaster_id", broadcaster.id);
@@ -1889,11 +2199,11 @@ const moderateTwitch = async (request: ModerationRequest): Promise<void> => {
     {
       method: "POST",
       headers: {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
     },
-    durationSeconds > 0 ? "Twitch timeout user" : "Twitch ban user"
+    durationSeconds > 0 ? "Twitch timeout user" : "Twitch ban user",
   );
 };
 
@@ -1904,10 +2214,16 @@ const parseKickTokenScopes = (token: string): Set<string> => {
   if (!payloadPart) return new Set();
   try {
     const payloadText = Buffer.from(payloadPart, "base64url").toString("utf8");
-    const payload = JSON.parse(payloadText) as { scope?: unknown; scopes?: unknown };
+    const payload = JSON.parse(payloadText) as {
+      scope?: unknown;
+      scopes?: unknown;
+    };
     const scopes = new Set<string>();
     if (typeof payload.scope === "string") {
-      for (const scope of payload.scope.split(/\s+/).map((entry) => entry.trim()).filter(Boolean)) {
+      for (const scope of payload.scope
+        .split(/\s+/)
+        .map((entry) => entry.trim())
+        .filter(Boolean)) {
         scopes.add(scope);
       }
     }
@@ -1928,9 +2244,10 @@ const kickApiFetchRaw = async (
   input: string | URL,
   init: RequestInit = {},
   source = "Kick API",
-  allowRetry = true
+  allowRetry = true,
 ): Promise<Response> => {
-  const firstToken = store.get("kickAccessToken")?.trim() || (await refreshKickAccessToken());
+  const firstToken =
+    store.get("kickAccessToken")?.trim() || (await refreshKickAccessToken());
   const doFetch = async (token: string) => {
     const headers = new Headers(init.headers ?? {});
     headers.set("Authorization", `Bearer ${token}`);
@@ -1939,7 +2256,7 @@ const kickApiFetchRaw = async (
     }
     return fetch(input, {
       ...init,
-      headers
+      headers,
     });
   };
 
@@ -1955,11 +2272,15 @@ const kickApiFetchRaw = async (
     const body = await response.text();
     const payload = body ? parseUnknownJson(body) : {};
     const detail =
-      payload && typeof payload === "object" && typeof (payload as Record<string, unknown>).message === "string"
+      payload &&
+      typeof payload === "object" &&
+      typeof (payload as Record<string, unknown>).message === "string"
         ? ((payload as Record<string, unknown>).message as string)
         : "";
     const suffix = detail ? ` (${detail})` : "";
-    throw new Error(`Kick moderation is unauthorized for this channel or account${suffix}.`);
+    throw new Error(
+      `Kick moderation is unauthorized for this channel or account${suffix}.`,
+    );
   }
   return response;
 };
@@ -1968,13 +2289,15 @@ const kickApiFetchJson = async <T>(
   input: string | URL,
   init: RequestInit = {},
   source = "Kick API",
-  allowRetry = true
+  allowRetry = true,
 ): Promise<T> => {
   const response = await kickApiFetchRaw(input, init, source, allowRetry);
   return fetchJsonOrThrow<T>(response, source);
 };
 
-const resolveKickBroadcasterUserId = async (channel: string): Promise<number> => {
+const resolveKickBroadcasterUserId = async (
+  channel: string,
+): Promise<number> => {
   const slug = normalizeLogin(channel);
   if (!slug) {
     throw new Error("Kick channel is required.");
@@ -1985,7 +2308,7 @@ const resolveKickBroadcasterUserId = async (channel: string): Promise<number> =>
     const channelPayload = await kickApiFetchJson<unknown>(
       `https://api.kick.com/public/v1/channels?${params.toString()}`,
       {},
-      "Kick channel lookup"
+      "Kick channel lookup",
     );
     const apiUserId = parseKickUserId(channelPayload);
     if (apiUserId) {
@@ -2005,8 +2328,13 @@ const resolveKickBroadcasterUserId = async (channel: string): Promise<number> =>
   return userId;
 };
 
-const resolveKickTargetUserId = async (request: ModerationRequest): Promise<number> => {
-  if (Number.isFinite(request.targetUserId) && Number(request.targetUserId) > 0) {
+const resolveKickTargetUserId = async (
+  request: ModerationRequest,
+): Promise<number> => {
+  if (
+    Number.isFinite(request.targetUserId) &&
+    Number(request.targetUserId) > 0
+  ) {
     return Number(request.targetUserId);
   }
   const username = normalizeLogin(request.username ?? "");
@@ -2019,7 +2347,7 @@ const resolveKickTargetUserId = async (request: ModerationRequest): Promise<numb
     const channelPayload = await kickApiFetchJson<unknown>(
       `https://api.kick.com/public/v1/channels?${params.toString()}`,
       {},
-      "Kick user lookup"
+      "Kick user lookup",
     );
     const userIdFromApi = parseKickUserId(channelPayload);
     if (userIdFromApi) {
@@ -2040,7 +2368,7 @@ const resolveKickTargetUserId = async (request: ModerationRequest): Promise<numb
   }
 
   throw new Error(
-    "Kick user lookup failed for this username. Ask the user to send a recent message so MultiChat can capture their user ID."
+    "Kick user lookup failed for this username. Ask the user to send a recent message so MultiChat can capture their user ID.",
   );
 };
 
@@ -2052,7 +2380,9 @@ const canModerateKickChannel = async (channel: string): Promise<boolean> => {
   if (!token) return false;
 
   const scopes = parseKickTokenScopes(token);
-  const hasModerationScope = scopes.has("moderation:ban") || scopes.has("moderation:chat_message:manage");
+  const hasModerationScope =
+    scopes.has("moderation:ban") ||
+    scopes.has("moderation:chat_message:manage");
   if (!hasModerationScope) return false;
 
   const kickUsername = normalizeLogin(store.get("kickUsername")?.trim() ?? "");
@@ -2060,25 +2390,31 @@ const canModerateKickChannel = async (channel: string): Promise<boolean> => {
     return true;
   }
 
-  const broadcasterUserId = await resolveKickBroadcasterUserId(normalizedChannel);
+  const broadcasterUserId =
+    await resolveKickBroadcasterUserId(normalizedChannel);
   const probeResponse = await kickApiFetchRaw(
     "https://api.kick.com/public/v1/moderation/bans",
     {
       method: "POST",
       headers: {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         broadcaster_user_id: broadcasterUserId,
         user_id: 0,
-        duration: 1
-      })
+        duration: 1,
+      }),
     },
-    "Kick permission probe"
+    "Kick permission probe",
   );
 
   if (probeResponse.ok) return true;
-  if (probeResponse.status === 400 || probeResponse.status === 404 || probeResponse.status === 422) return true;
+  if (
+    probeResponse.status === 400 ||
+    probeResponse.status === 404 ||
+    probeResponse.status === 422
+  )
+    return true;
   if (probeResponse.status === 403) return false;
   return false;
 };
@@ -2097,14 +2433,16 @@ const moderateKick = async (request: ModerationRequest): Promise<void> => {
     await kickApiFetchJson<Record<string, unknown>>(
       `https://api.kick.com/public/v1/chat/${encodeURIComponent(messageId)}`,
       {
-        method: "DELETE"
+        method: "DELETE",
       },
-      "Kick delete message"
+      "Kick delete message",
     );
     return;
   }
 
-  const broadcasterUserId = await resolveKickBroadcasterUserId(request.channel ?? "");
+  const broadcasterUserId = await resolveKickBroadcasterUserId(
+    request.channel ?? "",
+  );
   const targetUserId = await resolveKickTargetUserId(request);
   if (action === "unban") {
     await kickApiFetchJson<Record<string, unknown>>(
@@ -2112,22 +2450,23 @@ const moderateKick = async (request: ModerationRequest): Promise<void> => {
       {
         method: "DELETE",
         headers: {
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           broadcaster_user_id: broadcasterUserId,
-          user_id: targetUserId
-        })
+          user_id: targetUserId,
+        }),
       },
-      "Kick unban user"
+      "Kick unban user",
     );
     return;
   }
 
-  const timeoutMinutes = action === "timeout_60" ? 1 : action === "timeout_600" ? 10 : 0;
+  const timeoutMinutes =
+    action === "timeout_60" ? 1 : action === "timeout_600" ? 10 : 0;
   const body: Record<string, unknown> = {
     broadcaster_user_id: broadcasterUserId,
-    user_id: targetUserId
+    user_id: targetUserId,
   };
   if (timeoutMinutes > 0) {
     body.duration = timeoutMinutes;
@@ -2137,23 +2476,29 @@ const moderateKick = async (request: ModerationRequest): Promise<void> => {
     {
       method: "POST",
       headers: {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
     },
-    timeoutMinutes > 0 ? "Kick timeout user" : "Kick ban user"
+    timeoutMinutes > 0 ? "Kick timeout user" : "Kick ban user",
   );
 };
 
 const canModerateYouTubeChannel = (_channel: string): boolean =>
-  Boolean((store.get("youtubeAccessToken")?.trim() ?? "") || (store.get("youtubeRefreshToken")?.trim() ?? ""));
+  Boolean(
+    (store.get("youtubeAccessToken")?.trim() ?? "") ||
+    (store.get("youtubeRefreshToken")?.trim() ?? ""),
+  );
 
-const buildYouTubeBanCacheKey = (liveChatId: string, targetChannelId: string) => `${liveChatId}:${targetChannelId}`;
+const buildYouTubeBanCacheKey = (liveChatId: string, targetChannelId: string) =>
+  `${liveChatId}:${targetChannelId}`;
 
 const resolveYouTubeTargetChannelId = (request: ModerationRequest): string => {
   const channelId = (request.targetChannelId ?? request.username ?? "").trim();
   if (!channelId) {
-    throw new Error("YouTube target channel id is required for this moderation action.");
+    throw new Error(
+      "YouTube target channel id is required for this moderation action.",
+    );
   }
   return channelId;
 };
@@ -2169,11 +2514,15 @@ const moderateYouTube = async (request: ModerationRequest): Promise<void> => {
     throw new Error("YouTube live chat id is required for moderation.");
   }
   if (liveChatId.startsWith("web:")) {
-    throw new Error("YouTube web read-only sessions do not support moderation.");
+    throw new Error(
+      "YouTube web read-only sessions do not support moderation.",
+    );
   }
 
   if (!canModerateYouTubeChannel(request.channel ?? "")) {
-    throw new Error("YouTube sign-in required. Sign in again to use moderation.");
+    throw new Error(
+      "YouTube sign-in required. Sign in again to use moderation.",
+    );
   }
 
   if (action === "delete") {
@@ -2181,12 +2530,17 @@ const moderateYouTube = async (request: ModerationRequest): Promise<void> => {
     if (!messageId) {
       throw new Error("YouTube message id is required to delete a message.");
     }
-    const endpoint = new URL("https://www.googleapis.com/youtube/v3/liveChat/messages");
+    const endpoint = new URL(
+      "https://www.googleapis.com/youtube/v3/liveChat/messages",
+    );
     endpoint.searchParams.set("id", messageId);
     const response = await youtubeFetchWithAuth(endpoint, {
-      method: "DELETE"
+      method: "DELETE",
     });
-    await fetchJsonOrThrow<Record<string, unknown>>(response, "YouTube delete message");
+    await fetchJsonOrThrow<Record<string, unknown>>(
+      response,
+      "YouTube delete message",
+    );
     return;
   }
 
@@ -2196,25 +2550,35 @@ const moderateYouTube = async (request: ModerationRequest): Promise<void> => {
   if (action === "unban") {
     const cachedBanId = youtubeBanIdsByTarget.get(cacheKey)?.trim() ?? "";
     if (!cachedBanId) {
-      throw new Error("YouTube unban is only available after MultiChat created that ban in this session.");
+      throw new Error(
+        "YouTube unban is only available after MultiChat created that ban in this session.",
+      );
     }
-    const endpoint = new URL("https://www.googleapis.com/youtube/v3/liveChat/bans");
+    const endpoint = new URL(
+      "https://www.googleapis.com/youtube/v3/liveChat/bans",
+    );
     endpoint.searchParams.set("id", cachedBanId);
     const response = await youtubeFetchWithAuth(endpoint, {
-      method: "DELETE"
+      method: "DELETE",
     });
-    await fetchJsonOrThrow<Record<string, unknown>>(response, "YouTube unban user");
+    await fetchJsonOrThrow<Record<string, unknown>>(
+      response,
+      "YouTube unban user",
+    );
     youtubeBanIdsByTarget.delete(cacheKey);
     return;
   }
 
-  const durationSeconds = action === "timeout_60" ? 60 : action === "timeout_600" ? 600 : 0;
-  const endpoint = new URL("https://www.googleapis.com/youtube/v3/liveChat/bans");
+  const durationSeconds =
+    action === "timeout_60" ? 60 : action === "timeout_600" ? 600 : 0;
+  const endpoint = new URL(
+    "https://www.googleapis.com/youtube/v3/liveChat/bans",
+  );
   endpoint.searchParams.set("part", "snippet");
   const response = await youtubeFetchWithAuth(endpoint, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({
       snippet: {
@@ -2222,14 +2586,14 @@ const moderateYouTube = async (request: ModerationRequest): Promise<void> => {
         type: durationSeconds > 0 ? "temporary" : "permanent",
         ...(durationSeconds > 0 ? { banDurationSeconds: durationSeconds } : {}),
         bannedUserDetails: {
-          channelId: targetChannelId
-        }
-      }
-    })
+          channelId: targetChannelId,
+        },
+      },
+    }),
   });
   const payload = await fetchJsonOrThrow<{ id?: string }>(
     response,
-    durationSeconds > 0 ? "YouTube timeout user" : "YouTube ban user"
+    durationSeconds > 0 ? "YouTube timeout user" : "YouTube ban user",
   );
   const banId = payload.id?.trim() ?? "";
   if (banId) {
@@ -2237,7 +2601,9 @@ const moderateYouTube = async (request: ModerationRequest): Promise<void> => {
   }
 };
 
-const runModerationAction = async (request: ModerationRequest): Promise<void> => {
+const runModerationAction = async (
+  request: ModerationRequest,
+): Promise<void> => {
   if (request.platform === "twitch") {
     await moderateTwitch(request);
     return;
@@ -2303,7 +2669,7 @@ const createInitialUpdateStatus = (): UpdateStatus => ({
   state: "idle",
   message: "",
   channel: DEFAULT_UPDATE_CHANNEL,
-  currentVersion: app.getVersion()
+  currentVersion: app.getVersion(),
 });
 
 let updateStatus: UpdateStatus = createInitialUpdateStatus();
@@ -2326,19 +2692,24 @@ const disconnectTikTokConnection = async (connectionId: string) => {
     emitTikTokEvent({
       connectionId,
       type: "disconnected",
-      roomId: record.roomId
+      roomId: record.roomId,
     });
   }
 };
 
 const disconnectAllTikTokConnections = async () => {
   const ids = Array.from(tiktokConnections.keys());
-  await Promise.allSettled(ids.map((connectionId) => disconnectTikTokConnection(connectionId)));
+  await Promise.allSettled(
+    ids.map((connectionId) => disconnectTikTokConnection(connectionId)),
+  );
 };
 
 const updateStatusToRenderer = () => {
   if (mainWindow) {
-    mainWindow.webContents.send(IPC_CHANNELS.UPDATES_STATUS_EVENT, updateStatus);
+    mainWindow.webContents.send(
+      IPC_CHANNELS.UPDATES_STATUS_EVENT,
+      updateStatus,
+    );
   }
 };
 
@@ -2374,7 +2745,11 @@ const scheduleAutoInstallAfterDownload = (delayMs = 1800) => {
   }, delayMs);
 };
 
-const setUpdateStatus = (state: UpdateStatus["state"], message: string, extras: Partial<UpdateStatus> = {}) => {
+const setUpdateStatus = (
+  state: UpdateStatus["state"],
+  message: string,
+  extras: Partial<UpdateStatus> = {},
+) => {
   const channel = extras.channel ?? resolveConfiguredUpdateChannel();
   updateStatus = {
     ...updateStatus,
@@ -2382,7 +2757,7 @@ const setUpdateStatus = (state: UpdateStatus["state"], message: string, extras: 
     state,
     message,
     channel,
-    currentVersion: app.getVersion()
+    currentVersion: app.getVersion(),
   };
   updateStatusToRenderer();
 };
@@ -2450,8 +2825,8 @@ const showHelpGuide = async () => {
       "9. Use Help > Check for Updates to manually verify updates anytime.",
       "10. Open Menu > Auth Manager to validate Twitch/Kick send permissions and active-tab mod capability.",
       "11. Open Menu > Connection Health for per-platform status, reconnect reasons, token expiry, and last error.",
-      "12. Open Menu > Mention Inbox to jump directly to pings across open chats."
-    ].join("\n")
+      "12. Open Menu > Mention Inbox to jump directly to pings across open chats.",
+    ].join("\n"),
   };
 
   if (mainWindow) {
@@ -2473,8 +2848,8 @@ const showAboutApp = async () => {
       `Platform: ${process.platform} (${process.arch})`,
       `Electron: ${process.versions.electron}`,
       `Chromium: ${process.versions.chrome}`,
-      `Node.js: ${process.versions.node}`
-    ].join("\n")
+      `Node.js: ${process.versions.node}`,
+    ].join("\n"),
   };
 
   if (mainWindow) {
@@ -2487,7 +2862,9 @@ const showAboutApp = async () => {
 const checkForUpdatesFromMenu = async () => {
   const status = await requestUpdateCheck();
   const finalStatus =
-    status.state === "checking" || status.state === "idle" ? await waitForUpdateTerminalState(12_000) : status;
+    status.state === "checking" || status.state === "idle"
+      ? await waitForUpdateTerminalState(12_000)
+      : status;
 
   if (isWindows) {
     // Windows update checks stay in-app only (no OS modal popups).
@@ -2503,7 +2880,7 @@ const checkForUpdatesFromMenu = async () => {
     detail:
       finalStatus.releaseNotes && finalStatus.releaseNotes.trim()
         ? `Release notes (${finalStatus.availableVersion ?? "latest"}):\n\n${finalStatus.releaseNotes.trim()}`
-        : undefined
+        : undefined,
   };
 
   if (mainWindow) {
@@ -2535,30 +2912,32 @@ const setupAppMenu = () => {
             label: "About MultiChat",
             click: () => {
               void showAboutApp();
-            }
+            },
           } as MenuItemConstructorOptions,
-          { type: "separator" } as MenuItemConstructorOptions
+          { type: "separator" } as MenuItemConstructorOptions,
         ]
       : []),
     {
       label: "Help Guide",
       click: () => {
         void showHelpGuide();
-      }
+      },
     },
     {
       label: "Check for Updates",
       click: () => {
         void checkForUpdatesFromMenu();
-      }
+      },
     },
     { type: "separator" },
     {
       label: "MultiChat Releases",
       click: () => {
-        void shell.openExternal("https://github.com/mhdtech1/MultiChat/releases");
-      }
-    }
+        void shell.openExternal(
+          "https://github.com/mhdtech1/MultiChat/releases",
+        );
+      },
+    },
   ];
 
   const template: MenuItemConstructorOptions[] = [
@@ -2575,15 +2954,15 @@ const setupAppMenu = () => {
               { role: "hideOthers" },
               { role: "unhide" },
               { type: "separator" },
-              { role: "quit" }
-            ]
-          } as MenuItemConstructorOptions
+              { role: "quit" },
+            ],
+          } as MenuItemConstructorOptions,
         ]
       : [
           {
             label: "File",
-            submenu: [{ role: "quit" }]
-          } as MenuItemConstructorOptions
+            submenu: [{ role: "quit" }],
+          } as MenuItemConstructorOptions,
         ]),
     {
       label: "Edit",
@@ -2594,8 +2973,8 @@ const setupAppMenu = () => {
         { role: "cut" },
         { role: "copy" },
         { role: "paste" },
-        { role: "selectAll" }
-      ]
+        { role: "selectAll" },
+      ],
     },
     {
       label: "View",
@@ -2608,8 +2987,8 @@ const setupAppMenu = () => {
         { role: "zoomIn" },
         { role: "zoomOut" },
         { type: "separator" },
-        { role: "togglefullscreen" }
-      ]
+        { role: "togglefullscreen" },
+      ],
     },
     {
       label: "Window",
@@ -2622,17 +3001,17 @@ const setupAppMenu = () => {
               label: "Show MultiChat",
               click: () => {
                 revealMainWindow();
-              }
+              },
             },
             { type: "separator" },
-            { role: "front" }
+            { role: "front" },
           ]
-        : [{ role: "minimize" }, { role: "close" }]
+        : [{ role: "minimize" }, { role: "close" }],
     },
     {
       label: "Help",
-      submenu: helpSubmenu
-    }
+      submenu: helpSubmenu,
+    },
   ];
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
@@ -2664,25 +3043,30 @@ const setupAutoUpdater = () => {
     setUpdateStatus("checking", "Checking for updates...", {
       availableVersion: undefined,
       releaseDate: undefined,
-      releaseNotes: undefined
+      releaseNotes: undefined,
     });
   });
   autoUpdater.on("update-available", (info) => {
     updateInstallTriggered = false;
-    const availableVersion = typeof info.version === "string" ? info.version : undefined;
+    const availableVersion =
+      typeof info.version === "string" ? info.version : undefined;
     const infoRecord = info as unknown as Record<string, unknown>;
-    setUpdateStatus("available", `Update ${availableVersion ?? "new version"} available. Downloading in background...`, {
-      availableVersion,
-      releaseDate: normalizeIsoDate(infoRecord.releaseDate),
-      releaseNotes: normalizeReleaseNotes(infoRecord.releaseNotes)
-    });
+    setUpdateStatus(
+      "available",
+      `Update ${availableVersion ?? "new version"} available. Downloading in background...`,
+      {
+        availableVersion,
+        releaseDate: normalizeIsoDate(infoRecord.releaseDate),
+        releaseNotes: normalizeReleaseNotes(infoRecord.releaseNotes),
+      },
+    );
   });
   autoUpdater.on("update-not-available", () => {
     updateInstallTriggered = false;
     setUpdateStatus("not-available", "You are on the latest version.", {
       availableVersion: undefined,
       releaseDate: undefined,
-      releaseNotes: undefined
+      releaseNotes: undefined,
     });
   });
   autoUpdater.on("download-progress", (progress) => {
@@ -2690,13 +3074,18 @@ const setupAutoUpdater = () => {
     setUpdateStatus("downloading", `Downloading update: ${percent}%`);
   });
   autoUpdater.on("update-downloaded", (info) => {
-    const availableVersion = typeof info.version === "string" ? info.version : undefined;
+    const availableVersion =
+      typeof info.version === "string" ? info.version : undefined;
     const infoRecord = info as unknown as Record<string, unknown>;
-    setUpdateStatus("downloaded", `Update ${availableVersion ?? "new version"} downloaded. Restarting to apply update...`, {
-      availableVersion,
-      releaseDate: normalizeIsoDate(infoRecord.releaseDate),
-      releaseNotes: normalizeReleaseNotes(infoRecord.releaseNotes)
-    });
+    setUpdateStatus(
+      "downloaded",
+      `Update ${availableVersion ?? "new version"} downloaded. Restarting to apply update...`,
+      {
+        availableVersion,
+        releaseDate: normalizeIsoDate(infoRecord.releaseDate),
+        releaseNotes: normalizeReleaseNotes(infoRecord.releaseNotes),
+      },
+    );
     scheduleAutoInstallAfterDownload();
   });
   autoUpdater.on("error", (error) => {
@@ -2721,12 +3110,15 @@ const createMainWindow = () => {
       nodeIntegration: false,
       sandbox: true,
       backgroundThrottling: false,
-      preload: path.join(__dirname, "../preload/preload.cjs")
-    }
+      preload: path.join(__dirname, "../preload/preload.cjs"),
+    },
   });
 
-  const devServerUrl = process.env.VITE_DEV_SERVER_URL || "http://localhost:5173";
-  const indexUrl = app.isPackaged ? path.join(__dirname, "../renderer/index.html") : devServerUrl;
+  const devServerUrl =
+    process.env.VITE_DEV_SERVER_URL || "http://localhost:5173";
+  const indexUrl = app.isPackaged
+    ? path.join(__dirname, "../renderer/index.html")
+    : devServerUrl;
   mainWindow.loadURL(app.isPackaged ? `file://${indexUrl}` : indexUrl);
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -2778,14 +3170,23 @@ app.whenReady().then(async () => {
     kickGuest: false,
     kickScopeVersion: KICK_SCOPE_VERSION,
     twitchClientId: process.env.TWITCH_CLIENT_ID ?? TWITCH_MANAGED_CLIENT_ID,
-    twitchRedirectUri: process.env.TWITCH_REDIRECT_URI ?? TWITCH_DEFAULT_REDIRECT_URI,
+    twitchRedirectUri:
+      process.env.TWITCH_REDIRECT_URI ?? TWITCH_DEFAULT_REDIRECT_URI,
     kickClientId: process.env.KICK_CLIENT_ID ?? KICK_MANAGED_CLIENT_ID,
-    kickClientSecret: process.env.KICK_CLIENT_SECRET ?? KICK_MANAGED_CLIENT_SECRET,
+    kickClientSecret:
+      process.env.KICK_CLIENT_SECRET ?? KICK_MANAGED_CLIENT_SECRET,
     kickRedirectUri: process.env.KICK_REDIRECT_URI ?? KICK_DEFAULT_REDIRECT_URI,
-    youtubeClientId: YOUTUBE_ALPHA_ENABLED ? process.env.YOUTUBE_CLIENT_ID ?? YOUTUBE_MANAGED_CLIENT_ID : "",
-    youtubeClientSecret: YOUTUBE_ALPHA_ENABLED ? process.env.YOUTUBE_CLIENT_SECRET ?? YOUTUBE_MANAGED_CLIENT_SECRET : "",
-    youtubeRedirectUri: process.env.YOUTUBE_REDIRECT_URI ?? YOUTUBE_DEFAULT_REDIRECT_URI,
-    youtubeApiKey: YOUTUBE_ALPHA_ENABLED ? process.env.YOUTUBE_API_KEY ?? YOUTUBE_MANAGED_API_KEY : "",
+    youtubeClientId: YOUTUBE_ALPHA_ENABLED
+      ? (process.env.YOUTUBE_CLIENT_ID ?? YOUTUBE_MANAGED_CLIENT_ID)
+      : "",
+    youtubeClientSecret: YOUTUBE_ALPHA_ENABLED
+      ? (process.env.YOUTUBE_CLIENT_SECRET ?? YOUTUBE_MANAGED_CLIENT_SECRET)
+      : "",
+    youtubeRedirectUri:
+      process.env.YOUTUBE_REDIRECT_URI ?? YOUTUBE_DEFAULT_REDIRECT_URI,
+    youtubeApiKey: YOUTUBE_ALPHA_ENABLED
+      ? (process.env.YOUTUBE_API_KEY ?? YOUTUBE_MANAGED_API_KEY)
+      : "",
     youtubeAlphaEnabled: YOUTUBE_ALPHA_ENABLED,
     tiktokAlphaEnabled: TIKTOK_ALPHA_ENABLED,
     tiktokSessionId: "",
@@ -2793,7 +3194,7 @@ app.whenReady().then(async () => {
     tiktokUsername: "",
     setupWizardCompleted: false,
     setupWizardVersion: 0,
-    setupWizardSendTestCompleted: false
+    setupWizardSendTestCompleted: false,
   });
 
   try {
@@ -2806,7 +3207,8 @@ app.whenReady().then(async () => {
 
   const currentVersion = app.getVersion();
   const lastLaunchedVersion = store.get("lastLaunchedVersion")?.trim() ?? "";
-  const forcedResetAppliedVersion = store.get("forcedResetAppliedVersion")?.trim() ?? "";
+  const forcedResetAppliedVersion =
+    store.get("forcedResetAppliedVersion")?.trim() ?? "";
   const shouldApplyForcedReset =
     currentVersion === FORCE_APP_RESET_VERSION &&
     forcedResetAppliedVersion !== FORCE_APP_RESET_VERSION &&
@@ -2816,48 +3218,69 @@ app.whenReady().then(async () => {
   if (shouldApplyForcedReset) {
     store.reset({
       forcedResetAppliedVersion: FORCE_APP_RESET_VERSION,
-      lastLaunchedVersion: currentVersion
+      lastLaunchedVersion: currentVersion,
     });
   } else if (lastLaunchedVersion !== currentVersion) {
     store.set({
-      lastLaunchedVersion: currentVersion
+      lastLaunchedVersion: currentVersion,
     });
   }
 
-  const managedTwitchClientId = (process.env.TWITCH_CLIENT_ID ?? TWITCH_MANAGED_CLIENT_ID).trim();
+  const managedTwitchClientId = (
+    process.env.TWITCH_CLIENT_ID ?? TWITCH_MANAGED_CLIENT_ID
+  ).trim();
   if (!store.get("twitchClientId")?.trim() && managedTwitchClientId) {
     store.set("twitchClientId", managedTwitchClientId);
   }
-  const managedTwitchRedirectUri = (process.env.TWITCH_REDIRECT_URI ?? TWITCH_DEFAULT_REDIRECT_URI).trim();
+  const managedTwitchRedirectUri = (
+    process.env.TWITCH_REDIRECT_URI ?? TWITCH_DEFAULT_REDIRECT_URI
+  ).trim();
   if (!store.get("twitchRedirectUri")?.trim() && managedTwitchRedirectUri) {
     store.set("twitchRedirectUri", managedTwitchRedirectUri);
   }
-  const managedKickClientId = (process.env.KICK_CLIENT_ID ?? KICK_MANAGED_CLIENT_ID).trim();
+  const managedKickClientId = (
+    process.env.KICK_CLIENT_ID ?? KICK_MANAGED_CLIENT_ID
+  ).trim();
   if (!store.get("kickClientId")?.trim() && managedKickClientId) {
     store.set("kickClientId", managedKickClientId);
   }
-  const managedKickClientSecret = (process.env.KICK_CLIENT_SECRET ?? KICK_MANAGED_CLIENT_SECRET).trim();
+  const managedKickClientSecret = (
+    process.env.KICK_CLIENT_SECRET ?? KICK_MANAGED_CLIENT_SECRET
+  ).trim();
   if (!store.get("kickClientSecret")?.trim() && managedKickClientSecret) {
     store.set("kickClientSecret", managedKickClientSecret);
   }
-  const managedKickRedirectUri = (process.env.KICK_REDIRECT_URI ?? KICK_DEFAULT_REDIRECT_URI).trim();
+  const managedKickRedirectUri = (
+    process.env.KICK_REDIRECT_URI ?? KICK_DEFAULT_REDIRECT_URI
+  ).trim();
   if (!store.get("kickRedirectUri")?.trim() && managedKickRedirectUri) {
     store.set("kickRedirectUri", managedKickRedirectUri);
   }
   if (YOUTUBE_ALPHA_ENABLED) {
-    const managedYouTubeClientId = (process.env.YOUTUBE_CLIENT_ID ?? YOUTUBE_MANAGED_CLIENT_ID).trim();
+    const managedYouTubeClientId = (
+      process.env.YOUTUBE_CLIENT_ID ?? YOUTUBE_MANAGED_CLIENT_ID
+    ).trim();
     if (!store.get("youtubeClientId")?.trim() && managedYouTubeClientId) {
       store.set("youtubeClientId", managedYouTubeClientId);
     }
-    const managedYouTubeClientSecret = (process.env.YOUTUBE_CLIENT_SECRET ?? YOUTUBE_MANAGED_CLIENT_SECRET).trim();
-    if (!store.get("youtubeClientSecret")?.trim() && managedYouTubeClientSecret) {
+    const managedYouTubeClientSecret = (
+      process.env.YOUTUBE_CLIENT_SECRET ?? YOUTUBE_MANAGED_CLIENT_SECRET
+    ).trim();
+    if (
+      !store.get("youtubeClientSecret")?.trim() &&
+      managedYouTubeClientSecret
+    ) {
       store.set("youtubeClientSecret", managedYouTubeClientSecret);
     }
-    const managedYouTubeRedirectUri = (process.env.YOUTUBE_REDIRECT_URI ?? YOUTUBE_DEFAULT_REDIRECT_URI).trim();
+    const managedYouTubeRedirectUri = (
+      process.env.YOUTUBE_REDIRECT_URI ?? YOUTUBE_DEFAULT_REDIRECT_URI
+    ).trim();
     if (!store.get("youtubeRedirectUri")?.trim() && managedYouTubeRedirectUri) {
       store.set("youtubeRedirectUri", managedYouTubeRedirectUri);
     }
-    const managedYouTubeApiKey = (process.env.YOUTUBE_API_KEY ?? YOUTUBE_MANAGED_API_KEY).trim();
+    const managedYouTubeApiKey = (
+      process.env.YOUTUBE_API_KEY ?? YOUTUBE_MANAGED_API_KEY
+    ).trim();
     if (!store.get("youtubeApiKey")?.trim() && managedYouTubeApiKey) {
       store.set("youtubeApiKey", managedYouTubeApiKey);
     }
@@ -2868,7 +3291,7 @@ app.whenReady().then(async () => {
       youtubeRefreshToken: "",
       youtubeTokenExpiry: 0,
       youtubeUsername: "",
-      youtubeLiveChatId: ""
+      youtubeLiveChatId: "",
     });
     await clearAuthTokens("youtube");
   }
@@ -2877,7 +3300,7 @@ app.whenReady().then(async () => {
       tiktokAlphaEnabled: false,
       tiktokSessionId: "",
       tiktokTtTargetIdc: "",
-      tiktokUsername: ""
+      tiktokUsername: "",
     });
   }
 
@@ -2890,37 +3313,54 @@ app.whenReady().then(async () => {
   }
 
   if (disabledPlatforms.size > 0) {
-    const existingSources = Array.isArray(store.get("sessionSources")) ? store.get("sessionSources") ?? [] : [];
-    const filteredSources = existingSources.filter((source) => !disabledPlatforms.has(source.platform));
+    const existingSources = Array.isArray(store.get("sessionSources"))
+      ? (store.get("sessionSources") ?? [])
+      : [];
+    const filteredSources = existingSources.filter(
+      (source) => !disabledPlatforms.has(source.platform),
+    );
     const retainedIds = new Set(filteredSources.map((source) => source.id));
-    const existingTabs = Array.isArray(store.get("sessionTabs")) ? store.get("sessionTabs") ?? [] : [];
+    const existingTabs = Array.isArray(store.get("sessionTabs"))
+      ? (store.get("sessionTabs") ?? [])
+      : [];
     const filteredTabs = existingTabs
-      .map((tab) => ({ ...tab, sourceIds: tab.sourceIds.filter((sourceId) => retainedIds.has(sourceId)) }))
+      .map((tab) => ({
+        ...tab,
+        sourceIds: tab.sourceIds.filter((sourceId) =>
+          retainedIds.has(sourceId),
+        ),
+      }))
       .filter((tab) => tab.sourceIds.length > 0);
     const activeTabId = store.get("sessionActiveTabId");
     const nextActiveTabId =
-      typeof activeTabId === "string" && filteredTabs.some((tab) => tab.id === activeTabId)
+      typeof activeTabId === "string" &&
+      filteredTabs.some((tab) => tab.id === activeTabId)
         ? activeTabId
         : (filteredTabs[0]?.id ?? "");
 
     store.set({
       sessionSources: filteredSources,
       sessionTabs: filteredTabs,
-      sessionActiveTabId: nextActiveTabId
+      sessionActiveTabId: nextActiveTabId,
     });
   }
 
-  if (store.get("youtubeAlphaEnabled") !== YOUTUBE_ALPHA_ENABLED || store.get("tiktokAlphaEnabled") !== TIKTOK_ALPHA_ENABLED) {
+  if (
+    store.get("youtubeAlphaEnabled") !== YOUTUBE_ALPHA_ENABLED ||
+    store.get("tiktokAlphaEnabled") !== TIKTOK_ALPHA_ENABLED
+  ) {
     store.set({
       youtubeAlphaEnabled: YOUTUBE_ALPHA_ENABLED,
-      tiktokAlphaEnabled: TIKTOK_ALPHA_ENABLED
+      tiktokAlphaEnabled: TIKTOK_ALPHA_ENABLED,
     });
   }
 
   if (store.get("twitchGuest") && store.get("twitchClientId")?.trim()) {
     store.set({
       twitchGuest: false,
-      twitchUsername: store.get("twitchToken") ? store.get("twitchUsername") : ""
+      twitchUsername: store.get("twitchToken")
+        ? store.get("twitchUsername")
+        : "",
     });
   }
   if ((store.get("twitchScopeVersion") ?? 0) < TWITCH_SCOPE_VERSION) {
@@ -2928,14 +3368,20 @@ app.whenReady().then(async () => {
       twitchToken: "",
       twitchUsername: "",
       twitchGuest: false,
-      twitchScopeVersion: TWITCH_SCOPE_VERSION
+      twitchScopeVersion: TWITCH_SCOPE_VERSION,
     });
     await clearAuthTokens("twitch");
   }
-  if (store.get("kickGuest") && store.get("kickClientId")?.trim() && store.get("kickClientSecret")?.trim()) {
+  if (
+    store.get("kickGuest") &&
+    store.get("kickClientId")?.trim() &&
+    store.get("kickClientSecret")?.trim()
+  ) {
     store.set({
       kickGuest: false,
-      kickUsername: store.get("kickAccessToken") ? store.get("kickUsername") : ""
+      kickUsername: store.get("kickAccessToken")
+        ? store.get("kickUsername")
+        : "",
     });
   }
   if ((store.get("kickScopeVersion") ?? 0) < KICK_SCOPE_VERSION) {
@@ -2944,153 +3390,200 @@ app.whenReady().then(async () => {
       kickRefreshToken: "",
       kickUsername: "",
       kickGuest: false,
-      kickScopeVersion: KICK_SCOPE_VERSION
+      kickScopeVersion: KICK_SCOPE_VERSION,
     });
     await clearAuthTokens("kick");
   }
-  if (store.get("updateChannel") !== "stable" && store.get("updateChannel") !== "beta") {
+  if (
+    store.get("updateChannel") !== "stable" &&
+    store.get("updateChannel") !== "beta"
+  ) {
     store.set({
-      updateChannel: DEFAULT_UPDATE_CHANNEL
+      updateChannel: DEFAULT_UPDATE_CHANNEL,
     });
   }
   createMainWindow();
   setupAppMenu();
   setupAutoUpdater();
 
-  ipcMain.handle(IPC_CHANNELS.SETTINGS_GET, () => store.store);
-  ipcMain.handle(IPC_CHANNELS.SETTINGS_SET, async (_event, updates: AppSettings) => {
-    const nextUpdates: Partial<AppSettings> = {
-      ...updates,
-      updateChannel: updates.updateChannel === "beta" ? "beta" : updates.updateChannel === "stable" ? "stable" : resolveConfiguredUpdateChannel(),
-      youtubeAlphaEnabled: YOUTUBE_ALPHA_ENABLED,
-      tiktokAlphaEnabled: TIKTOK_ALPHA_ENABLED
-    };
+  registerIpcHandlers(ipcMain, {
+    [IPC_CHANNELS.SETTINGS_GET]: () => store.store,
+    [IPC_CHANNELS.SETTINGS_SET]: async (_event, updates: unknown) => {
+      const requestedUpdates = (updates ?? {}) as AppSettings;
+      const nextUpdates: Partial<AppSettings> = {
+        ...requestedUpdates,
+        updateChannel:
+          requestedUpdates.updateChannel === "beta"
+            ? "beta"
+            : requestedUpdates.updateChannel === "stable"
+              ? "stable"
+              : resolveConfiguredUpdateChannel(),
+        youtubeAlphaEnabled: YOUTUBE_ALPHA_ENABLED,
+        tiktokAlphaEnabled: TIKTOK_ALPHA_ENABLED,
+      };
 
-    if (!YOUTUBE_ALPHA_ENABLED) {
-      Object.assign(nextUpdates, {
-        youtubeAccessToken: "",
-        youtubeRefreshToken: "",
-        youtubeTokenExpiry: 0,
-        youtubeUsername: "",
-        youtubeLiveChatId: ""
-      });
-    }
-    if (!TIKTOK_ALPHA_ENABLED) {
-      Object.assign(nextUpdates, {
-        tiktokSessionId: "",
-        tiktokTtTargetIdc: "",
-        tiktokUsername: ""
-      });
-    }
-
-    const disabledPlatforms = new Set<string>();
-    if (!YOUTUBE_ALPHA_ENABLED) {
-      disabledPlatforms.add("youtube");
-    }
-    if (!TIKTOK_ALPHA_ENABLED) {
-      disabledPlatforms.add("tiktok");
-    }
-
-    if (disabledPlatforms.size > 0) {
-      const currentSources = Array.isArray(updates.sessionSources)
-        ? updates.sessionSources
-        : Array.isArray(store.get("sessionSources"))
-          ? store.get("sessionSources") ?? []
-          : [];
-      const filteredSources = currentSources.filter((source) => !disabledPlatforms.has(source.platform));
-      const retainedIds = new Set(filteredSources.map((source) => source.id));
-      const currentTabs = Array.isArray(updates.sessionTabs)
-        ? updates.sessionTabs
-        : Array.isArray(store.get("sessionTabs"))
-          ? store.get("sessionTabs") ?? []
-          : [];
-      const filteredTabs = currentTabs
-        .map((tab) => ({
-          ...tab,
-          sourceIds: tab.sourceIds.filter((sourceId) => retainedIds.has(sourceId))
-        }))
-        .filter((tab) => tab.sourceIds.length > 0);
-
-      const requestedActiveTabId =
-        typeof updates.sessionActiveTabId === "string" ? updates.sessionActiveTabId : (store.get("sessionActiveTabId") ?? "");
-      const nextActiveTabId =
-        requestedActiveTabId && filteredTabs.some((tab) => tab.id === requestedActiveTabId)
-          ? requestedActiveTabId
-          : (filteredTabs[0]?.id ?? "");
-
-      Object.assign(nextUpdates, {
-        sessionSources: filteredSources,
-        sessionTabs: filteredTabs,
-        sessionActiveTabId: nextActiveTabId
-      });
-    }
-
-    const prevTwitchToken = String(store.get("twitchToken") ?? "").trim();
-    const prevKickAccessToken = String(store.get("kickAccessToken") ?? "").trim();
-    const prevKickRefreshToken = String(store.get("kickRefreshToken") ?? "").trim();
-    const prevYouTubeAccessToken = String(store.get("youtubeAccessToken") ?? "").trim();
-    const prevYouTubeRefreshToken = String(store.get("youtubeRefreshToken") ?? "").trim();
-
-    const nextTwitchToken =
-      typeof nextUpdates.twitchToken === "string" ? nextUpdates.twitchToken.trim() : prevTwitchToken;
-    const nextKickAccessToken =
-      typeof nextUpdates.kickAccessToken === "string" ? nextUpdates.kickAccessToken.trim() : prevKickAccessToken;
-    const nextKickRefreshToken =
-      typeof nextUpdates.kickRefreshToken === "string" ? nextUpdates.kickRefreshToken.trim() : prevKickRefreshToken;
-    const nextYouTubeAccessToken =
-      typeof nextUpdates.youtubeAccessToken === "string" ? nextUpdates.youtubeAccessToken.trim() : prevYouTubeAccessToken;
-    const nextYouTubeRefreshToken =
-      typeof nextUpdates.youtubeRefreshToken === "string" ? nextUpdates.youtubeRefreshToken.trim() : prevYouTubeRefreshToken;
-
-    store.set(nextUpdates);
-    if (typeof nextUpdates.twitchToken === "string" && nextTwitchToken !== prevTwitchToken) {
-      if (nextTwitchToken) {
-        await storeAuthTokens("twitch", { accessToken: nextTwitchToken });
-      } else {
-        await clearAuthTokens("twitch");
-      }
-    }
-    if (
-      (typeof nextUpdates.kickAccessToken === "string" || typeof nextUpdates.kickRefreshToken === "string") &&
-      (nextKickAccessToken !== prevKickAccessToken || nextKickRefreshToken !== prevKickRefreshToken)
-    ) {
-      if (nextKickAccessToken || nextKickRefreshToken) {
-        await storeAuthTokens("kick", {
-          accessToken: nextKickAccessToken,
-          refreshToken: nextKickRefreshToken
+      if (!YOUTUBE_ALPHA_ENABLED) {
+        Object.assign(nextUpdates, {
+          youtubeAccessToken: "",
+          youtubeRefreshToken: "",
+          youtubeTokenExpiry: 0,
+          youtubeUsername: "",
+          youtubeLiveChatId: "",
         });
-      } else {
-        await clearAuthTokens("kick");
       }
-    }
-    if (
-      (typeof nextUpdates.youtubeAccessToken === "string" || typeof nextUpdates.youtubeRefreshToken === "string") &&
-      (nextYouTubeAccessToken !== prevYouTubeAccessToken || nextYouTubeRefreshToken !== prevYouTubeRefreshToken)
-    ) {
-      if (nextYouTubeAccessToken || nextYouTubeRefreshToken) {
-        await storeAuthTokens("youtube", {
-          accessToken: nextYouTubeAccessToken,
-          refreshToken: nextYouTubeRefreshToken
+      if (!TIKTOK_ALPHA_ENABLED) {
+        Object.assign(nextUpdates, {
+          tiktokSessionId: "",
+          tiktokTtTargetIdc: "",
+          tiktokUsername: "",
         });
-      } else {
-        await clearAuthTokens("youtube");
       }
-    }
-    if (nextUpdates.updateChannel === "stable" || nextUpdates.updateChannel === "beta") {
-      applyAutoUpdaterChannel(nextUpdates.updateChannel);
-    }
-    return store.store;
+
+      const disabledPlatforms = new Set<string>();
+      if (!YOUTUBE_ALPHA_ENABLED) {
+        disabledPlatforms.add("youtube");
+      }
+      if (!TIKTOK_ALPHA_ENABLED) {
+        disabledPlatforms.add("tiktok");
+      }
+
+      if (disabledPlatforms.size > 0) {
+        const currentSources = Array.isArray(requestedUpdates.sessionSources)
+          ? requestedUpdates.sessionSources
+          : Array.isArray(store.get("sessionSources"))
+            ? (store.get("sessionSources") ?? [])
+            : [];
+        const filteredSources = currentSources.filter(
+          (source) => !disabledPlatforms.has(source.platform),
+        );
+        const retainedIds = new Set(filteredSources.map((source) => source.id));
+        const currentTabs = Array.isArray(requestedUpdates.sessionTabs)
+          ? requestedUpdates.sessionTabs
+          : Array.isArray(store.get("sessionTabs"))
+            ? (store.get("sessionTabs") ?? [])
+            : [];
+        const filteredTabs = currentTabs
+          .map((tab) => ({
+            ...tab,
+            sourceIds: tab.sourceIds.filter((sourceId) =>
+              retainedIds.has(sourceId),
+            ),
+          }))
+          .filter((tab) => tab.sourceIds.length > 0);
+
+        const requestedActiveTabId =
+          typeof requestedUpdates.sessionActiveTabId === "string"
+            ? requestedUpdates.sessionActiveTabId
+            : (store.get("sessionActiveTabId") ?? "");
+        const nextActiveTabId =
+          requestedActiveTabId &&
+          filteredTabs.some((tab) => tab.id === requestedActiveTabId)
+            ? requestedActiveTabId
+            : (filteredTabs[0]?.id ?? "");
+
+        Object.assign(nextUpdates, {
+          sessionSources: filteredSources,
+          sessionTabs: filteredTabs,
+          sessionActiveTabId: nextActiveTabId,
+        });
+      }
+
+      const prevTwitchToken = String(store.get("twitchToken") ?? "").trim();
+      const prevKickAccessToken = String(
+        store.get("kickAccessToken") ?? "",
+      ).trim();
+      const prevKickRefreshToken = String(
+        store.get("kickRefreshToken") ?? "",
+      ).trim();
+      const prevYouTubeAccessToken = String(
+        store.get("youtubeAccessToken") ?? "",
+      ).trim();
+      const prevYouTubeRefreshToken = String(
+        store.get("youtubeRefreshToken") ?? "",
+      ).trim();
+
+      const nextTwitchToken =
+        typeof nextUpdates.twitchToken === "string"
+          ? nextUpdates.twitchToken.trim()
+          : prevTwitchToken;
+      const nextKickAccessToken =
+        typeof nextUpdates.kickAccessToken === "string"
+          ? nextUpdates.kickAccessToken.trim()
+          : prevKickAccessToken;
+      const nextKickRefreshToken =
+        typeof nextUpdates.kickRefreshToken === "string"
+          ? nextUpdates.kickRefreshToken.trim()
+          : prevKickRefreshToken;
+      const nextYouTubeAccessToken =
+        typeof nextUpdates.youtubeAccessToken === "string"
+          ? nextUpdates.youtubeAccessToken.trim()
+          : prevYouTubeAccessToken;
+      const nextYouTubeRefreshToken =
+        typeof nextUpdates.youtubeRefreshToken === "string"
+          ? nextUpdates.youtubeRefreshToken.trim()
+          : prevYouTubeRefreshToken;
+
+      store.set(nextUpdates);
+      if (
+        typeof nextUpdates.twitchToken === "string" &&
+        nextTwitchToken !== prevTwitchToken
+      ) {
+        if (nextTwitchToken) {
+          await storeAuthTokens("twitch", { accessToken: nextTwitchToken });
+        } else {
+          await clearAuthTokens("twitch");
+        }
+      }
+      if (
+        (typeof nextUpdates.kickAccessToken === "string" ||
+          typeof nextUpdates.kickRefreshToken === "string") &&
+        (nextKickAccessToken !== prevKickAccessToken ||
+          nextKickRefreshToken !== prevKickRefreshToken)
+      ) {
+        if (nextKickAccessToken || nextKickRefreshToken) {
+          await storeAuthTokens("kick", {
+            accessToken: nextKickAccessToken,
+            refreshToken: nextKickRefreshToken,
+          });
+        } else {
+          await clearAuthTokens("kick");
+        }
+      }
+      if (
+        (typeof nextUpdates.youtubeAccessToken === "string" ||
+          typeof nextUpdates.youtubeRefreshToken === "string") &&
+        (nextYouTubeAccessToken !== prevYouTubeAccessToken ||
+          nextYouTubeRefreshToken !== prevYouTubeRefreshToken)
+      ) {
+        if (nextYouTubeAccessToken || nextYouTubeRefreshToken) {
+          await storeAuthTokens("youtube", {
+            accessToken: nextYouTubeAccessToken,
+            refreshToken: nextYouTubeRefreshToken,
+          });
+        } else {
+          await clearAuthTokens("youtube");
+        }
+      }
+      if (
+        nextUpdates.updateChannel === "stable" ||
+        nextUpdates.updateChannel === "beta"
+      ) {
+        applyAutoUpdaterChannel(nextUpdates.updateChannel);
+      }
+      return store.store;
+    },
   });
   ipcMain.handle(IPC_CHANNELS.AUTH_TWITCH_SIGN_IN, async () => {
     const clientId = store.get("twitchClientId")?.trim();
-    const redirectUri = store.get("twitchRedirectUri")?.trim() || TWITCH_DEFAULT_REDIRECT_URI;
+    const redirectUri =
+      store.get("twitchRedirectUri")?.trim() || TWITCH_DEFAULT_REDIRECT_URI;
 
     if (!clientId) {
       const guestName = `justinfan${Math.floor(Math.random() * 100000)}`;
       store.set({
         twitchToken: "",
         twitchUsername: guestName,
-        twitchGuest: true
+        twitchGuest: true,
       });
       await clearAuthTokens("twitch");
       return store.store;
@@ -3105,13 +3598,19 @@ app.whenReady().then(async () => {
     authUrl.searchParams.set("state", state);
     authUrl.searchParams.set("force_verify", "true");
 
-    const callbackUrl = await openAuthInBrowser(authUrl.toString(), redirectUri);
-    const hash = callbackUrl.includes("#") ? callbackUrl.slice(callbackUrl.indexOf("#") + 1) : "";
+    const callbackUrl = await openAuthInBrowser(
+      authUrl.toString(),
+      redirectUri,
+    );
+    const hash = callbackUrl.includes("#")
+      ? callbackUrl.slice(callbackUrl.indexOf("#") + 1)
+      : "";
     const params = new URLSearchParams(hash);
 
     const error = params.get("error");
     if (error) {
-      const description = params.get("error_description") ?? "Twitch sign-in failed.";
+      const description =
+        params.get("error_description") ?? "Twitch sign-in failed.";
       throw new Error(description);
     }
 
@@ -3128,12 +3627,18 @@ app.whenReady().then(async () => {
       login?: string;
     };
 
-    const validateResponse = await fetch("https://id.twitch.tv/oauth2/validate", {
-      headers: {
-        Authorization: `OAuth ${accessToken}`
-      }
-    });
-    const validated = await fetchJsonOrThrow<TwitchValidateResponse>(validateResponse, "Twitch token validation");
+    const validateResponse = await fetch(
+      "https://id.twitch.tv/oauth2/validate",
+      {
+        headers: {
+          Authorization: `OAuth ${accessToken}`,
+        },
+      },
+    );
+    const validated = await fetchJsonOrThrow<TwitchValidateResponse>(
+      validateResponse,
+      "Twitch token validation",
+    );
 
     if (!validated.login) {
       throw new Error("Twitch token validation did not include a username.");
@@ -3144,7 +3649,7 @@ app.whenReady().then(async () => {
       twitchUsername: validated.login,
       twitchGuest: false,
       twitchScopeVersion: TWITCH_SCOPE_VERSION,
-      twitchRedirectUri: redirectUri
+      twitchRedirectUri: redirectUri,
     });
     await storeAuthTokens("twitch", { accessToken });
 
@@ -3155,7 +3660,7 @@ app.whenReady().then(async () => {
       twitchToken: "",
       twitchUsername: "",
       twitchGuest: false,
-      twitchScopeVersion: TWITCH_SCOPE_VERSION
+      twitchScopeVersion: TWITCH_SCOPE_VERSION,
     });
     await clearAuthTokens("twitch");
     return store.store;
@@ -3163,21 +3668,25 @@ app.whenReady().then(async () => {
   ipcMain.handle(IPC_CHANNELS.AUTH_KICK_SIGN_IN, async () => {
     const clientId = store.get("kickClientId")?.trim();
     const clientSecret = store.get("kickClientSecret")?.trim();
-    const redirectUri = store.get("kickRedirectUri")?.trim() || KICK_DEFAULT_REDIRECT_URI;
+    const redirectUri =
+      store.get("kickRedirectUri")?.trim() || KICK_DEFAULT_REDIRECT_URI;
 
     if (!clientId) {
       store.set({
         kickAccessToken: "",
         kickRefreshToken: "",
         kickUsername: "guest",
-        kickGuest: true
+        kickGuest: true,
       });
       await clearAuthTokens("kick");
       return store.store;
     }
     const state = randomToken(24);
     const codeVerifier = randomToken(48);
-    const codeChallenge = crypto.createHash("sha256").update(codeVerifier).digest("base64url");
+    const codeChallenge = crypto
+      .createHash("sha256")
+      .update(codeVerifier)
+      .digest("base64url");
 
     const authUrl = new URL("https://id.kick.com/oauth/authorize");
     authUrl.searchParams.set("client_id", clientId);
@@ -3188,11 +3697,16 @@ app.whenReady().then(async () => {
     authUrl.searchParams.set("code_challenge", codeChallenge);
     authUrl.searchParams.set("code_challenge_method", "S256");
 
-    const callbackUrl = await openAuthInBrowser(authUrl.toString(), redirectUri);
+    const callbackUrl = await openAuthInBrowser(
+      authUrl.toString(),
+      redirectUri,
+    );
     const callback = new URL(callbackUrl);
     const error = callback.searchParams.get("error");
     if (error) {
-      const description = callback.searchParams.get("error_description") ?? "Kick sign-in failed.";
+      const description =
+        callback.searchParams.get("error_description") ??
+        "Kick sign-in failed.";
       throw new Error(description);
     }
 
@@ -3215,7 +3729,7 @@ app.whenReady().then(async () => {
       client_id: clientId,
       redirect_uri: redirectUri,
       grant_type: "authorization_code",
-      code_verifier: codeVerifier
+      code_verifier: codeVerifier,
     });
     if (clientSecret) {
       tokenParams.set("client_secret", clientSecret);
@@ -3225,11 +3739,14 @@ app.whenReady().then(async () => {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
-        Accept: "application/json"
+        Accept: "application/json",
       },
-      body: tokenParams
+      body: tokenParams,
     });
-    const tokens = await fetchJsonOrThrow<KickTokenResponse>(tokenResponse, "Kick token exchange");
+    const tokens = await fetchJsonOrThrow<KickTokenResponse>(
+      tokenResponse,
+      "Kick token exchange",
+    );
 
     if (!tokens.access_token) {
       throw new Error("Kick token exchange did not return an access token.");
@@ -3238,10 +3755,13 @@ app.whenReady().then(async () => {
     const userResponse = await fetch("https://api.kick.com/public/v1/users", {
       headers: {
         Authorization: `Bearer ${tokens.access_token}`,
-        Accept: "application/json"
-      }
+        Accept: "application/json",
+      },
     });
-    const userPayload = await fetchJsonOrThrow<unknown>(userResponse, "Kick user profile");
+    const userPayload = await fetchJsonOrThrow<unknown>(
+      userResponse,
+      "Kick user profile",
+    );
     const username = parseKickUserName(userPayload);
 
     store.set({
@@ -3250,11 +3770,11 @@ app.whenReady().then(async () => {
       kickUsername: username ?? "",
       kickGuest: false,
       kickScopeVersion: KICK_SCOPE_VERSION,
-      kickRedirectUri: redirectUri
+      kickRedirectUri: redirectUri,
     });
     await storeAuthTokens("kick", {
       accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token ?? ""
+      refreshToken: tokens.refresh_token ?? "",
     });
 
     return store.store;
@@ -3265,7 +3785,7 @@ app.whenReady().then(async () => {
       kickRefreshToken: "",
       kickUsername: "",
       kickGuest: false,
-      kickScopeVersion: KICK_SCOPE_VERSION
+      kickScopeVersion: KICK_SCOPE_VERSION,
     });
     await clearAuthTokens("kick");
     return store.store;
@@ -3283,7 +3803,10 @@ app.whenReady().then(async () => {
 
     const state = randomToken(24);
     const codeVerifier = randomToken(48);
-    const codeChallenge = crypto.createHash("sha256").update(codeVerifier).digest("base64url");
+    const codeChallenge = crypto
+      .createHash("sha256")
+      .update(codeVerifier)
+      .digest("base64url");
     const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
     authUrl.searchParams.set("client_id", clientId);
     authUrl.searchParams.set("redirect_uri", redirectUri);
@@ -3296,12 +3819,17 @@ app.whenReady().then(async () => {
     authUrl.searchParams.set("code_challenge_method", "S256");
     authUrl.searchParams.set("code_challenge", codeChallenge);
 
-    const callbackUrl = await openAuthInBrowser(authUrl.toString(), redirectUri);
+    const callbackUrl = await openAuthInBrowser(
+      authUrl.toString(),
+      redirectUri,
+    );
     const callback = new URL(callbackUrl);
 
     const error = callback.searchParams.get("error");
     if (error) {
-      const description = callback.searchParams.get("error_description") ?? "YouTube sign-in failed.";
+      const description =
+        callback.searchParams.get("error_description") ??
+        "YouTube sign-in failed.";
       throw new Error(description);
     }
     if (callback.searchParams.get("state") !== state) {
@@ -3318,7 +3846,7 @@ app.whenReady().then(async () => {
       client_id: clientId,
       redirect_uri: redirectUri,
       grant_type: "authorization_code",
-      code_verifier: codeVerifier
+      code_verifier: codeVerifier,
     });
     if (clientSecret) {
       tokenParams.set("client_secret", clientSecret);
@@ -3328,11 +3856,14 @@ app.whenReady().then(async () => {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
-        Accept: "application/json"
+        Accept: "application/json",
       },
-      body: tokenParams
+      body: tokenParams,
     });
-    const tokens = await fetchJsonOrThrow<YouTubeTokenResponse>(tokenResponse, "YouTube token exchange");
+    const tokens = await fetchJsonOrThrow<YouTubeTokenResponse>(
+      tokenResponse,
+      "YouTube token exchange",
+    );
     if (!tokens.access_token) {
       throw new Error("YouTube token exchange did not return an access token.");
     }
@@ -3340,16 +3871,21 @@ app.whenReady().then(async () => {
     await saveYouTubeTokens({
       accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token,
-      expiresIn: tokens.expires_in
+      expiresIn: tokens.expires_in,
     });
 
     let username = store.get("youtubeUsername")?.trim() ?? "";
     try {
       const channelResponse = await youtubeFetchWithAuth(
-        "https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true&maxResults=1"
+        "https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true&maxResults=1",
       );
-      const channelPayload = await fetchJsonOrThrow<YouTubeChannelsResponse>(channelResponse, "YouTube profile");
-      const first = Array.isArray(channelPayload.items) ? channelPayload.items[0] : undefined;
+      const channelPayload = await fetchJsonOrThrow<YouTubeChannelsResponse>(
+        channelResponse,
+        "YouTube profile",
+      );
+      const first = Array.isArray(channelPayload.items)
+        ? channelPayload.items[0]
+        : undefined;
       username = first?.snippet?.title?.trim() ?? username;
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
@@ -3358,7 +3894,7 @@ app.whenReady().then(async () => {
 
     store.set({
       youtubeUsername: username,
-      youtubeRedirectUri: redirectUri
+      youtubeRedirectUri: redirectUri,
     });
 
     return store.store;
@@ -3369,7 +3905,7 @@ app.whenReady().then(async () => {
       youtubeRefreshToken: "",
       youtubeTokenExpiry: 0,
       youtubeUsername: "",
-      youtubeLiveChatId: ""
+      youtubeLiveChatId: "",
     });
     youtubeBanIdsByTarget.clear();
     await clearAuthTokens("youtube");
@@ -3383,11 +3919,13 @@ app.whenReady().then(async () => {
     store.set({
       tiktokSessionId: credentials.sessionId,
       tiktokTtTargetIdc: credentials.ttTargetIdc,
-      tiktokUsername: store.get("tiktokUsername")?.trim() || "signed-in"
+      tiktokUsername: store.get("tiktokUsername")?.trim() || "signed-in",
     });
     const resolved = await readTikTokAuthFromSession(authSession);
     if (!resolved) {
-      throw new Error("TikTok sign-in completed, but session cookies were not persisted.");
+      throw new Error(
+        "TikTok sign-in completed, but session cookies were not persisted.",
+      );
     }
     return store.store;
   });
@@ -3397,7 +3935,7 @@ app.whenReady().then(async () => {
     store.set({
       tiktokSessionId: "",
       tiktokTtTargetIdc: "",
-      tiktokUsername: ""
+      tiktokUsername: "",
     });
     await disconnectAllTikTokConnections();
     return store.store;
@@ -3408,29 +3946,38 @@ app.whenReady().then(async () => {
   ipcMain.handle(IPC_CHANNELS.AUTH_TEST_PERMISSIONS, async () => {
     return getAuthHealthSnapshot();
   });
-  ipcMain.handle(IPC_CHANNELS.MODERATION_ACT, async (_event, payload: ModerationRequest) => {
-    const platform = payload?.platform;
-    const channel = normalizeLogin(payload?.channel ?? "");
-    const action = payload?.action;
-    if (!platform) {
-      throw new Error("Moderation platform is required.");
-    }
-    if (!channel) {
-      throw new Error("Moderation channel is required.");
-    }
-    if (!action) {
-      throw new Error("Moderation action is required.");
-    }
-    await runModerationAction({
-      ...payload,
-      platform,
-      channel,
-      action
-    });
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.MODERATION_ACT,
+    async (_event, payload: ModerationRequest) => {
+      const platform = payload?.platform;
+      const channel = normalizeLogin(payload?.channel ?? "");
+      const action = payload?.action;
+      if (!platform) {
+        throw new Error("Moderation platform is required.");
+      }
+      if (!channel) {
+        throw new Error("Moderation channel is required.");
+      }
+      if (!action) {
+        throw new Error("Moderation action is required.");
+      }
+      await runModerationAction({
+        ...payload,
+        platform,
+        channel,
+        action,
+      });
+    },
+  );
   ipcMain.handle(
     IPC_CHANNELS.MODERATION_CAN_MODERATE,
-    async (_event, payload: { platform?: "twitch" | "kick" | "youtube" | "tiktok"; channel?: string }) => {
+    async (
+      _event,
+      payload: {
+        platform?: "twitch" | "kick" | "youtube" | "tiktok";
+        channel?: string;
+      },
+    ) => {
       const platform = payload?.platform;
       const channel = normalizeLogin(payload?.channel ?? "");
       if (!platform || !channel) return false;
@@ -3460,278 +4007,317 @@ app.whenReady().then(async () => {
       } catch {
         return false;
       }
-    }
+    },
   );
-  ipcMain.handle(IPC_CHANNELS.KICK_RESOLVE_CHATROOM, async (_event, channel: string) => {
-    const slug = channel.trim().toLowerCase();
-    if (!slug) {
-      throw new Error("Kick channel is required.");
-    }
+  ipcMain.handle(
+    IPC_CHANNELS.KICK_RESOLVE_CHATROOM,
+    async (_event, channel: string) => {
+      const slug = channel.trim().toLowerCase();
+      if (!slug) {
+        throw new Error("Kick channel is required.");
+      }
 
-    const lookup = await resolveKickChannelLookup(slug);
+      const lookup = await resolveKickChannelLookup(slug);
 
-    if (!lookup.ok) {
-      throw new Error(lookup.message);
-    }
+      if (!lookup.ok) {
+        throw new Error(lookup.message);
+      }
 
-    const chatroomId = parseKickChatroomId(lookup.payload);
-    if (!chatroomId) {
-      throw new Error("Kick chatroom id not found for this channel.");
-    }
-    return { chatroomId };
-  });
-  ipcMain.handle(IPC_CHANNELS.YOUTUBE_RESOLVE_LIVE_CHAT, async (_event, channel: string) => {
-    assertYouTubeAlphaEnabled();
-    const input = channel.trim();
-    if (!input) {
-      throw new Error("YouTube channel is required.");
-    }
-    const resolved = await resolveYouTubeLiveChat(input);
-    store.set({
-      youtubeLiveChatId: resolved.liveChatId
-    });
-    return resolved;
-  });
-  ipcMain.handle(IPC_CHANNELS.YOUTUBE_FETCH_MESSAGES, async (_event, payload: { liveChatId?: string; pageToken?: string }) => {
-    assertYouTubeAlphaEnabled();
-    const liveChatId = payload?.liveChatId?.trim();
-    if (!liveChatId) {
-      throw new Error("YouTube live chat id is required.");
-    }
-    if (liveChatId.startsWith("web:")) {
-      return fetchYouTubeWebLiveMessages({
-        liveChatId,
-        pageToken: payload?.pageToken?.trim() || undefined
+      const chatroomId = parseKickChatroomId(lookup.payload);
+      if (!chatroomId) {
+        throw new Error("Kick chatroom id not found for this channel.");
+      }
+      return { chatroomId };
+    },
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.YOUTUBE_RESOLVE_LIVE_CHAT,
+    async (_event, channel: string) => {
+      assertYouTubeAlphaEnabled();
+      const input = channel.trim();
+      if (!input) {
+        throw new Error("YouTube channel is required.");
+      }
+      const resolved = await resolveYouTubeLiveChat(input);
+      store.set({
+        youtubeLiveChatId: resolved.liveChatId,
       });
-    }
-    const requestUrl = new URL("https://www.googleapis.com/youtube/v3/liveChat/messages");
-    requestUrl.searchParams.set("part", "id,snippet,authorDetails");
-    requestUrl.searchParams.set("liveChatId", liveChatId);
-    requestUrl.searchParams.set("maxResults", "200");
-    const pageToken = payload?.pageToken?.trim();
-    if (pageToken) {
-      requestUrl.searchParams.set("pageToken", pageToken);
-    }
-
-    const response = await youtubeFetchReadOnly(requestUrl);
-    const data = await fetchJsonOrThrow<{
-      nextPageToken?: string;
-      pollingIntervalMillis?: number;
-      items?: unknown[];
-    }>(response, "YouTube live chat messages");
-
-    return {
-      nextPageToken: data.nextPageToken,
-      pollingIntervalMillis: data.pollingIntervalMillis,
-      items: Array.isArray(data.items) ? data.items : []
-    };
-  });
-  ipcMain.handle(IPC_CHANNELS.YOUTUBE_SEND_MESSAGE, async (_event, payload: { liveChatId?: string; message?: string }) => {
-    assertYouTubeAlphaEnabled();
-    const liveChatId = payload?.liveChatId?.trim();
-    const message = payload?.message?.trim();
-    if (!liveChatId) {
-      throw new Error("YouTube live chat id is required.");
-    }
-    if (!message) {
-      throw new Error("Message cannot be empty.");
-    }
-    if (liveChatId.startsWith("web:")) {
-      throw new Error("YouTube web read-only sessions do not support sending messages.");
-    }
-
-    const endpoint = new URL("https://www.googleapis.com/youtube/v3/liveChat/messages");
-    endpoint.searchParams.set("part", "snippet");
-
-    const response = await youtubeFetchWithAuth(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        snippet: {
+      return resolved;
+    },
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.YOUTUBE_FETCH_MESSAGES,
+    async (_event, payload: { liveChatId?: string; pageToken?: string }) => {
+      assertYouTubeAlphaEnabled();
+      const liveChatId = payload?.liveChatId?.trim();
+      if (!liveChatId) {
+        throw new Error("YouTube live chat id is required.");
+      }
+      if (liveChatId.startsWith("web:")) {
+        return fetchYouTubeWebLiveMessages({
           liveChatId,
-          type: "textMessageEvent",
-          textMessageDetails: {
-            messageText: message
-          }
-        }
-      })
-    });
-    await fetchJsonOrThrow<unknown>(response, "YouTube send message");
-  });
-  ipcMain.handle(IPC_CHANNELS.TIKTOK_CONNECT, async (_event, channel: string) => {
-    assertTikTokAlphaEnabled();
-    const normalizedChannel = normalizeTikTokChannel(channel);
-    if (!normalizedChannel) {
-      throw new Error("TikTok channel is required.");
-    }
+          pageToken: payload?.pageToken?.trim() || undefined,
+        });
+      }
+      const requestUrl = new URL(
+        "https://www.googleapis.com/youtube/v3/liveChat/messages",
+      );
+      requestUrl.searchParams.set("part", "id,snippet,authorDetails");
+      requestUrl.searchParams.set("liveChatId", liveChatId);
+      requestUrl.searchParams.set("maxResults", "200");
+      const pageToken = payload?.pageToken?.trim();
+      if (pageToken) {
+        requestUrl.searchParams.set("pageToken", pageToken);
+      }
 
-    const sessionId = store.get("tiktokSessionId")?.trim() ?? "";
-    const ttTargetIdc = store.get("tiktokTtTargetIdc")?.trim() ?? "";
-    const activeSignApiKey = TIKTOK_SIGN_API_KEY;
-    const hasAuthenticatedSession = Boolean(sessionId && ttTargetIdc);
+      const response = await youtubeFetchReadOnly(requestUrl);
+      const data = await fetchJsonOrThrow<{
+        nextPageToken?: string;
+        pollingIntervalMillis?: number;
+        items?: unknown[];
+      }>(response, "YouTube live chat messages");
 
-    const connectionOptions: Record<string, unknown> = {
-      processInitialData: false,
-      fetchRoomInfoOnConnect: true,
-      enableExtendedGiftInfo: false,
-      enableRequestPolling: true
-    };
-    if (activeSignApiKey) {
-      connectionOptions.signApiKey = activeSignApiKey;
-    }
-    if (hasAuthenticatedSession) {
-      connectionOptions.sessionId = sessionId;
-      connectionOptions.ttTargetIdc = ttTargetIdc;
-      connectionOptions.authenticateWs = false;
-    }
+      return {
+        nextPageToken: data.nextPageToken,
+        pollingIntervalMillis: data.pollingIntervalMillis,
+        items: Array.isArray(data.items) ? data.items : [],
+      };
+    },
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.YOUTUBE_SEND_MESSAGE,
+    async (_event, payload: { liveChatId?: string; message?: string }) => {
+      assertYouTubeAlphaEnabled();
+      const liveChatId = payload?.liveChatId?.trim();
+      const message = payload?.message?.trim();
+      if (!liveChatId) {
+        throw new Error("YouTube live chat id is required.");
+      }
+      if (!message) {
+        throw new Error("Message cannot be empty.");
+      }
+      if (liveChatId.startsWith("web:")) {
+        throw new Error(
+          "YouTube web read-only sessions do not support sending messages.",
+        );
+      }
 
-    const connectionId = randomToken(18);
-    const connection = new TikTokLiveConnection(
-      normalizedChannel,
-      connectionOptions as ConstructorParameters<typeof TikTokLiveConnection>[1]
-    ) as unknown as TikTokConnection;
-    const record: TikTokConnectionRecord = {
-      connectionId,
-      channel: normalizedChannel,
-      connection
-    };
+      const endpoint = new URL(
+        "https://www.googleapis.com/youtube/v3/liveChat/messages",
+      );
+      endpoint.searchParams.set("part", "snippet");
 
-    tiktokConnections.set(connectionId, record);
-
-    let connectedEventSent = false;
-    const emitConnected = () => {
-      if (connectedEventSent) return;
-      connectedEventSent = true;
-      emitTikTokEvent({
-        connectionId,
-        type: "connected",
-        roomId: record.roomId
+      const response = await youtubeFetchWithAuth(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          snippet: {
+            liveChatId,
+            type: "textMessageEvent",
+            textMessageDetails: {
+              messageText: message,
+            },
+          },
+        }),
       });
-    };
+      await fetchJsonOrThrow<unknown>(response, "YouTube send message");
+    },
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.TIKTOK_CONNECT,
+    async (_event, channel: string) => {
+      assertTikTokAlphaEnabled();
+      const normalizedChannel = normalizeTikTokChannel(channel);
+      if (!normalizedChannel) {
+        throw new Error("TikTok channel is required.");
+      }
 
-    connection.on(WebcastEvent.CHAT, (payload: unknown) => {
-      const message = normalizeTikTokChatMessage(normalizedChannel, payload);
-      if (!message) return;
-      emitTikTokEvent({
+      const sessionId = store.get("tiktokSessionId")?.trim() ?? "";
+      const ttTargetIdc = store.get("tiktokTtTargetIdc")?.trim() ?? "";
+      const activeSignApiKey = TIKTOK_SIGN_API_KEY;
+      const hasAuthenticatedSession = Boolean(sessionId && ttTargetIdc);
+
+      const connectionOptions: Record<string, unknown> = {
+        processInitialData: false,
+        fetchRoomInfoOnConnect: true,
+        enableExtendedGiftInfo: false,
+        enableRequestPolling: true,
+      };
+      if (activeSignApiKey) {
+        connectionOptions.signApiKey = activeSignApiKey;
+      }
+      if (hasAuthenticatedSession) {
+        connectionOptions.sessionId = sessionId;
+        connectionOptions.ttTargetIdc = ttTargetIdc;
+        connectionOptions.authenticateWs = false;
+      }
+
+      const connectionId = randomToken(18);
+      const connection = new TikTokLiveConnection(
+        normalizedChannel,
+        connectionOptions as ConstructorParameters<
+          typeof TikTokLiveConnection
+        >[1],
+      ) as unknown as TikTokConnection;
+      const record: TikTokConnectionRecord = {
         connectionId,
-        type: "chat",
-        roomId: record.roomId,
-        message
-      });
-    });
+        channel: normalizedChannel,
+        connection,
+      };
 
-    const followEventName = (WebcastEvent as Record<string, string | undefined>).FOLLOW;
-    if (followEventName) {
-      connection.on(followEventName, (payload: unknown) => {
-        const message = normalizeTikTokFollowMessage(normalizedChannel, payload);
+      tiktokConnections.set(connectionId, record);
+
+      let connectedEventSent = false;
+      const emitConnected = () => {
+        if (connectedEventSent) return;
+        connectedEventSent = true;
+        emitTikTokEvent({
+          connectionId,
+          type: "connected",
+          roomId: record.roomId,
+        });
+      };
+
+      connection.on(WebcastEvent.CHAT, (payload: unknown) => {
+        const message = normalizeTikTokChatMessage(normalizedChannel, payload);
         if (!message) return;
         emitTikTokEvent({
           connectionId,
           type: "chat",
           roomId: record.roomId,
-          message
+          message,
         });
       });
-    }
 
-    connection.on(ControlEvent.CONNECTED, (state: unknown) => {
-      const roomId = asString(asUnknownRecord(state)?.roomId).trim();
-      if (roomId) {
-        record.roomId = roomId;
+      const followEventName = (
+        WebcastEvent as Record<string, string | undefined>
+      ).FOLLOW;
+      if (followEventName) {
+        connection.on(followEventName, (payload: unknown) => {
+          const message = normalizeTikTokFollowMessage(
+            normalizedChannel,
+            payload,
+          );
+          if (!message) return;
+          emitTikTokEvent({
+            connectionId,
+            type: "chat",
+            roomId: record.roomId,
+            message,
+          });
+        });
       }
-      emitConnected();
-    });
 
-    connection.on(ControlEvent.DISCONNECTED, (payload: unknown) => {
-      const reason = asString(asUnknownRecord(payload)?.reason).trim();
-      if (tiktokConnections.has(connectionId)) {
+      connection.on(ControlEvent.CONNECTED, (state: unknown) => {
+        const roomId = asString(asUnknownRecord(state)?.roomId).trim();
+        if (roomId) {
+          record.roomId = roomId;
+        }
+        emitConnected();
+      });
+
+      connection.on(ControlEvent.DISCONNECTED, (payload: unknown) => {
+        const reason = asString(asUnknownRecord(payload)?.reason).trim();
+        if (tiktokConnections.has(connectionId)) {
+          tiktokConnections.delete(connectionId);
+          connection.removeAllListeners?.();
+        }
+        emitTikTokEvent({
+          connectionId,
+          type: "disconnected",
+          roomId: record.roomId,
+          error: reason || undefined,
+        });
+      });
+
+      connection.on(ControlEvent.ERROR, (error: unknown) => {
+        const text = error instanceof Error ? error.message : String(error);
+        emitTikTokEvent({
+          connectionId,
+          type: "error",
+          roomId: record.roomId,
+          error: text,
+        });
+      });
+
+      try {
+        const state = (await connection.connect()) as Record<
+          string,
+          unknown
+        > | null;
+        const roomId = asString(asUnknownRecord(state)?.roomId).trim();
+        if (roomId) {
+          record.roomId = roomId;
+        }
+        emitConnected();
+        return {
+          connectionId,
+          roomId: record.roomId,
+        };
+      } catch (error) {
         tiktokConnections.delete(connectionId);
         connection.removeAllListeners?.();
+        const text = error instanceof Error ? error.message : String(error);
+        emitTikTokEvent({
+          connectionId,
+          type: "error",
+          error: text,
+        });
+        if (isLikelyTikTokOfflineError(text)) {
+          throw new Error(
+            `TikTok channel @${normalizedChannel} is offline right now.`,
+          );
+        }
+        throw new Error(`TikTok connect failed: ${text}`);
       }
-      emitTikTokEvent({
-        connectionId,
-        type: "disconnected",
-        roomId: record.roomId,
-        error: reason || undefined
-      });
-    });
-
-    connection.on(ControlEvent.ERROR, (error: unknown) => {
-      const text = error instanceof Error ? error.message : String(error);
-      emitTikTokEvent({
-        connectionId,
-        type: "error",
-        roomId: record.roomId,
-        error: text
-      });
-    });
-
-    try {
-      const state = (await connection.connect()) as Record<string, unknown> | null;
-      const roomId = asString(asUnknownRecord(state)?.roomId).trim();
-      if (roomId) {
-        record.roomId = roomId;
+    },
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.TIKTOK_DISCONNECT,
+    async (_event, connectionId: string) => {
+      const id = connectionId.trim();
+      if (!id) return;
+      await disconnectTikTokConnection(id);
+    },
+  );
+  ipcMain.handle(
+    IPC_CHANNELS.TIKTOK_SEND_MESSAGE,
+    async (_event, payload: { connectionId?: string; message?: string }) => {
+      assertTikTokAlphaEnabled();
+      const connectionId = payload?.connectionId?.trim();
+      const message = payload?.message?.trim();
+      const sessionId = store.get("tiktokSessionId")?.trim() ?? "";
+      const ttTargetIdc = store.get("tiktokTtTargetIdc")?.trim() ?? "";
+      const activeSignApiKey = TIKTOK_SIGN_API_KEY;
+      if (!connectionId) {
+        throw new Error("TikTok connection id is required.");
       }
-      emitConnected();
-      return {
-        connectionId,
-        roomId: record.roomId
-      };
-    } catch (error) {
-      tiktokConnections.delete(connectionId);
-      connection.removeAllListeners?.();
-      const text = error instanceof Error ? error.message : String(error);
-      emitTikTokEvent({
-        connectionId,
-        type: "error",
-        error: text
-      });
-      if (isLikelyTikTokOfflineError(text)) {
-        throw new Error(`TikTok channel @${normalizedChannel} is offline right now.`);
+      if (!message) {
+        throw new Error("Message cannot be empty.");
       }
-      throw new Error(`TikTok connect failed: ${text}`);
-    }
-  });
-  ipcMain.handle(IPC_CHANNELS.TIKTOK_DISCONNECT, async (_event, connectionId: string) => {
-    const id = connectionId.trim();
-    if (!id) return;
-    await disconnectTikTokConnection(id);
-  });
-  ipcMain.handle(IPC_CHANNELS.TIKTOK_SEND_MESSAGE, async (_event, payload: { connectionId?: string; message?: string }) => {
-    assertTikTokAlphaEnabled();
-    const connectionId = payload?.connectionId?.trim();
-    const message = payload?.message?.trim();
-    const sessionId = store.get("tiktokSessionId")?.trim() ?? "";
-    const ttTargetIdc = store.get("tiktokTtTargetIdc")?.trim() ?? "";
-    const activeSignApiKey = TIKTOK_SIGN_API_KEY;
-    if (!connectionId) {
-      throw new Error("TikTok connection id is required.");
-    }
-    if (!message) {
-      throw new Error("Message cannot be empty.");
-    }
-    if (!sessionId || !ttTargetIdc) {
-      throw new Error(TIKTOK_SIGN_IN_REQUIRED_MESSAGE);
-    }
-    if (!activeSignApiKey) {
-      throw new Error(TIKTOK_SIGN_KEY_REQUIRED_MESSAGE);
-    }
-    const record = tiktokConnections.get(connectionId);
-    if (!record) {
-      throw new Error("TikTok connection is not ready.");
-    }
-    if (typeof record.connection.sendMessage !== "function") {
-      throw new Error("TikTok sending is not enabled for this alpha build.");
-    }
-    try {
-      await record.connection.sendMessage(message);
-    } catch (error) {
-      const text = error instanceof Error ? error.message : String(error);
-      throw new Error(`TikTok send failed: ${text}`);
-    }
-  });
+      if (!sessionId || !ttTargetIdc) {
+        throw new Error(TIKTOK_SIGN_IN_REQUIRED_MESSAGE);
+      }
+      if (!activeSignApiKey) {
+        throw new Error(TIKTOK_SIGN_KEY_REQUIRED_MESSAGE);
+      }
+      const record = tiktokConnections.get(connectionId);
+      if (!record) {
+        throw new Error("TikTok connection is not ready.");
+      }
+      if (typeof record.connection.sendMessage !== "function") {
+        throw new Error("TikTok sending is not enabled for this alpha build.");
+      }
+      try {
+        await record.connection.sendMessage(message);
+      } catch (error) {
+        const text = error instanceof Error ? error.message : String(error);
+        throw new Error(`TikTok send failed: ${text}`);
+      }
+    },
+  );
   ipcMain.handle(IPC_CHANNELS.LOG_WRITE, (_event, message: string) => {
     const verbose = store.get("verboseLogs");
     if (verbose) writeLog(message);
@@ -3755,14 +4341,17 @@ app.whenReady().then(async () => {
       setUpdateStatus("error", `Update download failed: ${text}`);
     }
   });
-  ipcMain.handle(IPC_CHANNELS.UPDATES_SET_CHANNEL, async (_event, channel: UpdateChannel) => {
-    const normalized: UpdateChannel = channel === "beta" ? "beta" : "stable";
-    store.set({
-      updateChannel: normalized
-    });
-    applyAutoUpdaterChannel(normalized);
-    return updateStatus;
-  });
+  ipcMain.handle(
+    IPC_CHANNELS.UPDATES_SET_CHANNEL,
+    async (_event, channel: UpdateChannel) => {
+      const normalized: UpdateChannel = channel === "beta" ? "beta" : "stable";
+      store.set({
+        updateChannel: normalized,
+      });
+      applyAutoUpdaterChannel(normalized);
+      return updateStatus;
+    },
+  );
   ipcMain.handle(IPC_CHANNELS.UPDATES_INSTALL, () => {
     if (!app.isPackaged) {
       setUpdateStatus("not-available", DEV_UPDATE_MESSAGE);

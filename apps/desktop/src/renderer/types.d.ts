@@ -4,7 +4,7 @@ import type {
   ModerationRequest,
   TikTokRendererEvent,
   UpdateChannel,
-  UpdateStatus
+  UpdateStatus,
 } from "../shared/types";
 
 type ElectronAPI = {
@@ -24,7 +24,10 @@ type ElectronAPI = {
   getAuthHealth: () => Promise<AuthHealthSnapshot>;
   testAuthPermissions: () => Promise<AuthHealthSnapshot>;
   moderateChat: (payload: ModerationRequest) => Promise<void>;
-  canModerateSource: (payload: { platform: "twitch" | "kick" | "youtube" | "tiktok"; channel: string }) => Promise<boolean>;
+  canModerateSource: (payload: {
+    platform: "twitch" | "kick" | "youtube" | "tiktok";
+    channel: string;
+  }) => Promise<boolean>;
   resolveKickChatroom: (channel: string) => Promise<{ chatroomId: number }>;
   resolveYouTubeLiveChat: (channel: string) => Promise<{
     liveChatId: string;
@@ -32,15 +35,26 @@ type ElectronAPI = {
     channelTitle: string;
     videoId: string;
   }>;
-  youtubeFetchMessages: (payload: { liveChatId: string; pageToken?: string }) => Promise<{
+  youtubeFetchMessages: (payload: {
+    liveChatId: string;
+    pageToken?: string;
+  }) => Promise<{
     nextPageToken?: string;
     pollingIntervalMillis?: number;
     items?: unknown[];
   }>;
-  youtubeSendMessage: (payload: { liveChatId: string; message: string }) => Promise<void>;
-  tiktokConnect: (channel: string) => Promise<{ connectionId: string; roomId?: string }>;
+  youtubeSendMessage: (payload: {
+    liveChatId: string;
+    message: string;
+  }) => Promise<void>;
+  tiktokConnect: (
+    channel: string,
+  ) => Promise<{ connectionId: string; roomId?: string }>;
   tiktokDisconnect: (connectionId: string) => Promise<void>;
-  tiktokSendMessage: (payload: { connectionId: string; message: string }) => Promise<void>;
+  tiktokSendMessage: (payload: {
+    connectionId: string;
+    message: string;
+  }) => Promise<void>;
   onTikTokEvent: (callback: (event: TikTokRendererEvent) => void) => () => void;
   checkForUpdates: () => Promise<UpdateStatus>;
   downloadUpdate: () => Promise<void>;
@@ -51,6 +65,8 @@ type ElectronAPI = {
 };
 
 declare global {
+  const __APP_VERSION__: string;
+
   interface Window {
     electronAPI: ElectronAPI;
   }

@@ -1,6 +1,11 @@
 import type { ModerationRequest } from "../../shared/types.js";
 
-export function assertModerationPayload(payload: ModerationRequest): asserts payload is Required<Pick<ModerationRequest, "platform" | "channel" | "action">> & ModerationRequest {
+export function assertModerationPayload(
+  payload: ModerationRequest,
+): asserts payload is Required<
+  Pick<ModerationRequest, "platform" | "channel" | "action">
+> &
+  ModerationRequest {
   if (!payload.platform) {
     throw new Error("Moderation platform is required.");
   }

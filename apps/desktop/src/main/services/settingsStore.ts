@@ -8,7 +8,10 @@ const SENSITIVE_KEYS: Array<keyof AppSettings> = [
   "kickAccessToken",
   "kickRefreshToken",
   "youtubeAccessToken",
-  "youtubeRefreshToken"
+  "youtubeRefreshToken",
+  "tiktokSessionId",
+  "kickClientSecret",
+  "youtubeClientSecret",
 ];
 
 export class JsonSettingsStore {
@@ -44,7 +47,10 @@ export class JsonSettingsStore {
 
   set(updates: Partial<AppSettings>): void;
   set<K extends keyof AppSettings>(key: K, value: AppSettings[K]): void;
-  set<K extends keyof AppSettings>(arg1: K | Partial<AppSettings>, arg2?: AppSettings[K]): void {
+  set<K extends keyof AppSettings>(
+    arg1: K | Partial<AppSettings>,
+    arg2?: AppSettings[K],
+  ): void {
     if (typeof arg1 === "string") {
       this.state[arg1] = arg2 as AppSettings[K];
     } else {
@@ -84,6 +90,9 @@ export class JsonSettingsStore {
     for (const key of SENSITIVE_KEYS) {
       delete safeState[key];
     }
-    fs.writeFileSync(this.filePath, `${JSON.stringify(safeState, null, 2)}\n`, "utf8");
+    const serialized = `${JSON.stringify(safeState, null, 2)}\n`;
+    const tempPath = `${this.filePath}.tmp`;
+    fs.writeFileSync(tempPath, serialized, "utf8");
+    fs.renameSync(tempPath, this.filePath);
   }
 }

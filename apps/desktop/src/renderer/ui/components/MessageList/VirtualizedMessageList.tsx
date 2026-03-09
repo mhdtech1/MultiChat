@@ -10,8 +10,14 @@ type VirtualizedMessageListProps = {
   autoScrollEnabled?: boolean;
   onPauseAutoScroll?: () => void;
   onUserActivity?: () => void;
-  twitchGlobalBadgeCatalog?: Record<string, Record<string, { title: string; imageUrl: string }>>;
-  twitchChannelBadgeCatalogByRoomId?: Record<string, Record<string, Record<string, { title: string; imageUrl: string }>>>;
+  twitchGlobalBadgeCatalog?: Record<
+    string,
+    Record<string, { title: string; imageUrl: string }>
+  >;
+  twitchChannelBadgeCatalogByRoomId?: Record<
+    string,
+    Record<string, Record<string, { title: string; imageUrl: string }>>
+  >;
   onUsernameClick?: (username: string, platform: string) => void;
   onMessageClick?: (message: ChatMessage) => void;
   onAddChannel?: () => void;
@@ -32,7 +38,7 @@ export function VirtualizedMessageList({
   onUsernameClick,
   onMessageClick,
   onAddChannel,
-  onOpenSettings
+  onOpenSettings,
 }: VirtualizedMessageListProps) {
   const showTimestamps = useSettingsStore((state) => state.showTimestamps);
   const showBadges = useSettingsStore((state) => state.showBadges);
@@ -46,7 +52,7 @@ export function VirtualizedMessageList({
     getScrollElement: () => parentRef.current,
     estimateSize: () => ESTIMATED_ROW_HEIGHT,
     overscan: OVERSCAN_COUNT,
-    measureElement: (element) => element.getBoundingClientRect().height
+    measureElement: (element) => element.getBoundingClientRect().height,
   });
 
   const items = virtualizer.getVirtualItems();
@@ -55,7 +61,8 @@ export function VirtualizedMessageList({
   const checkIfAtBottom = useCallback(() => {
     const container = parentRef.current;
     if (!container) return;
-    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    const distanceFromBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight;
     isAtBottomRef.current = distanceFromBottom < SCROLL_BOTTOM_THRESHOLD_PX;
   }, []);
 
@@ -113,13 +120,16 @@ export function VirtualizedMessageList({
         style={{ overflow: "auto", height: "100%" }}
       >
         {messages.length === 0 ? (
-          <WelcomeScreen onAddChannel={onAddChannel} onOpenSettings={onOpenSettings} />
+          <WelcomeScreen
+            onAddChannel={onAddChannel}
+            onOpenSettings={onOpenSettings}
+          />
         ) : (
           <div
             style={{
               height: `${totalSize}px`,
               width: "100%",
-              position: "relative"
+              position: "relative",
             }}
           >
             {items.map((virtualRow) => {
@@ -134,7 +144,7 @@ export function VirtualizedMessageList({
                     top: 0,
                     left: 0,
                     width: "100%",
-                    transform: `translateY(${virtualRow.start}px)`
+                    transform: `translateY(${virtualRow.start}px)`,
                   }}
                 >
                   <ChatLine
@@ -142,7 +152,9 @@ export function VirtualizedMessageList({
                     showTimestamp={showTimestamps}
                     showBadges={showBadges}
                     twitchGlobalBadgeCatalog={twitchGlobalBadgeCatalog}
-                    twitchChannelBadgeCatalogByRoomId={twitchChannelBadgeCatalogByRoomId}
+                    twitchChannelBadgeCatalogByRoomId={
+                      twitchChannelBadgeCatalogByRoomId
+                    }
                     onUsernameClick={onUsernameClick}
                     onMessageClick={(chatMessage) => {
                       if (autoScrollEnabled) {

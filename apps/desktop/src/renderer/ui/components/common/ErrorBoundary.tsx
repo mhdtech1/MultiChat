@@ -10,7 +10,10 @@ type ErrorBoundaryState = {
   error: Error | null;
 };
 
-export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+export class ErrorBoundary extends Component<
+  ErrorBoundaryProps,
+  ErrorBoundaryState
+> {
   constructor(props: ErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false, error: null };
@@ -21,7 +24,11 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error("[ErrorBoundary] Uncaught error:", error, info.componentStack);
+    console.error(
+      "[ErrorBoundary] Uncaught error:",
+      error,
+      info.componentStack,
+    );
   }
 
   render() {
@@ -38,13 +45,22 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
             justifyContent: "center",
             height: "100vh",
             padding: "2rem",
-            fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+            fontFamily:
+              "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
             background: "#0f172a",
-            color: "#e2e8f0"
+            color: "#e2e8f0",
           }}
         >
-          <h2 style={{ margin: "0 0 0.5rem", fontSize: "1.25rem" }}>Something went wrong</h2>
-          <p style={{ margin: "0 0 1.5rem", color: "#94a3b8", fontSize: "0.875rem" }}>
+          <h2 style={{ margin: "0 0 0.5rem", fontSize: "1.25rem" }}>
+            Something went wrong
+          </h2>
+          <p
+            style={{
+              margin: "0 0 1.5rem",
+              color: "#94a3b8",
+              fontSize: "0.875rem",
+            }}
+          >
             {this.state.error?.message ?? "An unexpected error occurred."}
           </p>
           <button
@@ -57,7 +73,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
               border: "none",
               borderRadius: "6px",
               cursor: "pointer",
-              fontSize: "0.875rem"
+              fontSize: "0.875rem",
             }}
           >
             Reload

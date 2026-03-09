@@ -13,7 +13,9 @@ type TwitchBadgeCatalog = Record<string, Record<string, TwitchBadgeAsset>>;
 const MESSAGE_LINK_REGEX = /(?:https?:\/\/|www\.)[^\s<]+/gi;
 
 const isSafeCssColor = (value: string): boolean =>
-  /^#(?:[0-9a-fA-F]{3,4}){1,2}$|^(?:rgb|hsl)a?\([\d\s,./%]+\)$|^[a-zA-Z]{1,30}$/.test(value);
+  /^#(?:[0-9a-fA-F]{3,4}){1,2}$|^(?:rgb|hsl)a?\([\d\s,./%]+\)$|^[a-zA-Z]{1,30}$/.test(
+    value,
+  );
 
 type ChatLineProps = {
   message: ChatMessage;
@@ -30,12 +32,13 @@ type ChatLineProps = {
 const formatTime = (timestamp: number | string) =>
   new Date(timestamp).toLocaleTimeString([], {
     hour: "2-digit",
-    minute: "2-digit"
+    minute: "2-digit",
   });
 
 const roleFromBadge = (badge: string): RoleType | null => {
   const key = badge.trim().toLowerCase().split(/[/:]/)[0] ?? "";
-  if (key === "broadcaster" || key === "streamer" || key === "owner") return "broadcaster";
+  if (key === "broadcaster" || key === "streamer" || key === "owner")
+    return "broadcaster";
   if (key === "moderator" || key === "mod") return "moderator";
   if (key === "vip") return "vip";
   if (key === "subscriber" || key === "sub") return "subscriber";
@@ -51,7 +54,10 @@ const asRecord = (value: unknown): Record<string, unknown> | null => {
   return value as Record<string, unknown>;
 };
 
-const addTwitchBadgeEntry = (target: Map<string, { setId: string; versionId: string; key: string }>, badge: string) => {
+const addTwitchBadgeEntry = (
+  target: Map<string, { setId: string; versionId: string; key: string }>,
+  badge: string,
+) => {
   const [rawSetId, rawVersionId] = badge.split("/", 2);
   const setId = (rawSetId ?? "").trim().toLowerCase();
   const versionId = (rawVersionId ?? "").trim();
@@ -69,7 +75,10 @@ const extractTwitchRoomId = (message: ChatMessage): string | null => {
 };
 
 const getTwitchBadgeEntries = (message: ChatMessage) => {
-  const badges = new Map<string, { setId: string; versionId: string; key: string }>();
+  const badges = new Map<
+    string,
+    { setId: string; versionId: string; key: string }
+  >();
   if (Array.isArray(message.badges)) {
     for (const badge of message.badges) {
       if (typeof badge === "string") {
@@ -91,17 +100,19 @@ const splitTrailingLinkText = (value: string) => {
   if (!match || !match[1]) {
     return {
       linkText: value,
-      trailingText: ""
+      trailingText: "",
     };
   }
   return {
     linkText: match[1],
-    trailingText: match[2]
+    trailingText: match[2],
   };
 };
 
 const normalizeMessageLinkHref = (value: string) =>
-  value.trim().toLowerCase().startsWith("www.") ? `https://${value.trim()}` : value.trim();
+  value.trim().toLowerCase().startsWith("www.")
+    ? `https://${value.trim()}`
+    : value.trim();
 
 const renderTextWithLinks = (text: string, keyPrefix: string): ReactNode[] => {
   if (!text) return [];
@@ -131,7 +142,7 @@ const renderTextWithLinks = (text: string, keyPrefix: string): ReactNode[] => {
           onClick={(event) => event.stopPropagation()}
         >
           {linkText}
-        </a>
+        </a>,
       );
       matchIndex += 1;
     }
@@ -157,17 +168,30 @@ export function ChatLine({
   twitchGlobalBadgeCatalog = {},
   twitchChannelBadgeCatalogByRoomId = {},
   onUsernameClick,
-  onMessageClick
+  onMessageClick,
 }: ChatLineProps) {
-  const twitchBadgeEntries = message.platform === "twitch" ? getTwitchBadgeEntries(message) : [];
-  const twitchRoomId = message.platform === "twitch" ? extractTwitchRoomId(message) : null;
-  const twitchRoomCatalog = twitchRoomId ? twitchChannelBadgeCatalogByRoomId[twitchRoomId] : undefined;
+  const twitchBadgeEntries =
+    message.platform === "twitch" ? getTwitchBadgeEntries(message) : [];
+  const twitchRoomId =
+    message.platform === "twitch" ? extractTwitchRoomId(message) : null;
+  const twitchRoomCatalog = twitchRoomId
+    ? twitchChannelBadgeCatalogByRoomId[twitchRoomId]
+    : undefined;
   const renderedTwitchSetIds = new Set<string>();
-  const fallbackBadgeValues = (message.badges?.length ? message.badges : twitchBadgeEntries.map((badge) => badge.key)) ?? [];
-  const hasAnyBadges = (message.badges?.length ?? 0) > 0 || twitchBadgeEntries.length > 0;
+  const fallbackBadgeValues =
+    (message.badges?.length
+      ? message.badges
+      : twitchBadgeEntries.map((badge) => badge.key)) ?? [];
+  const hasAnyBadges =
+    (message.badges?.length ?? 0) > 0 || twitchBadgeEntries.length > 0;
 
   return (
-    <div className={`chat-line ${isHighlighted ? "chat-line--highlighted" : ""}`} data-platform={message.platform} role="listitem" onClick={() => onMessageClick?.(message)}>
+    <div
+      className={`chat-line ${isHighlighted ? "chat-line--highlighted" : ""}`}
+      data-platform={message.platform}
+      role="listitem"
+      onClick={() => onMessageClick?.(message)}
+    >
       {showPlatformIcon ? (
         <div className="chat-line__platform">
           <PlatformIcon platform={message.platform} size="sm" showBackground />
@@ -178,7 +202,12 @@ export function ChatLine({
           <button
             type="button"
             className="chat-line__author"
-            style={{ color: message.color && isSafeCssColor(message.color) ? message.color : "var(--accent)" }}
+            style={{
+              color:
+                message.color && isSafeCssColor(message.color)
+                  ? message.color
+                  : "var(--accent)",
+            }}
             onClick={(event) => {
               event.stopPropagation();
               onUsernameClick?.(message.username, message.platform);
@@ -190,7 +219,8 @@ export function ChatLine({
             <span className="chat-line__badges">
               {twitchBadgeEntries.map((badge) => {
                 const asset =
-                  twitchRoomCatalog?.[badge.setId]?.[badge.versionId] ?? twitchGlobalBadgeCatalog?.[badge.setId]?.[badge.versionId];
+                  twitchRoomCatalog?.[badge.setId]?.[badge.versionId] ??
+                  twitchGlobalBadgeCatalog?.[badge.setId]?.[badge.versionId];
                 if (!asset) return null;
                 renderedTwitchSetIds.add(badge.setId);
                 return (
@@ -209,13 +239,25 @@ export function ChatLine({
                 const setId = badge.trim().toLowerCase().split(/[/:]/)[0] ?? "";
                 if (renderedTwitchSetIds.has(setId)) return null;
                 const role = roleFromBadge(badge);
-                return role ? <RoleBadge key={`${message.id}-${badge}`} role={role} size="sm" /> : null;
+                return role ? (
+                  <RoleBadge
+                    key={`${message.id}-${badge}`}
+                    role={role}
+                    size="sm"
+                  />
+                ) : null;
               })}
             </span>
           ) : null}
-          {showTimestamp ? <span className="chat-line__time">{formatTime(message.timestamp)}</span> : null}
+          {showTimestamp ? (
+            <span className="chat-line__time">
+              {formatTime(message.timestamp)}
+            </span>
+          ) : null}
         </div>
-        <div className="chat-line__message">{renderTextWithLinks(message.message, `${message.id}-body`)}</div>
+        <div className="chat-line__message">
+          {renderTextWithLinks(message.message, `${message.id}-body`)}
+        </div>
       </div>
     </div>
   );

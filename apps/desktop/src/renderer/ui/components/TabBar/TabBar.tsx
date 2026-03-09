@@ -12,7 +12,13 @@ type TabBarProps = {
   onAddTab?: () => void;
 };
 
-export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab, onAddTab }: TabBarProps) {
+export function TabBar({
+  tabs,
+  activeTabId,
+  onSelectTab,
+  onCloseTab,
+  onAddTab,
+}: TabBarProps) {
   return (
     <div className="tab-bar">
       {tabs.map((tab) => (

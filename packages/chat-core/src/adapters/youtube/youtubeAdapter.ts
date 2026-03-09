@@ -1,5 +1,10 @@
 import EventEmitter from "eventemitter3";
-import type { ChatAdapter, ChatAdapterOptions, ChatAdapterStatus, ChatMessage } from "../../types.js";
+import type {
+  ChatAdapter,
+  ChatAdapterOptions,
+  ChatAdapterStatus,
+  ChatMessage,
+} from "../../types.js";
 
 export type YouTubeAuth = {
   apiKey?: string;
@@ -19,7 +24,10 @@ export type YouTubeFetchResult = {
 
 type YouTubeTransport = {
   fetchMessages?: (payload: YouTubeFetchPayload) => Promise<YouTubeFetchResult>;
-  sendMessage?: (payload: { liveChatId: string; message: string }) => Promise<void>;
+  sendMessage?: (payload: {
+    liveChatId: string;
+    message: string;
+  }) => Promise<void>;
 };
 
 type YouTubeSnippet = {
@@ -58,7 +66,12 @@ export class YouTubeAdapter implements ChatAdapter {
   private seenIds = new Set<string>();
   private stopped = true;
 
-  constructor(options: ChatAdapterOptions & { auth?: YouTubeAuth; transport?: YouTubeTransport }) {
+  constructor(
+    options: ChatAdapterOptions & {
+      auth?: YouTubeAuth;
+      transport?: YouTubeTransport;
+    },
+  ) {
     this.channel = options.channel;
     this.auth = options.auth ?? {};
     this.transport = options.transport ?? {};
@@ -86,7 +99,8 @@ export class YouTubeAdapter implements ChatAdapter {
       throw new Error(error);
     }
     if (!this.transport.fetchMessages && !this.auth.apiKey) {
-      const error = "YouTube adapter requires OAuth transport or API key for polling.";
+      const error =
+        "YouTube adapter requires OAuth transport or API key for polling.";
       this.logger?.(error);
       this.setStatus("error");
       throw new Error(error);
@@ -103,7 +117,10 @@ export class YouTubeAdapter implements ChatAdapter {
 
   private clampPollingInterval(value: number | undefined) {
     if (!value || !Number.isFinite(value)) return DEFAULT_POLL_INTERVAL_MS;
-    return Math.max(MIN_POLL_INTERVAL_MS, Math.min(MAX_POLL_INTERVAL_MS, Math.floor(value)));
+    return Math.max(
+      MIN_POLL_INTERVAL_MS,
+      Math.min(MAX_POLL_INTERVAL_MS, Math.floor(value)),
+    );
   }
 
   private async fetchPage(): Promise<YouTubeFetchResult> {
@@ -113,7 +130,7 @@ export class YouTubeAdapter implements ChatAdapter {
     if (this.transport.fetchMessages) {
       return this.transport.fetchMessages({
         liveChatId: this.auth.liveChatId,
-        pageToken: this.nextPageToken
+        pageToken: this.nextPageToken,
       });
     }
     if (!this.auth.apiKey) {
@@ -124,11 +141,13 @@ export class YouTubeAdapter implements ChatAdapter {
       part: "snippet,authorDetails",
       liveChatId: this.auth.liveChatId,
       key: this.auth.apiKey,
-      maxResults: "200"
+      maxResults: "200",
     });
     if (this.nextPageToken) params.set("pageToken", this.nextPageToken);
 
-    const response = await fetch(`https://www.googleapis.com/youtube/v3/liveChat/messages?${params}`);
+    const response = await fetch(
+      `https://www.googleapis.com/youtube/v3/liveChat/messages?${params}`,
+    );
     if (!response.ok) {
       throw new Error(`YouTube polling request failed (${response.status}).`);
     }
@@ -146,7 +165,8 @@ export class YouTubeAdapter implements ChatAdapter {
     const snippet = item.snippet ?? {};
     const author = item.authorDetails ?? {};
 
-    const text = typeof snippet.displayMessage === "string" ? snippet.displayMessage : "";
+    const text =
+      typeof snippet.displayMessage === "string" ? snippet.displayMessage : "";
     if (!text) return null;
 
     const badges: string[] = [];
@@ -169,13 +189,16 @@ export class YouTubeAdapter implements ChatAdapter {
       message: text,
       timestamp: snippet.publishedAt ?? new Date().toISOString(),
       badges,
-      raw: item as unknown as Record<string, unknown>
+      raw: item as unknown as Record<string, unknown>,
     };
   }
 
   private async fetchAndEmit() {
     const data = await this.fetchPage();
-    this.nextPageToken = typeof data.nextPageToken === "string" ? data.nextPageToken : this.nextPageToken;
+    this.nextPageToken =
+      typeof data.nextPageToken === "string"
+        ? data.nextPageToken
+        : this.nextPageToken;
     this.pollIntervalMs = this.clampPollingInterval(data.pollingIntervalMillis);
 
     if (Array.isArray(data.items)) {
@@ -235,7 +258,7 @@ export class YouTubeAdapter implements ChatAdapter {
     }
     await this.transport.sendMessage({
       liveChatId: this.auth.liveChatId,
-      message: trimmed
+      message: trimmed,
     });
   }
 }

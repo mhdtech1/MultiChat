@@ -40,11 +40,12 @@ export class MainWindowManager {
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
-        preload: path.join(__dirname, "../preload/preload.cjs")
-      }
+        preload: path.join(__dirname, "../preload/preload.cjs"),
+      },
     });
 
-    const devServerUrl = process.env.VITE_DEV_SERVER_URL || "http://localhost:5173";
+    const devServerUrl =
+      process.env.VITE_DEV_SERVER_URL || "http://localhost:5173";
     const rendererPath = path.join(__dirname, "../../renderer/index.html");
     const loadUrl = app.isPackaged ? `file://${rendererPath}` : devServerUrl;
     void this.window.loadURL(loadUrl);

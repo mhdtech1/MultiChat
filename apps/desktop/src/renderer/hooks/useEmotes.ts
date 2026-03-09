@@ -8,6 +8,6 @@ export function useEmotes(globalEmotes: EmoteMap = {}) {
   }, [globalEmotes]);
 
   return {
-    resolveEmote
+    resolveEmote,
   };
 }

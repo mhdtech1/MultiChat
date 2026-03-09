@@ -1,5 +1,10 @@
 import EventEmitter from "eventemitter3";
-import type { ChatAdapter, ChatAdapterOptions, ChatAdapterStatus, ChatMessage } from "../../types.js";
+import type {
+  ChatAdapter,
+  ChatAdapterOptions,
+  ChatAdapterStatus,
+  ChatMessage,
+} from "../../types.js";
 
 export type KickAuth = {
   accessToken?: string;
@@ -7,7 +12,8 @@ export type KickAuth = {
   guest?: boolean;
 };
 
-const KICK_REAUTH_REQUIRED_MESSAGE = "Kick session expired. Sign in to Kick again.";
+const KICK_REAUTH_REQUIRED_MESSAGE =
+  "Kick session expired. Sign in to Kick again.";
 
 type KickChannelApiResponse = {
   id?: number;
@@ -25,7 +31,12 @@ type KickPusherEnvelope = {
   data?: unknown;
 };
 
-type KickModerationEventKind = "delete" | "timeout" | "ban" | "unban" | "chat_clear";
+type KickModerationEventKind =
+  | "delete"
+  | "timeout"
+  | "ban"
+  | "unban"
+  | "chat_clear";
 
 type KickSender = {
   username?: string;
@@ -46,14 +57,18 @@ type KickRawChatMessage = {
 
 const KICK_PUSHER_WS_URL = "wss://ws-us2.pusher.com/app/32cbd69e4b950bf97679";
 
-const decodeKickEmotes = (input: string) => input.replace(/\[emote:\d+:([^[\]]+)\]/g, "$1");
+const decodeKickEmotes = (input: string) =>
+  input.replace(/\[emote:\d+:([^[\]]+)\]/g, "$1");
 
 const asRecord = (value: unknown): Record<string, unknown> | null => {
   if (!value || typeof value !== "object") return null;
   return value as Record<string, unknown>;
 };
 
-const readFirstString = (record: Record<string, unknown>, keys: string[]): string => {
+const readFirstString = (
+  record: Record<string, unknown>,
+  keys: string[],
+): string => {
   for (const key of keys) {
     const value = record[key];
     if (typeof value === "string" && value.trim()) {
@@ -63,7 +78,10 @@ const readFirstString = (record: Record<string, unknown>, keys: string[]): strin
   return "";
 };
 
-const readFirstNumber = (record: Record<string, unknown>, keys: string[]): number | null => {
+const readFirstNumber = (
+  record: Record<string, unknown>,
+  keys: string[],
+): number | null => {
   for (const key of keys) {
     const value = record[key];
     if (typeof value === "number" && Number.isFinite(value)) {
@@ -85,16 +103,47 @@ const includesAnyToken = (value: string, tokens: string[]) => {
   return tokens.some((token) => normalized.includes(token));
 };
 
-const resolveKickModerationKind = (eventName: string, payload: Record<string, unknown>): KickModerationEventKind | null => {
+const resolveKickModerationKind = (
+  eventName: string,
+  payload: Record<string, unknown>,
+): KickModerationEventKind | null => {
   const type = typeof payload.type === "string" ? payload.type : "";
-  const eventType = typeof payload.eventType === "string" ? payload.eventType : "";
+  const eventType =
+    typeof payload.eventType === "string" ? payload.eventType : "";
   const payloadEvent = typeof payload.event === "string" ? payload.event : "";
-  const haystack = `${eventName} ${type} ${eventType} ${payloadEvent}`.toLowerCase();
+  const haystack =
+    `${eventName} ${type} ${eventType} ${payloadEvent}`.toLowerCase();
 
   if (includesAnyToken(haystack, ["unban", "unbanned"])) return "unban";
-  if (includesAnyToken(haystack, ["chat_clear", "chat-cleared", "chat cleared", "chatcleared"])) return "chat_clear";
-  if (includesAnyToken(haystack, ["delete", "deleted", "removed", "remove_message", "message_removed"])) return "delete";
-  if (includesAnyToken(haystack, ["timeout", "timedout", "timed_out", "muted", "temporary_ban", "temporary ban"])) {
+  if (
+    includesAnyToken(haystack, [
+      "chat_clear",
+      "chat-cleared",
+      "chat cleared",
+      "chatcleared",
+    ])
+  )
+    return "chat_clear";
+  if (
+    includesAnyToken(haystack, [
+      "delete",
+      "deleted",
+      "removed",
+      "remove_message",
+      "message_removed",
+    ])
+  )
+    return "delete";
+  if (
+    includesAnyToken(haystack, [
+      "timeout",
+      "timedout",
+      "timed_out",
+      "muted",
+      "temporary_ban",
+      "temporary ban",
+    ])
+  ) {
     return "timeout";
   }
   if (includesAnyToken(haystack, ["ban", "banned"])) return "ban";
@@ -110,15 +159,30 @@ const readKickTargetUsername = (payload: Record<string, unknown>): string => {
     "slug",
     "user_login",
     "display_name",
-    "displayName"
+    "displayName",
   ]);
   if (direct) return direct;
 
-  const nestedKeys = ["user", "target_user", "target", "sender", "message", "chat_message", "banned_user"];
+  const nestedKeys = [
+    "user",
+    "target_user",
+    "target",
+    "sender",
+    "message",
+    "chat_message",
+    "banned_user",
+  ];
   for (const key of nestedKeys) {
     const nested = asRecord(payload[key]);
     if (!nested) continue;
-    const nestedUsername = readFirstString(nested, ["username", "slug", "login", "display_name", "displayName", "name"]);
+    const nestedUsername = readFirstString(nested, [
+      "username",
+      "slug",
+      "login",
+      "display_name",
+      "displayName",
+      "name",
+    ]);
     if (nestedUsername) return nestedUsername;
   }
   return "";
@@ -132,7 +196,7 @@ const readKickTargetMessageId = (payload: Record<string, unknown>): string => {
     "message_id",
     "chat_message_id",
     "chat_entry_id",
-    "id"
+    "id",
   ]);
   if (direct) return direct;
 
@@ -140,20 +204,26 @@ const readKickTargetMessageId = (payload: Record<string, unknown>): string => {
   for (const key of nestedKeys) {
     const nested = asRecord(payload[key]);
     if (!nested) continue;
-    const nestedId = readFirstString(nested, ["id", "message_id", "chat_entry_id"]);
+    const nestedId = readFirstString(nested, [
+      "id",
+      "message_id",
+      "chat_entry_id",
+    ]);
     if (nestedId) return nestedId;
   }
   return "";
 };
 
-const readKickDurationSeconds = (payload: Record<string, unknown>): number | null => {
+const readKickDurationSeconds = (
+  payload: Record<string, unknown>,
+): number | null => {
   const direct = readFirstNumber(payload, [
     "durationSeconds",
     "duration_seconds",
     "duration",
     "ban_duration",
     "timeout",
-    "seconds"
+    "seconds",
   ]);
   if (direct && direct > 0) return direct;
 
@@ -161,7 +231,13 @@ const readKickDurationSeconds = (payload: Record<string, unknown>): number | nul
   for (const key of nestedKeys) {
     const nested = asRecord(payload[key]);
     if (!nested) continue;
-    const nestedDuration = readFirstNumber(nested, ["durationSeconds", "duration_seconds", "duration", "ban_duration", "timeout"]);
+    const nestedDuration = readFirstNumber(nested, [
+      "durationSeconds",
+      "duration_seconds",
+      "duration",
+      "ban_duration",
+      "timeout",
+    ]);
     if (nestedDuration && nestedDuration > 0) return nestedDuration;
   }
   return null;
@@ -210,7 +286,7 @@ export class KickAdapter implements ChatAdapter {
       auth?: KickAuth;
       resolveChatroomId?: (channel: string) => Promise<number>;
       refreshAccessToken?: () => Promise<string | null>;
-    }
+    },
   ) {
     this.channel = options.channel;
     this.auth = options.auth ?? {};
@@ -257,7 +333,8 @@ export class KickAdapter implements ChatAdapter {
     if (!payload || typeof payload !== "object") return null;
     const record = payload as Record<string, unknown>;
 
-    if (typeof record.broadcaster_user_id === "number") return record.broadcaster_user_id;
+    if (typeof record.broadcaster_user_id === "number")
+      return record.broadcaster_user_id;
     if (typeof record.user_id === "number") return record.user_id;
 
     const user = record.user;
@@ -290,8 +367,8 @@ export class KickAdapter implements ChatAdapter {
     const endpoint = `https://kick.com/api/v2/channels/${encodeURIComponent(this.channel)}`;
     const response = await fetch(endpoint, {
       headers: {
-        Accept: "application/json, text/plain, */*"
-      }
+        Accept: "application/json, text/plain, */*",
+      },
     });
 
     const text = await response.text();
@@ -299,7 +376,10 @@ export class KickAdapter implements ChatAdapter {
 
     if (!response.ok || !payload) {
       const detail =
-        typeof payload === "object" && payload && "message" in payload && typeof payload.message === "string"
+        typeof payload === "object" &&
+        payload &&
+        "message" in payload &&
+        typeof payload.message === "string"
           ? payload.message
           : `Kick channel lookup failed (${response.status})`;
       throw new Error(detail);
@@ -308,7 +388,7 @@ export class KickAdapter implements ChatAdapter {
     const chatroomId = this.extractChatroomId(payload);
     if (!chatroomId) {
       throw new Error(
-        "Kick chatroom lookup failed. Kick may be blocking automated requests; try again in a few minutes."
+        "Kick chatroom lookup failed. Kick may be blocking automated requests; try again in a few minutes.",
       );
     }
     return chatroomId;
@@ -333,7 +413,10 @@ export class KickAdapter implements ChatAdapter {
     const badges = parseKickBadges(identity.badges);
 
     return {
-      id: typeof data.id === "string" || typeof data.id === "number" ? String(data.id) : `${Date.now()}`,
+      id:
+        typeof data.id === "string" || typeof data.id === "number"
+          ? String(data.id)
+          : `${Date.now()}`,
       platform: "kick",
       channel: this.channel,
       username,
@@ -342,11 +425,14 @@ export class KickAdapter implements ChatAdapter {
       timestamp: data.created_at ?? new Date().toISOString(),
       badges,
       color: identity.color,
-      raw: data as unknown as Record<string, unknown>
+      raw: data as unknown as Record<string, unknown>,
     };
   }
 
-  private normalizeKickModerationEvent(eventName: string, payload: Record<string, unknown>): ChatMessage | null {
+  private normalizeKickModerationEvent(
+    eventName: string,
+    payload: Record<string, unknown>,
+  ): ChatMessage | null {
     const eventKind = resolveKickModerationKind(eventName, payload);
     if (!eventKind) return null;
 
@@ -361,7 +447,9 @@ export class KickAdapter implements ChatAdapter {
         : "A moderator deleted a message.";
     } else if (eventKind === "timeout") {
       const targetLabel = targetUsername || "A user";
-      content = durationSeconds ? `${targetLabel} was timed out for ${durationSeconds}s.` : `${targetLabel} was timed out.`;
+      content = durationSeconds
+        ? `${targetLabel} was timed out for ${durationSeconds}s.`
+        : `${targetLabel} was timed out.`;
     } else if (eventKind === "ban") {
       const targetLabel = targetUsername || "A user";
       content = `${targetLabel} was banned.`;
@@ -388,8 +476,8 @@ export class KickAdapter implements ChatAdapter {
         eventName,
         targetUsername: targetUsername || undefined,
         targetMessageId: targetMessageId || undefined,
-        durationSeconds: durationSeconds ?? undefined
-      }
+        durationSeconds: durationSeconds ?? undefined,
+      },
     };
   }
 
@@ -402,7 +490,11 @@ export class KickAdapter implements ChatAdapter {
       return;
     }
 
-    if (envelope.event.startsWith("pusher:") || envelope.event.startsWith("pusher_internal:")) return;
+    if (
+      envelope.event.startsWith("pusher:") ||
+      envelope.event.startsWith("pusher_internal:")
+    )
+      return;
 
     const payload =
       typeof envelope.data === "string"
@@ -418,7 +510,10 @@ export class KickAdapter implements ChatAdapter {
       return;
     }
 
-    const moderationEvent = this.normalizeKickModerationEvent(envelope.event, payload);
+    const moderationEvent = this.normalizeKickModerationEvent(
+      envelope.event,
+      payload,
+    );
     if (moderationEvent) {
       this.emitter.emit("message", moderationEvent);
     }
@@ -450,10 +545,12 @@ export class KickAdapter implements ChatAdapter {
       socket.send(
         JSON.stringify({
           event: "pusher:subscribe",
-          data: { auth: "", channel: `chatrooms.${this.chatroomId}.v2` }
-        })
+          data: { auth: "", channel: `chatrooms.${this.chatroomId}.v2` },
+        }),
       );
-      this.logger?.(`Kick connected to ${this.channel} (chatroom ${this.chatroomId}).`);
+      this.logger?.(
+        `Kick connected to ${this.channel} (chatroom ${this.chatroomId}).`,
+      );
     });
 
     socket.addEventListener("message", (event) => {
@@ -510,40 +607,60 @@ export class KickAdapter implements ChatAdapter {
     const params = new URLSearchParams();
     params.append("slug", this.channel);
 
-    let response = await fetch(`https://api.kick.com/public/v1/channels?${params.toString()}`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/json"
-      }
-    });
-    if ((response.status === 401 || response.status === 403) && this.refreshAccessToken) {
-      token = await this.refreshKickTokenOrThrow();
-      response = await fetch(`https://api.kick.com/public/v1/channels?${params.toString()}`, {
+    let response = await fetch(
+      `https://api.kick.com/public/v1/channels?${params.toString()}`,
+      {
         headers: {
           Authorization: `Bearer ${token}`,
-          Accept: "application/json"
-        }
-      });
+          Accept: "application/json",
+        },
+      },
+    );
+    if (
+      (response.status === 401 || response.status === 403) &&
+      this.refreshAccessToken
+    ) {
+      token = await this.refreshKickTokenOrThrow();
+      response = await fetch(
+        `https://api.kick.com/public/v1/channels?${params.toString()}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/json",
+          },
+        },
+      );
     }
 
     const text = await response.text();
     const payload = text ? parseJson<unknown>(text) : null;
 
-    let broadcasterUserId = response.ok && payload ? this.extractBroadcasterUserId(payload) : null;
+    let broadcasterUserId =
+      response.ok && payload ? this.extractBroadcasterUserId(payload) : null;
     if (!broadcasterUserId) {
       // Fallback to public website channel payload when API auth is restricted.
-      const fallback = await fetch(`https://kick.com/api/v2/channels/${encodeURIComponent(this.channel)}`, {
-        headers: {
-          Accept: "application/json, text/plain, */*"
-        }
-      });
+      const fallback = await fetch(
+        `https://kick.com/api/v2/channels/${encodeURIComponent(this.channel)}`,
+        {
+          headers: {
+            Accept: "application/json, text/plain, */*",
+          },
+        },
+      );
       const fallbackText = await fallback.text();
-      const fallbackPayload = fallbackText ? parseJson<unknown>(fallbackText) : null;
-      broadcasterUserId = fallback.ok && fallbackPayload ? this.extractBroadcasterUserId(fallbackPayload) : null;
+      const fallbackPayload = fallbackText
+        ? parseJson<unknown>(fallbackText)
+        : null;
+      broadcasterUserId =
+        fallback.ok && fallbackPayload
+          ? this.extractBroadcasterUserId(fallbackPayload)
+          : null;
     }
 
     if (!broadcasterUserId) {
-      throw new Error(`Kick broadcaster ID lookup failed (${response.status}).`);
+      throw new Error(
+        `Kick broadcaster ID lookup failed (${response.status}).`,
+      );
     }
 
     this.broadcasterUserId = broadcasterUserId;
@@ -568,28 +685,31 @@ export class KickAdapter implements ChatAdapter {
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
-        Accept: "application/json"
+        Accept: "application/json",
       },
       body: JSON.stringify({
         broadcaster_user_id: broadcasterUserId,
         content,
-        type: "user"
-      })
+        type: "user",
+      }),
     });
-    if ((response.status === 401 || response.status === 403) && this.refreshAccessToken) {
+    if (
+      (response.status === 401 || response.status === 403) &&
+      this.refreshAccessToken
+    ) {
       token = await this.refreshKickTokenOrThrow();
       response = await fetch("https://api.kick.com/public/v1/chat", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
-          Accept: "application/json"
+          Accept: "application/json",
         },
         body: JSON.stringify({
           broadcaster_user_id: broadcasterUserId,
           content,
-          type: "user"
-        })
+          type: "user",
+        }),
       });
     }
 

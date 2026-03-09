@@ -30,7 +30,7 @@ export const IPC_CHANNELS = {
   UPDATES_SET_CHANNEL: "updates:setChannel",
   UPDATES_INSTALL: "updates:install",
   UPDATES_GET_STATUS: "updates:getStatus",
-  UPDATES_STATUS_EVENT: "updates:status"
+  UPDATES_STATUS_EVENT: "updates:status",
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
@@ -38,5 +38,5 @@ export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
 export const AUTH = {
   OAUTH_CALLBACK_TIMEOUT_MS: 3 * 60 * 1000,
   OAUTH_HTTP_PORT: 51730,
-  TIKTOK_AUTH_TIMEOUT_MS: 4 * 60 * 1000
+  TIKTOK_AUTH_TIMEOUT_MS: 4 * 60 * 1000,
 } as const;

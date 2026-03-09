@@ -1,4 +1,7 @@
-export async function fetchJsonOrThrow<T>(response: Response, source: string): Promise<T> {
+export async function fetchJsonOrThrow<T>(
+  response: Response,
+  source: string,
+): Promise<T> {
   const text = await response.text();
   let parsed: unknown = {};
 
@@ -16,7 +19,8 @@ export async function fetchJsonOrThrow<T>(response: Response, source: string): P
     const message =
       (typeof payload.message === "string" && payload.message) ||
       (typeof nested?.message === "string" && nested.message) ||
-      (typeof payload.error_description === "string" && payload.error_description) ||
+      (typeof payload.error_description === "string" &&
+        payload.error_description) ||
       `${source} request failed (${response.status}).`;
     throw new Error(message);
   }

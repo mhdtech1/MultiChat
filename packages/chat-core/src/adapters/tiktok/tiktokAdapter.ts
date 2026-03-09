@@ -1,5 +1,10 @@
 import EventEmitter from "eventemitter3";
-import type { ChatAdapter, ChatAdapterOptions, ChatAdapterStatus, ChatMessage } from "../../types.js";
+import type {
+  ChatAdapter,
+  ChatAdapterOptions,
+  ChatAdapterStatus,
+  ChatMessage,
+} from "../../types.js";
 
 type TikTokTransportEvent = {
   connectionId: string;
@@ -10,9 +15,14 @@ type TikTokTransportEvent = {
 };
 
 type TikTokTransport = {
-  connect: (payload: { channel: string }) => Promise<{ connectionId: string; roomId?: string }>;
+  connect: (payload: {
+    channel: string;
+  }) => Promise<{ connectionId: string; roomId?: string }>;
   disconnect: (payload: { connectionId: string }) => Promise<void>;
-  sendMessage?: (payload: { connectionId: string; message: string }) => Promise<void>;
+  sendMessage?: (payload: {
+    connectionId: string;
+    message: string;
+  }) => Promise<void>;
   onEvent: (handler: (event: TikTokTransportEvent) => void) => () => void;
 };
 
@@ -47,7 +57,8 @@ export class TikTokAdapter implements ChatAdapter {
   private bindTransportEvents() {
     if (this.unsubscribeTransport) return;
     this.unsubscribeTransport = this.transport.onEvent((event) => {
-      if (!this.connectionId || event.connectionId !== this.connectionId) return;
+      if (!this.connectionId || event.connectionId !== this.connectionId)
+        return;
       if (event.type === "chat" && event.message) {
         this.emitter.emit("message", event.message);
         return;
@@ -79,7 +90,9 @@ export class TikTokAdapter implements ChatAdapter {
     this.connectionId = result.connectionId;
     this.setStatus("connected");
     if (result.roomId) {
-      this.logger?.(`TikTok connected to @${this.channel} (room ${result.roomId}).`);
+      this.logger?.(
+        `TikTok connected to @${this.channel} (room ${result.roomId}).`,
+      );
     }
   }
 
@@ -111,7 +124,7 @@ export class TikTokAdapter implements ChatAdapter {
     }
     await this.transport.sendMessage({
       connectionId: this.connectionId,
-      message: content
+      message: content,
     });
   }
 }

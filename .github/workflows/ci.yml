@@ -34,5 +34,11 @@ jobs:
           pnpm --filter @multichat/desktop build:renderer
           pnpm --filter @multichat/desktop build:main
 
+      - name: Lint
+        run: pnpm lint
+
+      - name: Format check
+        run: pnpm format
+
       - name: Run tests
         run: pnpm test

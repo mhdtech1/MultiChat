@@ -13,11 +13,12 @@ const buildSystemMessage = (
   message: IrcMessage,
   timestampMs: number,
   content: string,
-  extraRaw: Record<string, unknown>
+  extraRaw: Record<string, unknown>,
 ): ChatMessage => {
   const channel = message.params[0]?.replace("#", "") ?? "";
   const suffix = Math.random().toString(36).slice(2, 8);
-  const baseId = message.tags.id || message.tags["target-msg-id"] || `${timestampMs}`;
+  const baseId =
+    message.tags.id || message.tags["target-msg-id"] || `${timestampMs}`;
   return {
     id: `event-${baseId}-${suffix}`,
     platform: "twitch",
@@ -30,17 +31,23 @@ const buildSystemMessage = (
     color: "#f08a65",
     raw: {
       ...message.tags,
-      ...extraRaw
-    }
+      ...extraRaw,
+    },
   };
 };
 
-export const normalizeTwitchMessage = (message: IrcMessage): ChatMessage | null => {
+export const normalizeTwitchMessage = (
+  message: IrcMessage,
+): ChatMessage | null => {
   const channel = message.params[0]?.replace("#", "") ?? "";
   const username = message.prefix?.split("!")[0] ?? "";
   const displayName = message.tags["display-name"] || username || "Twitch";
-  const badges = message.tags.badges ? message.tags.badges.split(",").filter(Boolean) : [];
-  const timestampMs = message.tags["tmi-sent-ts"] ? Number(message.tags["tmi-sent-ts"]) : Date.now();
+  const badges = message.tags.badges
+    ? message.tags.badges.split(",").filter(Boolean)
+    : [];
+  const timestampMs = message.tags["tmi-sent-ts"]
+    ? Number(message.tags["tmi-sent-ts"])
+    : Date.now();
 
   if (message.command === "PRIVMSG" && message.trailing) {
     return {
@@ -53,7 +60,7 @@ export const normalizeTwitchMessage = (message: IrcMessage): ChatMessage | null 
       timestamp: new Date(timestampMs).toISOString(),
       badges,
       color: message.tags.color || undefined,
-      raw: message.tags
+      raw: message.tags,
     };
   }
 
@@ -76,8 +83,8 @@ export const normalizeTwitchMessage = (message: IrcMessage): ChatMessage | null 
       raw: {
         ...message.tags,
         eventType: "usernotice",
-        msgId: message.tags["msg-id"] || undefined
-      }
+        msgId: message.tags["msg-id"] || undefined,
+      },
     };
   }
 
@@ -93,7 +100,7 @@ export const normalizeTwitchMessage = (message: IrcMessage): ChatMessage | null 
       msgId: "clearmsg",
       targetUsername: target || undefined,
       targetMessageId: targetMsgId || undefined,
-      deletedMessage: deletedSnippet || undefined
+      deletedMessage: deletedSnippet || undefined,
     });
   }
 
@@ -111,7 +118,7 @@ export const normalizeTwitchMessage = (message: IrcMessage): ChatMessage | null 
       eventType: target ? (hasDuration ? "timeout" : "ban") : "chat_clear",
       msgId: "clearchat",
       targetUsername: target || undefined,
-      durationSeconds: hasDuration ? durationSeconds : undefined
+      durationSeconds: hasDuration ? durationSeconds : undefined,
     });
   }
 

@@ -17,7 +17,7 @@ describe("normalizeTwitchMessage", () => {
         displayName: "TestUser",
         message: "Hello world",
         badges: ["subscriber/3"],
-        color: "#FF0000"
+        color: "#FF0000",
       });
       expect(result?.id).toBe("msg-123");
     });
@@ -32,7 +32,8 @@ describe("normalizeTwitchMessage", () => {
     });
 
     it("handles messages with emotes", () => {
-      const line = "@emotes=25:0-4,6-10 :user!user@user.tmi.twitch.tv PRIVMSG #channel :Kappa Kappa";
+      const line =
+        "@emotes=25:0-4,6-10 :user!user@user.tmi.twitch.tv PRIVMSG #channel :Kappa Kappa";
       const parsed = parseIrcMessage(line);
       const result = parsed ? normalizeTwitchMessage(parsed) : null;
       expect(result?.message).toBe("Kappa Kappa");
@@ -41,7 +42,8 @@ describe("normalizeTwitchMessage", () => {
 
   describe("CLEARCHAT", () => {
     it("normalizes timeout event", () => {
-      const line = "@ban-duration=600;target-user-id=12345 :tmi.twitch.tv CLEARCHAT #channel :targetuser";
+      const line =
+        "@ban-duration=600;target-user-id=12345 :tmi.twitch.tv CLEARCHAT #channel :targetuser";
       const parsed = parseIrcMessage(line);
       const result = parsed ? normalizeTwitchMessage(parsed) : null;
       expect(result?.raw?.eventType).toBe("timeout");
@@ -49,7 +51,8 @@ describe("normalizeTwitchMessage", () => {
     });
 
     it("normalizes ban event without duration", () => {
-      const line = "@target-user-id=12345 :tmi.twitch.tv CLEARCHAT #channel :targetuser";
+      const line =
+        "@target-user-id=12345 :tmi.twitch.tv CLEARCHAT #channel :targetuser";
       const parsed = parseIrcMessage(line);
       const result = parsed ? normalizeTwitchMessage(parsed) : null;
       expect(result?.raw?.eventType).toBe("ban");

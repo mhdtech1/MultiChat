@@ -4,11 +4,15 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const appVersion = process.env.npm_package_version ?? "0.0.0";
 
 export default defineConfig({
   root: path.join(__dirname, "src/renderer"),
   // Electron file:// loads need relative asset paths in production.
   base: "./",
+  define: {
+    __APP_VERSION__: JSON.stringify(appVersion)
+  },
   plugins: [react()],
   resolve: {
     alias: {
@@ -19,6 +23,6 @@ export default defineConfig({
     outDir: path.join(__dirname, "dist/renderer"),
     emptyOutDir: true,
     sourcemap: true,
-    minify: false
+    minify: "esbuild"
   }
 });

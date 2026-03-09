@@ -29,7 +29,11 @@ export function Composer({ onSend, placeholder, disabled }: ComposerProps) {
         />
       </div>
       <div className="composer__actions">
-        <button className="composer__button composer__send" type="submit" disabled={disabled || !value.trim()}>
+        <button
+          className="composer__button composer__send"
+          type="submit"
+          disabled={disabled || !value.trim()}
+        >
           Send
         </button>
       </div>

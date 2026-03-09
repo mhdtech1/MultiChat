@@ -51,6 +51,6 @@ export const parseIrcMessage = (line: string): IrcMessage | null => {
     prefix,
     command: parts[0],
     params: parts.slice(1),
-    trailing
+    trailing,
   };
 };

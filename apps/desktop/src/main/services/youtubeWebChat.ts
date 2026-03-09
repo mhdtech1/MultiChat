@@ -30,10 +30,13 @@ const YOUTUBE_DESKTOP_USER_AGENT =
 const youtubeWebChatSessions = new Map<string, YouTubeWebChatSession>();
 
 const withTimeout = (init: RequestInit = {}): RequestInit => {
-  if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+  if (
+    typeof AbortSignal !== "undefined" &&
+    typeof AbortSignal.timeout === "function"
+  ) {
     return {
       ...init,
-      signal: init.signal ?? AbortSignal.timeout(YOUTUBE_WEB_FETCH_TIMEOUT_MS)
+      signal: init.signal ?? AbortSignal.timeout(YOUTUBE_WEB_FETCH_TIMEOUT_MS),
     };
   }
   return init;
@@ -64,7 +67,8 @@ const normalizeYouTubeInput = (input: string) => {
       if (parts[0] === "c" && parts[1]) return parts[1].replace(/^@/, "");
       if (parts[0] === "user" && parts[1]) return parts[1].replace(/^@/, "");
       if (parts[0]?.startsWith("@")) return parts[0].slice(1);
-      if ((parts[0] === "shorts" || parts[0] === "live") && parts[1]) return parts[1];
+      if ((parts[0] === "shorts" || parts[0] === "live") && parts[1])
+        return parts[1];
     }
   } catch {
     // Not a URL; fall back to plain-channel parsing.
@@ -105,10 +109,18 @@ const extractYouTubeVideoId = (input: string): string => {
         return watchId;
       }
       const pathParts = url.pathname.split("/").filter(Boolean);
-      if (pathParts[0] === "shorts" && pathParts[1] && YOUTUBE_VIDEO_ID_REGEX.test(pathParts[1])) {
+      if (
+        pathParts[0] === "shorts" &&
+        pathParts[1] &&
+        YOUTUBE_VIDEO_ID_REGEX.test(pathParts[1])
+      ) {
         return pathParts[1];
       }
-      if (pathParts[0] === "live" && pathParts[1] && YOUTUBE_VIDEO_ID_REGEX.test(pathParts[1])) {
+      if (
+        pathParts[0] === "live" &&
+        pathParts[1] &&
+        YOUTUBE_VIDEO_ID_REGEX.test(pathParts[1])
+      ) {
         return pathParts[1];
       }
     }
@@ -131,7 +143,9 @@ const htmlEntityDecode = (value: string) =>
 
 const matchFromHtml = (html: string, regex: RegExp): string => {
   const match = html.match(regex);
-  return typeof match?.[1] === "string" ? htmlEntityDecode(match[1]).trim() : "";
+  return typeof match?.[1] === "string"
+    ? htmlEntityDecode(match[1]).trim()
+    : "";
 };
 
 const parseYouTubeTextRuns = (runs: unknown): string => {
@@ -149,7 +163,13 @@ const parseYouTubeTextRuns = (runs: unknown): string => {
     .join("");
 };
 
-const parseYouTubeAuthorBadges = (badges: unknown): { isChatOwner?: boolean; isChatModerator?: boolean; isChatSponsor?: boolean } => {
+const parseYouTubeAuthorBadges = (
+  badges: unknown,
+): {
+  isChatOwner?: boolean;
+  isChatModerator?: boolean;
+  isChatSponsor?: boolean;
+} => {
   if (!Array.isArray(badges)) return {};
   let isChatOwner = false;
   let isChatModerator = false;
@@ -171,7 +191,10 @@ const parseYouTubeAuthorBadges = (badges: unknown): { isChatOwner?: boolean; isC
     ) {
       isChatOwner = true;
       isChatModerator = true;
-    } else if (iconType.includes("moderator") || tooltip.includes("moderator")) {
+    } else if (
+      iconType.includes("moderator") ||
+      tooltip.includes("moderator")
+    ) {
       isChatModerator = true;
     }
 
@@ -200,10 +223,14 @@ const normalizeYouTubeWebActions = (actions: unknown): YouTubeWebMessage[] => {
     if (!renderer) continue;
 
     const id = asString(renderer.id).trim();
-    const message = parseYouTubeTextRuns(asUnknownRecord(renderer.message)?.runs);
+    const message = parseYouTubeTextRuns(
+      asUnknownRecord(renderer.message)?.runs,
+    );
     if (!id || !message) continue;
 
-    const authorName = asString(asUnknownRecord(renderer.authorName)?.simpleText).trim() || "YouTube user";
+    const authorName =
+      asString(asUnknownRecord(renderer.authorName)?.simpleText).trim() ||
+      "YouTube user";
     const channelId = asString(renderer.authorExternalChannelId).trim();
     const timestampUsecRaw = Number(asString(renderer.timestampUsec));
     const publishedAt =
@@ -216,24 +243,30 @@ const normalizeYouTubeWebActions = (actions: unknown): YouTubeWebMessage[] => {
       id,
       snippet: {
         displayMessage: message,
-        publishedAt
+        publishedAt,
       },
       authorDetails: {
         channelId,
         displayName: authorName,
-        ...badges
-      }
+        ...badges,
+      },
     });
   }
 
   return items;
 };
 
-const extractYouTubeWebContinuation = (payload: unknown): { continuation?: string; pollingIntervalMillis?: number } => {
+const extractYouTubeWebContinuation = (
+  payload: unknown,
+): { continuation?: string; pollingIntervalMillis?: number } => {
   const root = asUnknownRecord(payload);
   const continuationContents = asUnknownRecord(root?.continuationContents);
-  const liveChatContinuation = asUnknownRecord(continuationContents?.liveChatContinuation);
-  const continuations = Array.isArray(liveChatContinuation?.continuations) ? liveChatContinuation.continuations : [];
+  const liveChatContinuation = asUnknownRecord(
+    continuationContents?.liveChatContinuation,
+  );
+  const continuations = Array.isArray(liveChatContinuation?.continuations)
+    ? liveChatContinuation.continuations
+    : [];
 
   for (const entry of continuations) {
     const record = asUnknownRecord(entry);
@@ -243,7 +276,10 @@ const extractYouTubeWebContinuation = (payload: unknown): { continuation?: strin
       const timeoutMs = Number(asString(timed.timeoutMs));
       return {
         continuation: continuation || undefined,
-        pollingIntervalMillis: Number.isFinite(timeoutMs) && timeoutMs > 0 ? Math.max(1000, Math.min(15000, timeoutMs)) : undefined
+        pollingIntervalMillis:
+          Number.isFinite(timeoutMs) && timeoutMs > 0
+            ? Math.max(1000, Math.min(15000, timeoutMs))
+            : undefined,
       };
     }
     const invalidation = asUnknownRecord(record?.invalidationContinuationData);
@@ -252,7 +288,10 @@ const extractYouTubeWebContinuation = (payload: unknown): { continuation?: strin
       const timeoutMs = Number(asString(invalidation.invalidationTimeoutMs));
       return {
         continuation: continuation || undefined,
-        pollingIntervalMillis: Number.isFinite(timeoutMs) && timeoutMs > 0 ? Math.max(1000, Math.min(15000, timeoutMs)) : undefined
+        pollingIntervalMillis:
+          Number.isFinite(timeoutMs) && timeoutMs > 0
+            ? Math.max(1000, Math.min(15000, timeoutMs))
+            : undefined,
       };
     }
     const reload = asUnknownRecord(record?.reloadContinuationData);
@@ -294,29 +333,37 @@ const fetchYouTubeHtml = async (url: string, source: string) => {
     withTimeout({
       headers: {
         Accept: "text/html",
-        "User-Agent": YOUTUBE_DESKTOP_USER_AGENT
-      }
-    })
+        "User-Agent": YOUTUBE_DESKTOP_USER_AGENT,
+      },
+    }),
   );
   if (!response.ok) {
     throw new Error(`${source} failed (${response.status}).`);
   }
   return {
     html: await response.text(),
-    finalUrl: response.url
+    finalUrl: response.url,
   };
 };
 
-const findYouTubeLiveVideoViaSearch = async (rawInput: string): Promise<string> => {
+const findYouTubeLiveVideoViaSearch = async (
+  rawInput: string,
+): Promise<string> => {
   const query = normalizeYouTubeInput(rawInput) || rawInput.trim();
   if (!query) return "";
   const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}&sp=EgJAAQ%253D%253D`;
-  const { html } = await fetchYouTubeHtml(searchUrl, "YouTube live search lookup");
+  const { html } = await fetchYouTubeHtml(
+    searchUrl,
+    "YouTube live search lookup",
+  );
   const fromVideoId = matchFromHtml(html, /"videoId":"([A-Za-z0-9_-]{11})"/);
   if (fromVideoId && YOUTUBE_VIDEO_ID_REGEX.test(fromVideoId)) {
     return fromVideoId;
   }
-  const fromWatchLink = matchFromHtml(html, /"url":"\\\/watch\?v=([A-Za-z0-9_-]{11})/);
+  const fromWatchLink = matchFromHtml(
+    html,
+    /"url":"\\\/watch\?v=([A-Za-z0-9_-]{11})/,
+  );
   if (fromWatchLink && YOUTUBE_VIDEO_ID_REGEX.test(fromWatchLink)) {
     return fromWatchLink;
   }
@@ -329,7 +376,10 @@ export const resolveYouTubeLiveChatViaWeb = async (rawInput: string) => {
   let liveHtml = "";
   let liveFinalUrl = liveUrl;
   try {
-    const livePage = await fetchYouTubeHtml(liveUrl, "YouTube live page lookup");
+    const livePage = await fetchYouTubeHtml(
+      liveUrl,
+      "YouTube live page lookup",
+    );
     liveHtml = livePage.html;
     liveFinalUrl = livePage.finalUrl;
   } catch (error) {
@@ -342,7 +392,10 @@ export const resolveYouTubeLiveChatViaWeb = async (rawInput: string) => {
   const redirectedVideoId = extractYouTubeVideoId(liveFinalUrl);
   const pageVideoId =
     redirectedVideoId ||
-    matchFromHtml(liveHtml, /"canonicalBaseUrl":"\\\/watch\?v=([A-Za-z0-9_-]{11})"/) ||
+    matchFromHtml(
+      liveHtml,
+      /"canonicalBaseUrl":"\\\/watch\?v=([A-Za-z0-9_-]{11})"/,
+    ) ||
     matchFromHtml(liveHtml, /"videoId":"([A-Za-z0-9_-]{11})"/) ||
     (await findYouTubeLiveVideoViaSearch(rawInput));
   if (!pageVideoId) {
@@ -351,17 +404,31 @@ export const resolveYouTubeLiveChatViaWeb = async (rawInput: string) => {
 
   const watchUrl = `https://www.youtube.com/watch?v=${pageVideoId}`;
   const watchHtml =
-    liveFinalUrl.includes("/watch") && redirectedVideoId === pageVideoId && liveHtml
+    liveFinalUrl.includes("/watch") &&
+    redirectedVideoId === pageVideoId &&
+    liveHtml
       ? liveHtml
       : (await fetchYouTubeHtml(watchUrl, "YouTube watch page lookup")).html;
 
   const apiKey = matchFromHtml(watchHtml, /"INNERTUBE_API_KEY":"([^"]+)"/);
-  const clientVersion = matchFromHtml(watchHtml, /"INNERTUBE_CLIENT_VERSION":"([^"]+)"/);
+  const clientVersion = matchFromHtml(
+    watchHtml,
+    /"INNERTUBE_CLIENT_VERSION":"([^"]+)"/,
+  );
   const visitorData = matchFromHtml(watchHtml, /"VISITOR_DATA":"([^"]+)"/);
   const continuation =
-    matchFromHtml(watchHtml, /"reloadContinuationData":\{"continuation":"([^"]+)"/) ||
-    matchFromHtml(watchHtml, /"timedContinuationData":\{"timeoutMs":[0-9]+,"continuation":"([^"]+)"/) ||
-    matchFromHtml(watchHtml, /"invalidationContinuationData":\{"invalidationId":"[^"]+","invalidationTimeoutMs":[0-9]+,"continuation":"([^"]+)"/);
+    matchFromHtml(
+      watchHtml,
+      /"reloadContinuationData":\{"continuation":"([^"]+)"/,
+    ) ||
+    matchFromHtml(
+      watchHtml,
+      /"timedContinuationData":\{"timeoutMs":[0-9]+,"continuation":"([^"]+)"/,
+    ) ||
+    matchFromHtml(
+      watchHtml,
+      /"invalidationContinuationData":\{"invalidationId":"[^"]+","invalidationTimeoutMs":[0-9]+,"continuation":"([^"]+)"/,
+    );
   const channelId = matchFromHtml(watchHtml, /"channelId":"(UC[^"]+)"/);
   const channelTitle =
     matchFromHtml(watchHtml, /"ownerChannelName":"([^"]+)"/) ||
@@ -369,7 +436,9 @@ export const resolveYouTubeLiveChatViaWeb = async (rawInput: string) => {
     normalizeYouTubeInput(rawInput);
 
   if (!apiKey || !clientVersion || !continuation) {
-    throw new Error("YouTube read-only web fallback could not extract live chat metadata for this stream.");
+    throw new Error(
+      "YouTube read-only web fallback could not extract live chat metadata for this stream.",
+    );
   }
 
   const normalizedChannelId = channelId || normalizeYouTubeInput(rawInput);
@@ -383,25 +452,32 @@ export const resolveYouTubeLiveChatViaWeb = async (rawInput: string) => {
     clientVersion,
     visitorData: visitorData || undefined,
     continuation,
-    updatedAt: Date.now()
+    updatedAt: Date.now(),
   });
 
   return {
     channelId: normalizedChannelId,
     channelTitle,
     videoId: pageVideoId,
-    liveChatId
+    liveChatId,
   };
 };
 
-export const fetchYouTubeWebLiveMessages = async (payload: { liveChatId: string; pageToken?: string }) => {
+export const fetchYouTubeWebLiveMessages = async (payload: {
+  liveChatId: string;
+  pageToken?: string;
+}) => {
   cleanupYouTubeWebSessions();
   const session = youtubeWebChatSessions.get(payload.liveChatId);
   if (!session) {
-    throw new Error("YouTube web chat session expired. Re-open the YouTube tab.");
+    throw new Error(
+      "YouTube web chat session expired. Re-open the YouTube tab.",
+    );
   }
 
-  const continuation = (payload.pageToken?.trim() || session.continuation).trim();
+  const continuation = (
+    payload.pageToken?.trim() || session.continuation
+  ).trim();
   if (!continuation) {
     throw new Error("YouTube web chat continuation token is missing.");
   }
@@ -414,10 +490,10 @@ export const fetchYouTubeWebLiveMessages = async (payload: { liveChatId: string;
         clientVersion: session.clientVersion,
         hl: "en",
         gl: "US",
-        ...(session.visitorData ? { visitorData: session.visitorData } : {})
-      }
+        ...(session.visitorData ? { visitorData: session.visitorData } : {}),
+      },
     },
-    continuation
+    continuation,
   };
 
   const response = await fetch(
@@ -429,17 +505,19 @@ export const fetchYouTubeWebLiveMessages = async (payload: { liveChatId: string;
         Accept: "application/json",
         Origin: "https://www.youtube.com",
         Referer: `https://www.youtube.com/watch?v=${session.videoId}`,
-        "User-Agent": YOUTUBE_DESKTOP_USER_AGENT
+        "User-Agent": YOUTUBE_DESKTOP_USER_AGENT,
       },
-      body: JSON.stringify(body)
-    })
+      body: JSON.stringify(body),
+    }),
   );
   if (!response.ok) {
     throw new Error(`YouTube web chat polling failed (${response.status}).`);
   }
   const parsed = (await response.json()) as unknown;
   const root = asUnknownRecord(parsed);
-  const liveChatContinuation = asUnknownRecord(asUnknownRecord(root?.continuationContents)?.liveChatContinuation);
+  const liveChatContinuation = asUnknownRecord(
+    asUnknownRecord(root?.continuationContents)?.liveChatContinuation,
+  );
   const actions = liveChatContinuation?.actions;
   const normalizedItems = normalizeYouTubeWebActions(actions);
   const continuationInfo = extractYouTubeWebContinuation(parsed);
@@ -452,6 +530,6 @@ export const fetchYouTubeWebLiveMessages = async (payload: { liveChatId: string;
   return {
     nextPageToken: continuationInfo.continuation ?? session.continuation,
     pollingIntervalMillis: continuationInfo.pollingIntervalMillis ?? 3000,
-    items: normalizedItems
+    items: normalizedItems,
   };
 };

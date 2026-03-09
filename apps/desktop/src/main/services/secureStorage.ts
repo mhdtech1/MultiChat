@@ -9,13 +9,16 @@ type TokenKeys = { access: keyof AppSettings; refresh?: keyof AppSettings };
 const PLATFORM_TOKEN_KEYS: Record<TokenPlatform, TokenKeys> = {
   twitch: { access: "twitchToken" },
   kick: { access: "kickAccessToken", refresh: "kickRefreshToken" },
-  youtube: { access: "youtubeAccessToken", refresh: "youtubeRefreshToken" }
+  youtube: { access: "youtubeAccessToken", refresh: "youtubeRefreshToken" },
 };
 
-const PLATFORM_ACCOUNTS: Record<TokenPlatform, { access: string; refresh?: string }> = {
+const PLATFORM_ACCOUNTS: Record<
+  TokenPlatform,
+  { access: string; refresh?: string }
+> = {
   twitch: { access: "TWITCH_access_token" },
   kick: { access: "KICK_access_token", refresh: "KICK_refresh_token" },
-  youtube: { access: "YOUTUBE_access_token", refresh: "YOUTUBE_refresh_token" }
+  youtube: { access: "YOUTUBE_access_token", refresh: "YOUTUBE_refresh_token" },
 };
 
 export interface SecureStorageService {
@@ -131,7 +134,7 @@ export function getSecureStorage(): SecureStorageService {
 
 export async function storeAuthTokens(
   platform: TokenPlatform,
-  tokens: { accessToken: string; refreshToken?: string }
+  tokens: { accessToken: string; refreshToken?: string },
 ): Promise<void> {
   const storage = getSecureStorage();
   const accounts = PLATFORM_ACCOUNTS[platform];
@@ -152,15 +155,17 @@ export async function storeAuthTokens(
 }
 
 export async function getAuthTokens(
-  platform: TokenPlatform
+  platform: TokenPlatform,
 ): Promise<{ accessToken: string | null; refreshToken: string | null }> {
   const storage = getSecureStorage();
   const accounts = PLATFORM_ACCOUNTS[platform];
   const accessToken = (await storage.getToken(accounts.access))?.trim() ?? null;
-  const refreshToken = accounts.refresh ? (await storage.getToken(accounts.refresh))?.trim() ?? null : null;
+  const refreshToken = accounts.refresh
+    ? ((await storage.getToken(accounts.refresh))?.trim() ?? null)
+    : null;
   return {
     accessToken: accessToken || null,
-    refreshToken: refreshToken || null
+    refreshToken: refreshToken || null,
   };
 }
 
@@ -178,35 +183,45 @@ type SettingsReaderWriter = {
   set(updates: Partial<AppSettings>): void;
 };
 
-export async function hydrateTokenStateFromSecureStorage(store: SettingsReaderWriter): Promise<void> {
+export async function hydrateTokenStateFromSecureStorage(
+  store: SettingsReaderWriter,
+): Promise<void> {
   const updates: Partial<AppSettings> = {};
 
   for (const platform of Object.keys(PLATFORM_TOKEN_KEYS) as TokenPlatform[]) {
     const keys = PLATFORM_TOKEN_KEYS[platform];
     const tokens = await getAuthTokens(platform);
-    (updates as Record<string, unknown>)[keys.access] = tokens.accessToken ?? "";
+    (updates as Record<string, unknown>)[keys.access] =
+      tokens.accessToken ?? "";
     if (keys.refresh) {
-      (updates as Record<string, unknown>)[keys.refresh] = tokens.refreshToken ?? "";
+      (updates as Record<string, unknown>)[keys.refresh] =
+        tokens.refreshToken ?? "";
     }
   }
 
   store.set(updates);
 }
 
-export async function migrateLegacySettingsTokens(store: SettingsReaderWriter): Promise<void> {
+export async function migrateLegacySettingsTokens(
+  store: SettingsReaderWriter,
+): Promise<void> {
   for (const platform of Object.keys(PLATFORM_TOKEN_KEYS) as TokenPlatform[]) {
     const keys = PLATFORM_TOKEN_KEYS[platform];
     const access = String(store.get(keys.access) ?? "").trim();
-    const refresh = keys.refresh ? String(store.get(keys.refresh) ?? "").trim() : "";
+    const refresh = keys.refresh
+      ? String(store.get(keys.refresh) ?? "").trim()
+      : "";
     if (!access && !refresh) continue;
 
     const existing = await getAuthTokens(platform);
-    const hasExisting = Boolean(existing.accessToken?.trim() || existing.refreshToken?.trim());
+    const hasExisting = Boolean(
+      existing.accessToken?.trim() || existing.refreshToken?.trim(),
+    );
     if (hasExisting) continue;
 
     await storeAuthTokens(platform, {
       accessToken: access,
-      refreshToken: refresh || undefined
+      refreshToken: refresh || undefined,
     });
   }
 }

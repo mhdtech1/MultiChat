@@ -13,10 +13,18 @@ export function TopBar({ onAddChannel, onOpenSettings }: TopBarProps) {
         <h1 className="top-bar__title">MultiChat</h1>
       </div>
       <div className="top-bar__actions">
-        <button type="button" className="top-bar__button top-bar__button--primary" onClick={onAddChannel}>
+        <button
+          type="button"
+          className="top-bar__button top-bar__button--primary"
+          onClick={onAddChannel}
+        >
           Add Channel
         </button>
-        <button type="button" className="top-bar__button" onClick={onOpenSettings}>
+        <button
+          type="button"
+          className="top-bar__button"
+          onClick={onOpenSettings}
+        >
           Settings
         </button>
       </div>

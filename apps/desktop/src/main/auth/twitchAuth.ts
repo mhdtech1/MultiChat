@@ -51,7 +51,10 @@ export class TwitchAuthService {
       }, AUTH.OAUTH_CALLBACK_TIMEOUT_MS);
 
       this.server = http.createServer(async (req, res) => {
-        const url = new URL(req.url ?? "/", `http://localhost:${AUTH.OAUTH_HTTP_PORT}`);
+        const url = new URL(
+          req.url ?? "/",
+          `http://localhost:${AUTH.OAUTH_HTTP_PORT}`,
+        );
         if (url.pathname !== "/twitch/callback") {
           res.writeHead(404);
           res.end("Not found");
@@ -75,13 +78,15 @@ export class TwitchAuthService {
           clearTimeout(timeout);
           this.cleanup();
           res.writeHead(200, { "Content-Type": "text/html" });
-          res.end("<html><body><h1>Signed in</h1><script>window.close()</script></body></html>");
+          res.end(
+            "<html><body><h1>Signed in</h1><script>window.close()</script></body></html>",
+          );
           resolve({
             accessToken: tokens.access_token,
             refreshToken: tokens.refresh_token,
             userId: user.id,
             username: user.login,
-            expiresIn: tokens.expires_in
+            expiresIn: tokens.expires_in,
           });
         } catch (error) {
           clearTimeout(timeout);
@@ -103,18 +108,20 @@ export class TwitchAuthService {
     });
   }
 
-  async refreshToken(refreshToken: string): Promise<{ accessToken: string; refreshToken: string; expiresIn: number }> {
+  async refreshToken(
+    refreshToken: string,
+  ): Promise<{ accessToken: string; refreshToken: string; expiresIn: number }> {
     const response = await fetch("https://id.twitch.tv/oauth2/token", {
       method: "POST",
       headers: {
-        "Content-Type": "application/x-www-form-urlencoded"
+        "Content-Type": "application/x-www-form-urlencoded",
       },
       body: new URLSearchParams({
         client_id: this.config.clientId,
         client_secret: this.config.clientSecret,
         grant_type: "refresh_token",
-        refresh_token: refreshToken
-      })
+        refresh_token: refreshToken,
+      }),
     });
     if (!response.ok) {
       throw new Error(`Token refresh failed: ${response.status}`);
@@ -123,7 +130,7 @@ export class TwitchAuthService {
     return {
       accessToken: data.access_token,
       refreshToken: data.refresh_token,
-      expiresIn: data.expires_in
+      expiresIn: data.expires_in,
     };
   }
 
@@ -133,7 +140,7 @@ export class TwitchAuthService {
       redirect_uri: this.config.redirectUri,
       response_type: "code",
       scope: this.config.scopes.join(" "),
-      state
+      state,
     });
     return `https://id.twitch.tv/oauth2/authorize?${params}`;
   }
@@ -142,15 +149,15 @@ export class TwitchAuthService {
     const response = await fetch("https://id.twitch.tv/oauth2/token", {
       method: "POST",
       headers: {
-        "Content-Type": "application/x-www-form-urlencoded"
+        "Content-Type": "application/x-www-form-urlencoded",
       },
       body: new URLSearchParams({
         client_id: this.config.clientId,
         client_secret: this.config.clientSecret,
         code,
         grant_type: "authorization_code",
-        redirect_uri: this.config.redirectUri
-      })
+        redirect_uri: this.config.redirectUri,
+      }),
     });
     if (!response.ok) {
       throw new Error(`Token exchange failed: ${response.status}`);
@@ -158,12 +165,14 @@ export class TwitchAuthService {
     return (await response.json()) as TwitchTokenResponse;
   }
 
-  private async fetchUser(accessToken: string): Promise<{ id: string; login: string }> {
+  private async fetchUser(
+    accessToken: string,
+  ): Promise<{ id: string; login: string }> {
     const response = await fetch("https://api.twitch.tv/helix/users", {
       headers: {
         Authorization: `Bearer ${accessToken}`,
-        "Client-Id": this.config.clientId
-      }
+        "Client-Id": this.config.clientId,
+      },
     });
     if (!response.ok) {
       throw new Error(`User fetch failed: ${response.status}`);

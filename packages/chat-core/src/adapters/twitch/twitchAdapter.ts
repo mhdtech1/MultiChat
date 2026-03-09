@@ -1,5 +1,10 @@
 import EventEmitter from "eventemitter3";
-import type { ChatAdapter, ChatAdapterOptions, ChatAdapterStatus, ChatMessage } from "../../types.js";
+import type {
+  ChatAdapter,
+  ChatAdapterOptions,
+  ChatAdapterStatus,
+  ChatMessage,
+} from "../../types.js";
 import { parseIrcMessage } from "./ircParser.js";
 import { normalizeTwitchMessage } from "./normalize.js";
 
@@ -54,9 +59,14 @@ export class TwitchAdapter implements ChatAdapter {
     socket.addEventListener("open", () => {
       this.reconnectAttempts = 0;
       this.setStatus("connected");
-      socket.send("CAP REQ :twitch.tv/tags twitch.tv/commands twitch.tv/membership");
-      const token = this.auth.token ? `oauth:${this.auth.token.replace(/^oauth:/, "")}` : "SCHMOOPIIE";
-      const nick = this.auth.username || `justinfan${Math.floor(Math.random() * 100000)}`;
+      socket.send(
+        "CAP REQ :twitch.tv/tags twitch.tv/commands twitch.tv/membership",
+      );
+      const token = this.auth.token
+        ? `oauth:${this.auth.token.replace(/^oauth:/, "")}`
+        : "SCHMOOPIIE";
+      const nick =
+        this.auth.username || `justinfan${Math.floor(Math.random() * 100000)}`;
       socket.send(`PASS ${token}`);
       socket.send(`NICK ${nick}`);
       this.queueJoin(this.channel);
@@ -74,9 +84,12 @@ export class TwitchAdapter implements ChatAdapter {
         if (!parsed) return;
         if (parsed.command === "USERSTATE") {
           const channel = parsed.params[0]?.replace(/^#/, "") || this.channel;
-          const username = this.auth.username || parsed.tags["display-name"] || "twitch-user";
+          const username =
+            this.auth.username || parsed.tags["display-name"] || "twitch-user";
           const displayName = parsed.tags["display-name"] || username;
-          const badges = parsed.tags.badges ? parsed.tags.badges.split(",").filter(Boolean) : [];
+          const badges = parsed.tags.badges
+            ? parsed.tags.badges.split(",").filter(Boolean)
+            : [];
           this.selfBadges = badges;
           this.selfColor = parsed.tags.color || undefined;
           this.selfDisplayName = displayName;
@@ -93,8 +106,8 @@ export class TwitchAdapter implements ChatAdapter {
             raw: {
               ...parsed.tags,
               selfRoleState: true,
-              hidden: true
-            }
+              hidden: true,
+            },
           } satisfies ChatMessage);
           return;
         }
@@ -166,7 +179,11 @@ export class TwitchAdapter implements ChatAdapter {
     if (content.length > 500) {
       throw new Error("Message is too long.");
     }
-    if (!this.auth.token || !this.auth.username || this.auth.username.startsWith("justinfan")) {
+    if (
+      !this.auth.token ||
+      !this.auth.username ||
+      this.auth.username.startsWith("justinfan")
+    ) {
       throw new Error("Twitch send requires an authenticated account.");
     }
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
@@ -185,7 +202,7 @@ export class TwitchAdapter implements ChatAdapter {
       timestamp: new Date().toISOString(),
       badges: [...this.selfBadges],
       color: this.selfColor,
-      raw: { localEcho: true }
+      raw: { localEcho: true },
     } satisfies ChatMessage);
   }
 }

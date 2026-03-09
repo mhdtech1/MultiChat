@@ -13,7 +13,11 @@ export type ChatMessage = {
   raw?: Record<string, unknown>;
 };
 
-export type ChatAdapterStatus = "disconnected" | "connecting" | "connected" | "error";
+export type ChatAdapterStatus =
+  | "disconnected"
+  | "connecting"
+  | "connected"
+  | "error";
 
 export type ChatAdapterOptions = {
   channel: string;

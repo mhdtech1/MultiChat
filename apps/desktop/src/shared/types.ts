@@ -2,7 +2,12 @@ export type WorkspacePreset = "streamer" | "moddesk" | "viewer";
 export type ThemeOption = "dark" | "light" | "classic";
 export type Platform = "twitch" | "kick" | "youtube" | "tiktok";
 export type UpdateChannel = "stable" | "beta";
-export type ModeratorAction = "timeout_60" | "timeout_600" | "ban" | "unban" | "delete";
+export type ModeratorAction =
+  | "timeout_60"
+  | "timeout_600"
+  | "ban"
+  | "unban"
+  | "delete";
 
 export type TabSendRule = {
   defaultTarget?: "all" | "first" | "specific";
@@ -111,7 +116,14 @@ export type AppSettings = {
 };
 
 export type UpdateStatus = {
-  state: "idle" | "checking" | "available" | "not-available" | "downloading" | "downloaded" | "error";
+  state:
+    | "idle"
+    | "checking"
+    | "available"
+    | "not-available"
+    | "downloading"
+    | "downloaded"
+    | "error";
   message: string;
   channel: UpdateChannel;
   currentVersion: string;
@@ -156,4 +168,3 @@ export type TikTokRendererEvent = {
   message?: unknown;
   error?: string;
 };
-

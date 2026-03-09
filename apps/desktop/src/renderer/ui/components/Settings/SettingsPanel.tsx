@@ -20,15 +20,19 @@ type SettingsPanelProps = {
 const PLATFORMS: Array<{ id: Platform; name: string; description: string }> = [
   { id: "twitch", name: "Twitch", description: "Connect your Twitch account" },
   { id: "kick", name: "Kick", description: "Connect your Kick account" },
-  { id: "youtube", name: "YouTube", description: "Connect your YouTube channel" },
-  { id: "tiktok", name: "TikTok", description: "Connect your TikTok account" }
+  {
+    id: "youtube",
+    name: "YouTube",
+    description: "Connect your YouTube channel",
+  },
+  { id: "tiktok", name: "TikTok", description: "Connect your TikTok account" },
 ];
 
 export function SettingsPanel({
   onClose,
   connectedAccounts = {},
   onConnectPlatform,
-  onDisconnectPlatform
+  onDisconnectPlatform,
 }: SettingsPanelProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>("accounts");
 
@@ -41,14 +45,21 @@ export function SettingsPanel({
           const isConnected = account?.connected ?? false;
 
           return (
-            <div key={platform.id} className={`platform-card ${isConnected ? "platform-card--connected" : ""}`}>
+            <div
+              key={platform.id}
+              className={`platform-card ${isConnected ? "platform-card--connected" : ""}`}
+            >
               <div className="platform-card__icon">
                 <PlatformIcon platform={platform.id} size="lg" showBackground />
               </div>
               <div className="platform-card__info">
                 <div className="platform-card__name">{platform.name}</div>
-                <div className={`platform-card__status ${isConnected ? "platform-card__status--connected" : ""}`}>
-                  {isConnected ? `Connected as ${account?.username}` : platform.description}
+                <div
+                  className={`platform-card__status ${isConnected ? "platform-card__status--connected" : ""}`}
+                >
+                  {isConnected
+                    ? `Connected as ${account?.username}`
+                    : platform.description}
                 </div>
               </div>
               <button
@@ -98,7 +109,11 @@ export function SettingsPanel({
         </label>
         <label className="settings-toggle">
           <span className="settings-toggle__label">Show platform icons</span>
-          <input type="checkbox" defaultChecked aria-label="Show platform icons" />
+          <input
+            type="checkbox"
+            defaultChecked
+            aria-label="Show platform icons"
+          />
           <span className="settings-toggle__switch" aria-hidden="true" />
         </label>
         <label className="settings-toggle">
@@ -111,10 +126,20 @@ export function SettingsPanel({
   );
 
   return (
-    <div className="settings-panel" role="dialog" aria-label="Settings" aria-modal="true">
+    <div
+      className="settings-panel"
+      role="dialog"
+      aria-label="Settings"
+      aria-modal="true"
+    >
       <div className="settings-panel__header">
         <h2 className="settings-panel__title">Settings</h2>
-        <button className="settings-panel__close" type="button" onClick={onClose} aria-label="Close settings">
+        <button
+          className="settings-panel__close"
+          type="button"
+          onClick={onClose}
+          aria-label="Close settings"
+        >
           ✕
         </button>
       </div>
@@ -125,7 +150,7 @@ export function SettingsPanel({
           { id: "appearance", label: "Appearance", icon: "🎨" },
           { id: "chat", label: "Chat", icon: "💬" },
           { id: "moderation", label: "Moderation", icon: "⚔️" },
-          { id: "about", label: "About", icon: "ℹ️" }
+          { id: "about", label: "About", icon: "ℹ️" },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -137,13 +162,20 @@ export function SettingsPanel({
             aria-controls={`settings-tabpanel-${tab.id}`}
             onClick={() => setActiveTab(tab.id as SettingsTab)}
           >
-            <span className="settings-tab__icon" aria-hidden="true">{tab.icon}</span>
+            <span className="settings-tab__icon" aria-hidden="true">
+              {tab.icon}
+            </span>
             <span className="settings-tab__label">{tab.label}</span>
           </button>
         ))}
       </div>
 
-      <div className="settings-panel__content" role="tabpanel" id={`settings-tabpanel-${activeTab}`} aria-labelledby={`settings-tab-${activeTab}`}>
+      <div
+        className="settings-panel__content"
+        role="tabpanel"
+        id={`settings-tabpanel-${activeTab}`}
+        aria-labelledby={`settings-tab-${activeTab}`}
+      >
         {activeTab === "accounts" ? renderAccountsTab() : null}
         {activeTab === "appearance" ? renderAppearanceTab() : null}
         {activeTab === "chat" ? (
@@ -160,8 +192,11 @@ export function SettingsPanel({
           <div className="settings-panel__section settings-about">
             <div className="settings-about__logo">💬</div>
             <h3>MultiChat</h3>
-            <p className="text-dim">Version 0.1.41</p>
-            <p className="text-secondary">The unified streaming chat client for Twitch, Kick, YouTube, and TikTok.</p>
+            <p className="text-dim">Version {__APP_VERSION__}</p>
+            <p className="text-secondary">
+              The unified streaming chat client for Twitch, Kick, YouTube, and
+              TikTok.
+            </p>
           </div>
         ) : null}
       </div>

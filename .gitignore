@@ -4,3 +4,4 @@ apps/desktop/dist
 packages/chat-core/dist
 *.log
 .env
+.tooling

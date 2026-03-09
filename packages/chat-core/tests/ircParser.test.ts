@@ -4,7 +4,8 @@ import { normalizeTwitchMessage } from "../src/adapters/twitch/normalize";
 
 describe("parseIrcMessage", () => {
   it("parses tag-prefixed PRIVMSG", () => {
-    const line = "@badge-info=;badges=moderator/1;color=#1E90FF;display-name=TestUser;emotes=;id=abc-123;mod=1;tmi-sent-ts=1710000000000 :testuser!testuser@testuser.tmi.twitch.tv PRIVMSG #twitch :hello world";
+    const line =
+      "@badge-info=;badges=moderator/1;color=#1E90FF;display-name=TestUser;emotes=;id=abc-123;mod=1;tmi-sent-ts=1710000000000 :testuser!testuser@testuser.tmi.twitch.tv PRIVMSG #twitch :hello world";
     const parsed = parseIrcMessage(line);
     expect(parsed?.tags["display-name"]).toBe("TestUser");
     expect(parsed?.command).toBe("PRIVMSG");
@@ -21,7 +22,8 @@ describe("parseIrcMessage", () => {
 
 describe("normalizeTwitchMessage", () => {
   it("normalizes PRIVMSG into ChatMessage", () => {
-    const line = "@badges=subscriber/3;color=#00FF00;display-name=Cat;id=msg1;tmi-sent-ts=1710000000000 :cat!cat@cat.tmi.twitch.tv PRIVMSG #twitch :meow";
+    const line =
+      "@badges=subscriber/3;color=#00FF00;display-name=Cat;id=msg1;tmi-sent-ts=1710000000000 :cat!cat@cat.tmi.twitch.tv PRIVMSG #twitch :meow";
     const parsed = parseIrcMessage(line);
     const message = parsed ? normalizeTwitchMessage(parsed) : null;
     expect(message?.platform).toBe("twitch");
@@ -59,7 +61,8 @@ describe("normalizeTwitchMessage", () => {
   });
 
   it("normalizes CLEARCHAT ban into a ban event", () => {
-    const line = "@tmi-sent-ts=1710000003000 :tmi.twitch.tv CLEARCHAT #twitch :cat";
+    const line =
+      "@tmi-sent-ts=1710000003000 :tmi.twitch.tv CLEARCHAT #twitch :cat";
     const parsed = parseIrcMessage(line);
     const message = parsed ? normalizeTwitchMessage(parsed) : null;
 

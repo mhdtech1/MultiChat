@@ -9,7 +9,8 @@ export function useAutoScroll() {
   const handleScroll = useCallback(() => {
     const container = containerRef.current;
     if (!container) return;
-    const distance = container.scrollHeight - (container.scrollTop + container.clientHeight);
+    const distance =
+      container.scrollHeight - (container.scrollTop + container.clientHeight);
     setIsAtBottom(distance <= SCROLL_THRESHOLD_PX);
   }, []);
 
@@ -24,6 +25,6 @@ export function useAutoScroll() {
     containerRef,
     isAtBottom,
     handleScroll,
-    scrollToBottom
+    scrollToBottom,
   };
 }
