@@ -267,10 +267,25 @@ export function createAuthSignInHandlers(
         },
         body: tokenParams,
       });
-      const tokens = await fetchJsonOrThrow<KickTokenResponse>(
-        tokenResponse,
-        "Kick token exchange",
-      );
+      let tokens: KickTokenResponse;
+      try {
+        tokens = await fetchJsonOrThrow<KickTokenResponse>(
+          tokenResponse,
+          "Kick token exchange",
+        );
+      } catch (error) {
+        if (!clientSecret) {
+          store.set({
+            kickAccessToken: "",
+            kickRefreshToken: "",
+            kickUsername: "guest",
+            kickGuest: true,
+          });
+          await clearAuthTokens("kick");
+          return store.store;
+        }
+        throw error;
+      }
 
       if (!tokens.access_token) {
         throw new Error("Kick token exchange did not return an access token.");

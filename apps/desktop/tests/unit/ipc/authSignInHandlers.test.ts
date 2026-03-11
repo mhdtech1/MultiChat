@@ -80,6 +80,72 @@ describe("createAuthSignInHandlers", () => {
     ).rejects.toThrow("youtube oauth missing");
   });
 
+  it("falls back to kick guest mode when token exchange fails without a client secret", async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      new Response("bad request", {
+        status: 400,
+      }),
+    );
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    try {
+      const store = createMockSettingsStore({
+        kickClientId: "kick-client",
+        kickClientSecret: "",
+        kickRedirectUri: "http://localhost/kick/callback",
+      });
+      const clearAuthTokens = vi.fn().mockResolvedValue(undefined);
+      const handlers = createAuthSignInHandlers({
+        store: store as never,
+        randomToken: vi
+          .fn()
+          .mockReturnValueOnce("kick-state")
+          .mockReturnValueOnce("kick-verifier"),
+        openAuthInBrowser: vi
+          .fn()
+          .mockResolvedValue(
+            "http://localhost/kick/callback?code=kick-code&state=kick-state",
+          ),
+        fetchJsonOrThrow: async <T,>(response: Response, source: string) => {
+          if (!response.ok) {
+            throw new Error(`${source} request failed (${response.status}).`);
+          }
+          return (await response.json()) as T;
+        },
+        clearAuthTokens,
+        storeAuthTokens: vi.fn().mockResolvedValue(undefined),
+        parseKickUserName: vi.fn(),
+        twitchDefaultRedirectUri: "http://localhost/twitch/callback",
+        twitchScopes: ["chat:read"],
+        twitchScopeVersion: 2,
+        kickDefaultRedirectUri: "http://localhost/kick/callback",
+        kickScopes: ["user:read"],
+        kickScopeVersion: 3,
+        youtubeScopes: ["scope"],
+        youtubeMissingOauthMessage: "youtube oauth missing",
+        assertYouTubeAlphaEnabled: vi.fn(),
+        youtubeConfig: vi.fn().mockReturnValue({
+          clientId: "",
+          clientSecret: "",
+          redirectUri: "http://localhost/youtube/callback",
+        }),
+        saveYouTubeTokens: vi.fn().mockResolvedValue(undefined),
+        youtubeFetchWithAuth: vi.fn(),
+      });
+
+      const result = await handlers[IPC_CHANNELS.AUTH_KICK_SIGN_IN](
+        {} as never,
+        undefined as never,
+      );
+
+      expect(result.kickGuest).toBe(true);
+      expect(result.kickUsername).toBe("guest");
+      expect(clearAuthTokens).toHaveBeenCalledWith("kick");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
 
 describe("createAuthTikTokHandlers", () => {
