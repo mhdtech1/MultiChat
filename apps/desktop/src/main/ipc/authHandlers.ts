@@ -196,10 +196,16 @@ export function createAuthSignInHandlers(
       return store.store;
     },
     [IPC_CHANNELS.AUTH_KICK_SIGN_IN]: async () => {
-      const clientId = store.get("kickClientId")?.trim();
-      const clientSecret = store.get("kickClientSecret")?.trim();
+      const clientId = (
+        process.env.KICK_CLIENT_ID ?? store.get("kickClientId")
+      )?.trim();
+      const clientSecret = (
+        process.env.KICK_CLIENT_SECRET ?? store.get("kickClientSecret")
+      )?.trim();
       const redirectUri =
-        store.get("kickRedirectUri")?.trim() || kickDefaultRedirectUri;
+        (
+          process.env.KICK_REDIRECT_URI ?? store.get("kickRedirectUri")
+        )?.trim() || kickDefaultRedirectUri;
 
       if (!clientId) {
         store.set({

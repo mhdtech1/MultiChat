@@ -1445,8 +1445,11 @@ const getAuthHealthSnapshot = async (): Promise<AuthHealthSnapshot> => {
 };
 
 const refreshKickAccessToken = async (): Promise<string> => {
-  const clientId = store.get("kickClientId")?.trim() ?? "";
-  const clientSecret = store.get("kickClientSecret")?.trim() ?? "";
+  const clientId =
+    (process.env.KICK_CLIENT_ID ?? store.get("kickClientId"))?.trim() ?? "";
+  const clientSecret =
+    (process.env.KICK_CLIENT_SECRET ?? store.get("kickClientSecret"))?.trim() ??
+    "";
   const refreshToken = store.get("kickRefreshToken")?.trim() ?? "";
   if (!clientId || !refreshToken) {
     throw new Error(KICK_REAUTH_REQUIRED_MESSAGE);

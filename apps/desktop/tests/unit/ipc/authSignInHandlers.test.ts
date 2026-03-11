@@ -146,6 +146,113 @@ describe("createAuthSignInHandlers", () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  it("prioritizes KICK env credentials over stored kick settings", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalKickClientId = process.env.KICK_CLIENT_ID;
+    const originalKickClientSecret = process.env.KICK_CLIENT_SECRET;
+    const originalKickRedirectUri = process.env.KICK_REDIRECT_URI;
+    process.env.KICK_CLIENT_ID = "env-kick-client";
+    process.env.KICK_CLIENT_SECRET = "env-kick-secret";
+    process.env.KICK_REDIRECT_URI = "http://localhost/env-kick-callback";
+
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ access_token: "env-access", refresh_token: "env-refresh" }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: [{ username: "env-user" }] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    try {
+      const store = createMockSettingsStore({
+        kickClientId: "stored-kick-client",
+        kickClientSecret: "stored-kick-secret",
+        kickRedirectUri: "http://localhost/stored-kick-callback",
+      });
+
+      const handlers = createAuthSignInHandlers({
+        store: store as never,
+        randomToken: vi
+          .fn()
+          .mockReturnValueOnce("kick-state")
+          .mockReturnValueOnce("kick-verifier"),
+        openAuthInBrowser: vi
+          .fn()
+          .mockResolvedValue(
+            "http://localhost/env-kick-callback?code=kick-code&state=kick-state",
+          ),
+        fetchJsonOrThrow: async <T,>(response: Response, source: string) => {
+          const text = await response.text();
+          const parsed = text ? JSON.parse(text) : {};
+          if (!response.ok) {
+            throw new Error(`${source} request failed (${response.status}).`);
+          }
+          return parsed as T;
+        },
+        clearAuthTokens: vi.fn().mockResolvedValue(undefined),
+        storeAuthTokens: vi.fn().mockResolvedValue(undefined),
+        parseKickUserName: vi.fn().mockReturnValue("env-user"),
+        twitchDefaultRedirectUri: "http://localhost/twitch/callback",
+        twitchScopes: ["chat:read"],
+        twitchScopeVersion: 2,
+        kickDefaultRedirectUri: "http://localhost/kick/callback",
+        kickScopes: ["user:read"],
+        kickScopeVersion: 3,
+        youtubeScopes: ["scope"],
+        youtubeMissingOauthMessage: "youtube oauth missing",
+        assertYouTubeAlphaEnabled: vi.fn(),
+        youtubeConfig: vi.fn().mockReturnValue({
+          clientId: "",
+          clientSecret: "",
+          redirectUri: "http://localhost/youtube/callback",
+        }),
+        saveYouTubeTokens: vi.fn().mockResolvedValue(undefined),
+        youtubeFetchWithAuth: vi.fn(),
+      });
+
+      await handlers[IPC_CHANNELS.AUTH_KICK_SIGN_IN](
+        {} as never,
+        undefined as never,
+      );
+
+      const tokenRequestBody = fetchMock.mock.calls[0]?.[1]
+        ?.body as URLSearchParams;
+      expect(tokenRequestBody.get("client_id")).toBe("env-kick-client");
+      expect(tokenRequestBody.get("client_secret")).toBe("env-kick-secret");
+      expect(tokenRequestBody.get("redirect_uri")).toBe(
+        "http://localhost/env-kick-callback",
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+      if (typeof originalKickClientId === "undefined") {
+        delete process.env.KICK_CLIENT_ID;
+      } else {
+        process.env.KICK_CLIENT_ID = originalKickClientId;
+      }
+      if (typeof originalKickClientSecret === "undefined") {
+        delete process.env.KICK_CLIENT_SECRET;
+      } else {
+        process.env.KICK_CLIENT_SECRET = originalKickClientSecret;
+      }
+      if (typeof originalKickRedirectUri === "undefined") {
+        delete process.env.KICK_REDIRECT_URI;
+      } else {
+        process.env.KICK_REDIRECT_URI = originalKickRedirectUri;
+      }
+    }
+  });
 });
 
 describe("createAuthTikTokHandlers", () => {
