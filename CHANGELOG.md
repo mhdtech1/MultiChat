@@ -2,6 +2,12 @@
 
 All notable changes to Chatrix are documented here.
 
+## [1.0.4] – 2026-03-17
+
+### Added
+
+- **Rebrand announcement** – Added a startup popup announcing the move to Chatrix, with local dismissal persistence so existing users see the rename without being blocked on every launch.
+
 ## [1.0.2] – 2026-03-07
 
 ### Fixed

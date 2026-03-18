@@ -1386,6 +1386,8 @@ const COMPOSER_COUNTER_DANGER_THRESHOLD = 485;
 const AUTO_RESUME_NEWEST_AFTER_MS = 15_000;
 const TIKTOK_OFFLINE_RETRY_MS = 2 * 60 * 1000;
 const SETUP_WIZARD_VERSION = 2;
+const REBRAND_ANNOUNCEMENT_STORAGE_KEY =
+  "chatrix:rebrand-announcement:dismissed:v1";
 const RECENT_CHAT_HISTORY_STORAGE_KEY = "chatrix:recent-history:v1";
 const LEGACY_RECENT_CHAT_HISTORY_STORAGE_KEY = "multichat:recent-history:v1";
 const RECENT_CHAT_LOOKBACK_MS = 60 * 60 * 1000;
@@ -2428,6 +2430,7 @@ const MainApp: React.FC = () => {
   const authHealthBusy = useAuthStore((state) => state.authHealthBusy);
   const setAuthHealthBusy = useAuthStore((state) => state.setAuthHealthBusy);
   const [readOnlyGuideMode, setReadOnlyGuideMode] = useState(false);
+  const [rebrandAnnouncementOpen, setRebrandAnnouncementOpen] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({
     state: "idle",
     message: "",
@@ -2713,6 +2716,26 @@ const MainApp: React.FC = () => {
       theme === "light" ? "light" : "dark",
     );
   }, [theme]);
+
+  useEffect(() => {
+    try {
+      const dismissed = window.localStorage.getItem(
+        REBRAND_ANNOUNCEMENT_STORAGE_KEY,
+      );
+      setRebrandAnnouncementOpen(!dismissed);
+    } catch {
+      setRebrandAnnouncementOpen(true);
+    }
+  }, []);
+
+  const dismissRebrandAnnouncement = useCallback(() => {
+    setRebrandAnnouncementOpen(false);
+    try {
+      window.localStorage.setItem(REBRAND_ANNOUNCEMENT_STORAGE_KEY, "true");
+    } catch {
+      // Ignore storage failures and just close the popup for this session.
+    }
+  }, []);
 
   useEffect(() => {
     if (!authMessage) return;
@@ -10016,6 +10039,63 @@ const MainApp: React.FC = () => {
                   </div>
                 ))
               )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {rebrandAnnouncementOpen ? (
+        <div className="guide-overlay rebrand-overlay">
+          <div
+            className="guide-modal rebrand-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Chatrix rebrand announcement"
+          >
+            <div className="guide-header">
+              <div>
+                <strong>We are rebranding to Chatrix!</strong>
+                <span>Same app, new name.</span>
+              </div>
+              <button
+                type="button"
+                className="ghost"
+                onClick={dismissRebrandAnnouncement}
+              >
+                Close
+              </button>
+            </div>
+            <div className="guide-body">
+              <div className="guide-section">
+                <h3>What is changing</h3>
+                <p>
+                  MultiChat is becoming <strong>Chatrix</strong>. Your tabs,
+                  settings, and saved chat history stay with you.
+                </p>
+              </div>
+              <div className="guide-section">
+                <h3>What stays the same</h3>
+                <ul>
+                  <li>All your connected platforms and layouts still work.</li>
+                  <li>Existing local settings and secure auth storage migrate automatically.</li>
+                  <li>The current GitHub repo and release flow remain live while the rename rolls out.</li>
+                </ul>
+              </div>
+            </div>
+            <div className="guide-footer">
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => {
+                  dismissRebrandAnnouncement();
+                  setQuickTourOpen(true);
+                }}
+              >
+                Open Quick Tour
+              </button>
+              <button type="button" onClick={dismissRebrandAnnouncement}>
+                Continue to Chatrix
+              </button>
             </div>
           </div>
         </div>

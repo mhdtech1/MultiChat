@@ -1680,6 +1680,14 @@ select {
   width: min(840px, 100%);
 }
 
+.rebrand-overlay {
+  z-index: 34;
+}
+
+.rebrand-modal {
+  width: min(560px, 100%);
+}
+
 .guide-header {
   display: flex;
   align-items: center;
