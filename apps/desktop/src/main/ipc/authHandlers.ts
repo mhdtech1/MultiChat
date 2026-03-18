@@ -170,11 +170,14 @@ export function createAuthSignInHandlers(
         throw new Error("Twitch did not return an access token.");
       }
 
-      const validateResponse = await fetch("https://id.twitch.tv/oauth2/validate", {
-        headers: {
-          Authorization: `OAuth ${accessToken}`,
+      const validateResponse = await fetch(
+        "https://id.twitch.tv/oauth2/validate",
+        {
+          headers: {
+            Authorization: `OAuth ${accessToken}`,
+          },
         },
-      });
+      );
       const validated = await fetchJsonOrThrow<TwitchValidateResponse>(
         validateResponse,
         "Twitch token validation",

@@ -2828,7 +2828,10 @@ const connectTikTokChannel = async (channel: string) => {
   });
 
   try {
-    const state = (await connection.connect()) as Record<string, unknown> | null;
+    const state = (await connection.connect()) as Record<
+      string,
+      unknown
+    > | null;
     const roomId = asString(asUnknownRecord(state)?.roomId).trim();
     if (roomId) {
       record.roomId = roomId;
@@ -2848,7 +2851,9 @@ const connectTikTokChannel = async (channel: string) => {
       error: text,
     });
     if (isLikelyTikTokOfflineError(text)) {
-      throw new Error(`TikTok channel @${normalizedChannel} is offline right now.`);
+      throw new Error(
+        `TikTok channel @${normalizedChannel} is offline right now.`,
+      );
     }
     throw new Error(`TikTok connect failed: ${text}`);
   }

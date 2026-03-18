@@ -2493,7 +2493,9 @@ const MainApp: React.FC = () => {
     Record<string, ChatMessage[]>
   >({});
   const statusBySource = useConnectionStore((state) => state.statusBySource);
-  const setStatusBySource = useConnectionStore((state) => state.setStatusBySource);
+  const setStatusBySource = useConnectionStore(
+    (state) => state.setStatusBySource,
+  );
   const moderatorBySource = useConnectionStore(
     (state) => state.moderatorBySource,
   );
@@ -10077,8 +10079,14 @@ const MainApp: React.FC = () => {
                 <h3>What stays the same</h3>
                 <ul>
                   <li>All your connected platforms and layouts still work.</li>
-                  <li>Existing local settings and secure auth storage migrate automatically.</li>
-                  <li>The current GitHub repo and release flow remain live while the rename rolls out.</li>
+                  <li>
+                    Existing local settings and secure auth storage migrate
+                    automatically.
+                  </li>
+                  <li>
+                    The current GitHub repo and release flow remain live while
+                    the rename rolls out.
+                  </li>
                 </ul>
               </div>
             </div>

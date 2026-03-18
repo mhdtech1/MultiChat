@@ -44,7 +44,10 @@ class KeytarSecureStorage implements SecureStorageService {
         for (const serviceName of [SERVICE_NAME, ...LEGACY_SERVICE_NAMES]) {
           const credentials = await keytar.findCredentials(serviceName);
           for (const credential of credentials) {
-            if (!this.cache.has(credential.account) || serviceName === SERVICE_NAME) {
+            if (
+              !this.cache.has(credential.account) ||
+              serviceName === SERVICE_NAME
+            ) {
               this.cache.set(credential.account, credential.password);
             }
           }
@@ -68,7 +71,9 @@ class KeytarSecureStorage implements SecureStorageService {
     if (cached === normalized) return;
     await keytar.setPassword(SERVICE_NAME, account, normalized);
     for (const legacyServiceName of LEGACY_SERVICE_NAMES) {
-      await keytar.deletePassword(legacyServiceName, account).catch(() => false);
+      await keytar
+        .deletePassword(legacyServiceName, account)
+        .catch(() => false);
     }
     this.cache.set(account, normalized);
   }

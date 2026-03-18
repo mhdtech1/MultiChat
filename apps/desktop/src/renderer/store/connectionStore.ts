@@ -19,7 +19,9 @@ type ConnectionStoreState = {
   setConnectionHealthBySource: (
     updater: Updater<Record<string, ConnectionHealthState>>,
   ) => void;
-  setStatusBySource: (updater: Updater<Record<string, ChatAdapterStatus>>) => void;
+  setStatusBySource: (
+    updater: Updater<Record<string, ChatAdapterStatus>>,
+  ) => void;
   setModeratorBySource: (updater: Updater<Record<string, boolean>>) => void;
   resetConnectionState: () => void;
 };

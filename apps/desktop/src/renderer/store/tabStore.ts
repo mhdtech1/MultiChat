@@ -41,4 +41,3 @@ export const useTabStore = create<TabStoreState>((set) => ({
       activeTabId: "",
     }),
 }));
-

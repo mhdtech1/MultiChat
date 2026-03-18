@@ -25,7 +25,9 @@ const migrateLegacyRendererSettings = () => {
   try {
     const current = window.localStorage.getItem(RENDERER_SETTINGS_STORAGE_KEY);
     if (current) return;
-    const legacy = window.localStorage.getItem(LEGACY_RENDERER_SETTINGS_STORAGE_KEY);
+    const legacy = window.localStorage.getItem(
+      LEGACY_RENDERER_SETTINGS_STORAGE_KEY,
+    );
     if (!legacy) return;
     window.localStorage.setItem(RENDERER_SETTINGS_STORAGE_KEY, legacy);
   } catch {
