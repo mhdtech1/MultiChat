@@ -1,4 +1,4 @@
-import type { ChatMessage } from "@multichat/chat-core";
+import type { ChatMessage } from "@chatrix/chat-core";
 import { Composer } from "../components/Composer";
 import { MessageList } from "../components/MessageList";
 import { TabBar } from "../components/TabBar";

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { ChatMessage } from "@multichat/chat-core";
+import type { ChatMessage } from "@chatrix/chat-core";
 import { PlatformIcon } from "../common/PlatformIcon";
 import { RoleBadge, type RoleType } from "../common/RoleBadge";
 

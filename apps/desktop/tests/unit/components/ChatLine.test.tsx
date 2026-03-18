@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import type { ChatMessage } from "@multichat/chat-core";
+import type { ChatMessage } from "@chatrix/chat-core";
 import { ChatLine } from "../../../src/renderer/ui/components/MessageList/ChatLine";
 
 const mockMessage: ChatMessage = {

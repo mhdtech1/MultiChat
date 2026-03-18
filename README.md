@@ -1,30 +1,30 @@
-# MultiChat (Desktop)
+# Chatrix (Desktop)
 
 Creator-facing and viewer-facing multi-chat desktop app built with Electron + Vite + React + TypeScript.
 
 ## Download Installers
 
-- macOS (DMG): [Download MultiChat for macOS](https://github.com/mhdtech1/MultiChat/releases/latest/download/MultiChat-mac.dmg)
-- Windows (EXE): [Download MultiChat for Windows](https://github.com/mhdtech1/MultiChat/releases/latest/download/MultiChat-win.exe)
+- macOS (DMG): [Download Chatrix for macOS](https://github.com/mhdtech1/MultiChat/releases/latest/download/Chatrix-mac.dmg)
+- Windows (EXE): [Download Chatrix for Windows](https://github.com/mhdtech1/MultiChat/releases/latest/download/Chatrix-win.exe)
 
 ## macOS Gatekeeper Warning (Current)
 
 If macOS says:
 
-`Apple could not verify “MultiChat” is free of malware...`
+`Apple could not verify “Chatrix” is free of malware...`
 
 that means the app is not yet signed + notarized with Apple Developer ID in release CI.
 
 Temporary open steps:
 
-1. Open the DMG and drag `MultiChat.app` to `Applications`.
-2. In `Applications`, right-click `MultiChat.app` and click `Open`.
+1. Open the DMG and drag `Chatrix.app` to `Applications`.
+2. In `Applications`, right-click `Chatrix.app` and click `Open`.
 3. Click `Open` again in the security prompt.
 
 If that prompt does not appear:
 
 1. Open `System Settings -> Privacy & Security`.
-2. Find the blocked MultiChat item and click `Open Anyway`.
+2. Find the blocked Chatrix item and click `Open Anyway`.
 
 Permanent fix (in progress):
 
@@ -104,7 +104,7 @@ pnpm build:mac
 
 This creates a single installer file at:
 
-- `apps/desktop/dist/MultiChat-mac-<version>.dmg`
+- `apps/desktop/dist/Chatrix-mac-<version>.dmg`
 
 ### Recreate Mac Build From Scratch
 
@@ -123,7 +123,7 @@ To build for each OS, run the build command on that OS or use CI runners for mac
 
 ### Updates
 
-Auto-updates are configured through GitHub Releases (`mhdtech1/MultiChat`).
+Auto-updates are configured through the current GitHub Releases repo (`mhdtech1/MultiChat`).
 After publishing a newer release, the app downloads it in the background and applies it on app restart.
 
 ### Windows Code Signing (GitHub Actions)

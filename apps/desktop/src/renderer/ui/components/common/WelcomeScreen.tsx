@@ -18,7 +18,7 @@ export function WelcomeScreen({
             <span className="welcome-screen__logo-icon">💬</span>
           </div>
           <h1 className="welcome-screen__title">
-            Welcome to <span className="welcome-screen__brand">MultiChat</span>
+            Welcome to <span className="welcome-screen__brand">Chatrix</span>
           </h1>
           <p className="welcome-screen__subtitle">
             One chat to rule them all. Connect Twitch, Kick, YouTube, and TikTok

@@ -10,7 +10,7 @@ export function TopBar({ onAddChannel, onOpenSettings }: TopBarProps) {
         <div className="top-bar__logo" aria-hidden="true">
           💬
         </div>
-        <h1 className="top-bar__title">MultiChat</h1>
+        <h1 className="top-bar__title">Chatrix</h1>
       </div>
       <div className="top-bar__actions">
         <button

@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { ChatMessage } from "@multichat/chat-core";
+import type { ChatMessage } from "@chatrix/chat-core";
 
 type SettingsState = {
   showTimestamps: boolean;
@@ -16,8 +16,24 @@ type ChatState = {
   clearMessages: () => void;
 };
 
-const RENDERER_SETTINGS_STORAGE_KEY = "multichat:renderer-settings";
+const RENDERER_SETTINGS_STORAGE_KEY = "chatrix:renderer-settings";
+const LEGACY_RENDERER_SETTINGS_STORAGE_KEY = "multichat:renderer-settings";
 const CHAT_STORE_MAX_MESSAGES = 1000;
+
+const migrateLegacyRendererSettings = () => {
+  if (typeof window === "undefined") return;
+  try {
+    const current = window.localStorage.getItem(RENDERER_SETTINGS_STORAGE_KEY);
+    if (current) return;
+    const legacy = window.localStorage.getItem(LEGACY_RENDERER_SETTINGS_STORAGE_KEY);
+    if (!legacy) return;
+    window.localStorage.setItem(RENDERER_SETTINGS_STORAGE_KEY, legacy);
+  } catch {
+    // Best-effort only. Missing localStorage access should not break startup.
+  }
+};
+
+migrateLegacyRendererSettings();
 
 const clampMessages = (messages: ChatMessage[]) =>
   messages.length > CHAT_STORE_MAX_MESSAGES

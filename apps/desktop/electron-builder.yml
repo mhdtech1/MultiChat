@@ -1,12 +1,12 @@
-appId: com.multichat.desktop
-productName: MultiChat
+appId: com.chatrix.desktop
+productName: Chatrix
 afterPack: ../../scripts/after-pack-prune-locales.cjs
 files:
   - dist/main/**
   - dist/shared/**
   - dist/preload/**
   - dist/renderer/**
-  - node_modules/@multichat/**
+  - node_modules/@chatrix/**
   - package.json
   - from: ../../node_modules
     to: node_modules

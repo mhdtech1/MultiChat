@@ -10,7 +10,7 @@ importers:
 
   apps/desktop:
     dependencies:
-      '@multichat/chat-core':
+      '@chatrix/chat-core':
         specifier: workspace:*
         version: link:../../packages/chat-core
       '@tanstack/react-virtual':

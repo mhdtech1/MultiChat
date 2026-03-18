@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ChatAdapterStatus } from "@multichat/chat-core";
+import type { ChatAdapterStatus } from "@chatrix/chat-core";
 
 type Updater<T> = T | ((previous: T) => T);
 

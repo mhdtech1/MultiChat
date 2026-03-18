@@ -1,5 +1,5 @@
 {
-  "name": "@multichat/desktop",
+  "name": "@chatrix/desktop",
   "version": "1.0.3",
   "private": true,
   "type": "module",
@@ -21,7 +21,7 @@
     "format": "prettier --check \"src/**/*.{ts,tsx,css,html}\""
   },
   "dependencies": {
-    "@multichat/chat-core": "workspace:*",
+    "@chatrix/chat-core": "workspace:*",
     "@tanstack/react-virtual": "^3.13.19",
     "argparse": "^2.0.1",
     "builder-util-runtime": "9.5.1",

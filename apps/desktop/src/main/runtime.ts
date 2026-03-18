@@ -63,7 +63,7 @@ const DEV_UPDATE_MESSAGE =
   "Auto updates are available in packaged builds only.";
 const DEFAULT_UPDATE_MESSAGE = "Checking for updates shortly...";
 const LEGACY_SIGNATURE_UPDATE_MESSAGE =
-  "Updater could not apply this update due to a legacy app signature. Download and install the latest MultiChat release once from GitHub; future restart updates will then work.";
+  "Updater could not apply this update due to a legacy app signature. Download and install the latest Chatrix release once from GitHub; future restart updates will then work.";
 const KICK_REAUTH_REQUIRED_MESSAGE =
   "Kick session expired. Sign in to Kick again.";
 const YOUTUBE_MISSING_OAUTH_MESSAGE =
@@ -82,7 +82,7 @@ const TIKTOK_SIGN_IN_REQUIRED_MESSAGE =
   "Sign in with TikTok before sending messages.";
 const TIKTOK_SIGN_KEY_REQUIRED_MESSAGE =
   "TikTok sending is not configured in this build.";
-const TIKTOK_AUTH_PARTITION = "persist:multichat-tiktok-auth";
+const TIKTOK_AUTH_PARTITION = "persist:chatrix-tiktok-auth";
 const TIKTOK_AUTH_TIMEOUT_MS = AUTH.TIKTOK_AUTH_TIMEOUT_MS;
 const TIKTOK_LOGIN_URL = "https://www.tiktok.com/login";
 
@@ -255,7 +255,7 @@ const formatUpdaterErrorMessage = (errorText: string) => {
     lower.includes("rename") &&
     lower.includes("updater")
   ) {
-    return "Updater could not replace its pending installer file. Close MultiChat, delete the updater cache folder in %LOCALAPPDATA%, and reopen the app to retry.";
+    return "Updater could not replace its pending installer file. Close Chatrix, delete the updater cache folder in %LOCALAPPDATA%, and reopen the app to retry.";
   }
   if (
     lower.includes("code signature") ||
@@ -2382,7 +2382,7 @@ const resolveKickTargetUserId = async (
   }
 
   throw new Error(
-    "Kick user lookup failed for this username. Ask the user to send a recent message so MultiChat can capture their user ID.",
+    "Kick user lookup failed for this username. Ask the user to send a recent message so Chatrix can capture their user ID.",
   );
 };
 
@@ -2565,7 +2565,7 @@ const moderateYouTube = async (request: ModerationRequest): Promise<void> => {
     const cachedBanId = youtubeBanIdsByTarget.get(cacheKey)?.trim() ?? "";
     if (!cachedBanId) {
       throw new Error(
-        "YouTube unban is only available after MultiChat created that ban in this session.",
+        "YouTube unban is only available after Chatrix created that ban in this session.",
       );
     }
     const endpoint = new URL(
@@ -3029,8 +3029,8 @@ const showHelpGuide = async () => {
     type: "info",
     buttons: ["Close"],
     defaultId: 0,
-    title: "MultiChat Help Guide",
-    message: "How to use MultiChat",
+    title: "Chatrix Help Guide",
+    message: "How to use Chatrix",
     detail: [
       "1. Sign in with Twitch or Kick to unlock full app features and chat sending.",
       "2. You can still open YouTube, TikTok, and Kick chats in read-only mode without login.",
@@ -3059,8 +3059,8 @@ const showAboutApp = async () => {
     type: "info",
     buttons: ["OK"],
     defaultId: 0,
-    title: "About MultiChat",
-    message: `MultiChat v${app.getVersion()}`,
+    title: "About Chatrix",
+    message: `Chatrix v${app.getVersion()}`,
     detail: [
       `Version: ${app.getVersion()}`,
       `Platform: ${process.platform} (${process.arch})`,
@@ -3127,7 +3127,7 @@ const setupAppMenu = () => {
     ...(!isMac
       ? [
           {
-            label: "About MultiChat",
+            label: "About Chatrix",
             click: () => {
               void showAboutApp();
             },
@@ -3149,7 +3149,7 @@ const setupAppMenu = () => {
     },
     { type: "separator" },
     {
-      label: "MultiChat Releases",
+      label: "Chatrix Releases",
       click: () => {
         void shell.openExternal(
           "https://github.com/mhdtech1/MultiChat/releases",
@@ -3216,7 +3216,7 @@ const setupAppMenu = () => {
             { role: "zoom" },
             { type: "separator" },
             {
-              label: "Show MultiChat",
+              label: "Show Chatrix",
               click: () => {
                 revealMainWindow();
               },

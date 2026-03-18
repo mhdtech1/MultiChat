@@ -11,7 +11,7 @@ import type {
   ChatAdapter,
   ChatAdapterStatus,
   ChatMessage,
-} from "@multichat/chat-core";
+} from "@chatrix/chat-core";
 import {
   KickAdapter,
   TikTokAdapter,
@@ -19,7 +19,7 @@ import {
   YouTubeAdapter,
   normalizeTwitchMessage,
   parseIrcMessage,
-} from "@multichat/chat-core";
+} from "@chatrix/chat-core";
 import type {
   AppSettings,
   ChatSource,
@@ -1386,7 +1386,8 @@ const COMPOSER_COUNTER_DANGER_THRESHOLD = 485;
 const AUTO_RESUME_NEWEST_AFTER_MS = 15_000;
 const TIKTOK_OFFLINE_RETRY_MS = 2 * 60 * 1000;
 const SETUP_WIZARD_VERSION = 2;
-const RECENT_CHAT_HISTORY_STORAGE_KEY = "multichat:recent-history:v1";
+const RECENT_CHAT_HISTORY_STORAGE_KEY = "chatrix:recent-history:v1";
+const LEGACY_RECENT_CHAT_HISTORY_STORAGE_KEY = "multichat:recent-history:v1";
 const RECENT_CHAT_LOOKBACK_MS = 60 * 60 * 1000;
 const RECENT_CHAT_MAX_MESSAGES_PER_SOURCE = 4000;
 const RECENT_CHAT_SAVE_DEBOUNCE_MS = 1200;
@@ -1517,7 +1518,9 @@ const pruneRecentHistoryMessages = (
 
 const readRecentHistoryPayload = () => {
   try {
-    const raw = window.localStorage.getItem(RECENT_CHAT_HISTORY_STORAGE_KEY);
+    const raw =
+      window.localStorage.getItem(RECENT_CHAT_HISTORY_STORAGE_KEY) ??
+      window.localStorage.getItem(LEGACY_RECENT_CHAT_HISTORY_STORAGE_KEY);
     if (!raw) return {} as Record<string, ChatMessage[]>;
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== "object")
@@ -3690,7 +3693,7 @@ const MainApp: React.FC = () => {
     updateStatus.state === "downloading" || updateStatus.state === "downloaded";
   const updateLockTitle =
     updateStatus.state === "downloading"
-      ? "Updating MultiChat..."
+      ? "Updating Chatrix..."
       : "Applying Update...";
   const updateLockMessage =
     updateStatus.message || "Please wait while the update completes.";
@@ -5488,7 +5491,7 @@ const MainApp: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `multichat-session-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.json`;
+    a.download = `chatrix-session-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.json`;
     a.click();
     URL.revokeObjectURL(url);
     setAuthMessage("Exported session snapshot.");
@@ -7088,7 +7091,7 @@ const MainApp: React.FC = () => {
       <>
         <div className="login-gate">
           <div className="login-card">
-            <h1>MultiChat</h1>
+            <h1>Chatrix</h1>
             <p>Loading your local profile...</p>
           </div>
         </div>
@@ -7113,7 +7116,7 @@ const MainApp: React.FC = () => {
       <>
         <div className="login-gate">
           <div className="login-card">
-            <h1>MultiChat</h1>
+            <h1>Chatrix</h1>
             <p>Sign in to Twitch or Kick to unlock full app features.</p>
             <div className="login-buttons">
               <button
@@ -7321,7 +7324,7 @@ const MainApp: React.FC = () => {
                 : "Refresh Tab"}
           </button>
           <div className="brand-block">
-            <h1>MultiChat</h1>
+            <h1>Chatrix</h1>
             {isAdvancedMode ? <p>Unified chat desk</p> : null}
           </div>
         </div>
@@ -9123,7 +9126,7 @@ const MainApp: React.FC = () => {
                   ) : null}
                   {activePinnedMessage ? (
                     <div className="quick-mod-panel">
-                      <strong>Pinned (MultiChat)</strong>
+                      <strong>Pinned (Chatrix)</strong>
                       <span className="menu-muted">
                         [{platformIconGlyph(activePinnedMessage.platform)}] #
                         {activePinnedMessage.channel} ·{" "}
@@ -9143,7 +9146,7 @@ const MainApp: React.FC = () => {
                   ) : null}
                   {pollComposerOpen ? (
                     <div className="quick-mod-panel">
-                      <strong>Start Poll (MultiChat)</strong>
+                      <strong>Start Poll (Chatrix)</strong>
                       <input
                         value={pollQuestionDraft}
                         onChange={(event) =>
@@ -9887,7 +9890,7 @@ const MainApp: React.FC = () => {
               type="button"
               onClick={() => void pinMessageForActiveTab(messageMenu.message)}
             >
-              Pin message in MultiChat
+              Pin message in Chatrix
             </button>
           ) : null}
           <strong>Copy</strong>
@@ -10031,7 +10034,7 @@ const MainApp: React.FC = () => {
           >
             <div className="guide-header">
               <div>
-                <strong>Welcome to MultiChat</strong>
+                <strong>Welcome to Chatrix</strong>
                 <span>Step {setupWizardStep + 1} of 3</span>
               </div>
               <button
@@ -10294,7 +10297,7 @@ const MainApp: React.FC = () => {
                     of inactivity, or instantly via Go to latest message.
                   </li>
                   <li>
-                    Right-click a message to pin it in MultiChat for the current
+                    Right-click a message to pin it in Chatrix for the current
                     tab.
                   </li>
                   <li>Use Quick Actions to start local polls per tab.</li>

@@ -191,7 +191,7 @@ export function SettingsPanel({
         {activeTab === "about" ? (
           <div className="settings-panel__section settings-about">
             <div className="settings-about__logo">💬</div>
-            <h3>MultiChat</h3>
+            <h3>Chatrix</h3>
             <p className="text-dim">Version {__APP_VERSION__}</p>
             <p className="text-secondary">
               The unified streaming chat client for Twitch, Kick, YouTube, and

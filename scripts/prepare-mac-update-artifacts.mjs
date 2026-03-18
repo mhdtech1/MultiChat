@@ -7,16 +7,16 @@ import os from "node:os";
 import path from "node:path";
 import yaml from "js-yaml";
 
-const APP_IDENTIFIER = "com.multichat.desktop";
+const APP_IDENTIFIER = "com.chatrix.desktop";
 const desktopDir = process.cwd();
 const desktopPkgPath = path.join(desktopDir, "package.json");
 const builderConfigPath = path.join(desktopDir, "electron-builder.yml");
 const distDir = path.join(desktopDir, "dist");
-const appPath = path.join(distDir, "mac-arm64", "MultiChat.app");
-const zipPath = path.join(distDir, "MultiChat-mac.zip");
-const dmgPath = path.join(distDir, "MultiChat-mac.dmg");
-const zipBlockmapPath = path.join(distDir, "MultiChat-mac.zip.blockmap");
-const dmgBlockmapPath = path.join(distDir, "MultiChat-mac.dmg.blockmap");
+const appPath = path.join(distDir, "mac-arm64", "Chatrix.app");
+const zipPath = path.join(distDir, "Chatrix-mac.zip");
+const dmgPath = path.join(distDir, "Chatrix-mac.dmg");
+const zipBlockmapPath = path.join(distDir, "Chatrix-mac.zip.blockmap");
+const dmgBlockmapPath = path.join(distDir, "Chatrix-mac.dmg.blockmap");
 const ymlPath = path.join(distDir, "latest-mac.yml");
 const stableYmlPath = path.join(distDir, "stable-mac.yml");
 
@@ -59,8 +59,8 @@ const appUpdatePublishConfig = (() => {
   };
 })();
 
-const tempDir = mkdtempSync(path.join(os.tmpdir(), "multichat-mac-release-"));
-const stagedAppPath = path.join(tempDir, "MultiChat.app");
+const tempDir = mkdtempSync(path.join(os.tmpdir(), "chatrix-mac-release-"));
+const stagedAppPath = path.join(tempDir, "Chatrix.app");
 const dmgRootPath = path.join(tempDir, "dmg-root");
 const verifyExtractDir = path.join(tempDir, "verify-extract");
 
@@ -103,9 +103,9 @@ try {
 
   rmSync(dmgPath, { force: true });
   mkdirSync(dmgRootPath, { recursive: true });
-  execFileSync("ditto", [stagedAppPath, path.join(dmgRootPath, "MultiChat.app")], { stdio: "inherit" });
+  execFileSync("ditto", [stagedAppPath, path.join(dmgRootPath, "Chatrix.app")], { stdio: "inherit" });
   symlinkSync("/Applications", path.join(dmgRootPath, "Applications"));
-  execFileSync("hdiutil", ["create", "-volname", "MultiChat", "-srcfolder", dmgRootPath, "-ov", "-format", "UDZO", dmgPath], {
+  execFileSync("hdiutil", ["create", "-volname", "Chatrix", "-srcfolder", dmgRootPath, "-ov", "-format", "UDZO", dmgPath], {
     stdio: "inherit"
   });
 
@@ -117,7 +117,7 @@ try {
   rmSync(verifyExtractDir, { recursive: true, force: true });
   execFileSync("mkdir", ["-p", verifyExtractDir], { stdio: "inherit" });
   execFileSync("ditto", ["-x", "-k", zipPath, verifyExtractDir], { stdio: "inherit" });
-  execFileSync("codesign", ["--verify", "--deep", "--strict", path.join(verifyExtractDir, "MultiChat.app")], {
+  execFileSync("codesign", ["--verify", "--deep", "--strict", path.join(verifyExtractDir, "Chatrix.app")], {
     stdio: "inherit"
   });
 
@@ -129,10 +129,10 @@ try {
   const latestMac = {
     version: appVersion,
     files: [
-      { url: "MultiChat-mac.zip", sha512: zipSha512, size: zipSize },
-      { url: "MultiChat-mac.dmg", sha512: dmgSha512, size: dmgSize }
+      { url: "Chatrix-mac.zip", sha512: zipSha512, size: zipSize },
+      { url: "Chatrix-mac.dmg", sha512: dmgSha512, size: dmgSize }
     ],
-    path: "MultiChat-mac.zip",
+    path: "Chatrix-mac.zip",
     sha512: zipSha512,
     releaseDate: new Date().toISOString()
   };
@@ -140,7 +140,7 @@ try {
   const ymlContent = yaml.dump(latestMac, { lineWidth: -1, noRefs: true });
   writeFileSync(ymlPath, ymlContent, "utf8");
   writeFileSync(stableYmlPath, ymlContent, "utf8");
-  console.log("[mac-update] generated signed MultiChat-mac.zip/.dmg and refreshed latest-mac.yml + stable-mac.yml");
+  console.log("[mac-update] generated signed Chatrix-mac.zip/.dmg and refreshed latest-mac.yml + stable-mac.yml");
 } finally {
   rmSync(tempDir, { recursive: true, force: true });
 }

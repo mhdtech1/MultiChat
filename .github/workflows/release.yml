@@ -32,15 +32,15 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build shared packages
-        run: pnpm --filter @multichat/chat-core build
+        run: pnpm --filter @chatrix/chat-core build
 
       - name: Build desktop app
         run: |
-          pnpm --filter @multichat/desktop build:renderer
-          pnpm --filter @multichat/desktop build:main
+          pnpm --filter @chatrix/desktop build:renderer
+          pnpm --filter @chatrix/desktop build:main
 
       - name: Build and package desktop app
-        run: pnpm --filter @multichat/desktop package:win
+        run: pnpm --filter @chatrix/desktop package:win
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -48,7 +48,7 @@ jobs:
           name: installers-windows
           if-no-files-found: error
           path: |
-            apps/desktop/dist/MultiChat-win*.exe
+            apps/desktop/dist/Chatrix-win*.exe
             apps/desktop/dist/latest*.yml
             apps/desktop/dist/stable*.yml
 
@@ -74,15 +74,15 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build shared packages
-        run: pnpm --filter @multichat/chat-core build
+        run: pnpm --filter @chatrix/chat-core build
 
       - name: Build desktop app
         run: |
-          pnpm --filter @multichat/desktop build:renderer
-          pnpm --filter @multichat/desktop build:main
+          pnpm --filter @chatrix/desktop build:renderer
+          pnpm --filter @chatrix/desktop build:main
 
       - name: Build and package desktop app
-        run: pnpm --filter @multichat/desktop package:mac
+        run: pnpm --filter @chatrix/desktop package:mac
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -90,8 +90,8 @@ jobs:
           name: installers-macos
           if-no-files-found: error
           path: |
-            apps/desktop/dist/MultiChat-mac*.dmg
-            apps/desktop/dist/MultiChat-mac*.zip
+            apps/desktop/dist/Chatrix-mac*.dmg
+            apps/desktop/dist/Chatrix-mac*.zip
             apps/desktop/dist/latest-mac*.yml
             apps/desktop/dist/stable-mac*.yml
 

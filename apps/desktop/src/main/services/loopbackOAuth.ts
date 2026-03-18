@@ -38,7 +38,7 @@ const authCompletePage = `
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>MultiChat Sign-In Complete</title>
+    <title>Chatrix Sign-In Complete</title>
     <style>
       body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; background: #0f172a; color: #e2e8f0; display: grid; place-items: center; min-height: 100vh; }
       .card { max-width: 540px; padding: 24px; border: 1px solid #334155; border-radius: 12px; background: #111827; }
@@ -48,7 +48,7 @@ const authCompletePage = `
   </head>
   <body>
     <main class="card">
-      <h1>Returning to MultiChat</h1>
+      <h1>Returning to Chatrix</h1>
       <p>This tab will close automatically. If it stays open, you can close it manually.</p>
     </main>
     <script>

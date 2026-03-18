@@ -16,7 +16,7 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      "@multichat/chat-core": path.join(__dirname, "../../packages/chat-core/src/index.ts")
+      "@chatrix/chat-core": path.join(__dirname, "../../packages/chat-core/src/index.ts")
     }
   },
   build: {

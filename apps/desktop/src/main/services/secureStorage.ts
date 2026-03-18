@@ -1,7 +1,8 @@
 import keytar from "keytar";
 import type { AppSettings } from "../../shared/types.js";
 
-const SERVICE_NAME = "MultiChat";
+const SERVICE_NAME = "Chatrix";
+const LEGACY_SERVICE_NAMES = ["MultiChat"];
 
 type TokenPlatform = "twitch" | "kick" | "youtube";
 type TokenKeys = { access: keyof AppSettings; refresh?: keyof AppSettings };
@@ -39,10 +40,14 @@ class KeytarSecureStorage implements SecureStorageService {
     if (this.cacheLoaded) return;
     if (!this.cacheLoadPromise) {
       this.cacheLoadPromise = (async () => {
-        const credentials = await keytar.findCredentials(SERVICE_NAME);
         this.cache.clear();
-        for (const credential of credentials) {
-          this.cache.set(credential.account, credential.password);
+        for (const serviceName of [SERVICE_NAME, ...LEGACY_SERVICE_NAMES]) {
+          const credentials = await keytar.findCredentials(serviceName);
+          for (const credential of credentials) {
+            if (!this.cache.has(credential.account) || serviceName === SERVICE_NAME) {
+              this.cache.set(credential.account, credential.password);
+            }
+          }
         }
         this.cacheLoaded = true;
       })().finally(() => {
@@ -62,6 +67,9 @@ class KeytarSecureStorage implements SecureStorageService {
     const cached = this.cache.get(account);
     if (cached === normalized) return;
     await keytar.setPassword(SERVICE_NAME, account, normalized);
+    for (const legacyServiceName of LEGACY_SERVICE_NAMES) {
+      await keytar.deletePassword(legacyServiceName, account).catch(() => false);
+    }
     this.cache.set(account, normalized);
   }
 
@@ -81,9 +89,14 @@ class KeytarSecureStorage implements SecureStorageService {
       this.cache.set(account, null);
       return false;
     }
-    const deleted = await keytar.deletePassword(SERVICE_NAME, account);
+    const deletedResults = await Promise.all([
+      keytar.deletePassword(SERVICE_NAME, account),
+      ...LEGACY_SERVICE_NAMES.map((legacyServiceName) =>
+        keytar.deletePassword(legacyServiceName, account).catch(() => false),
+      ),
+    ]);
     this.cache.set(account, null);
-    return deleted;
+    return deletedResults.some(Boolean);
   }
 
   async getAllAccounts(): Promise<string[]> {

@@ -1,4 +1,4 @@
-import type { ChatMessage } from "@multichat/chat-core";
+import type { ChatMessage } from "@chatrix/chat-core";
 import { useSettingsStore } from "../../../store";
 import { ChatLine } from "./ChatLine";
 import { WelcomeScreen } from "../common/WelcomeScreen";

@@ -8,7 +8,7 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..");
 const appDir = path.join(repoRoot, "apps", "desktop");
 
-execSync("pnpm --filter @multichat/desktop build:main", { stdio: "inherit", cwd: repoRoot });
+execSync("pnpm --filter @chatrix/desktop build:main", { stdio: "inherit", cwd: repoRoot });
 
 const require = createRequire(path.join(appDir, "package.json"));
 const electronPath = require("electron");
