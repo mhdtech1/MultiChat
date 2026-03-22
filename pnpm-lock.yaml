@@ -138,6 +138,24 @@ importers:
         specifier: ^2.0.5
         version: 2.1.9(@types/node@20.19.32)(jsdom@28.1.0)(lightningcss@1.31.1)(terser@5.46.0)
 
+  apps/kick-broker:
+    devDependencies:
+      '@types/node':
+        specifier: ^20.14.10
+        version: 20.19.32
+      prettier:
+        specifier: ^3.3.3
+        version: 3.8.1
+      tsx:
+        specifier: ^4.16.2
+        version: 4.21.0
+      typescript:
+        specifier: ^5.5.4
+        version: 5.9.3
+      vitest:
+        specifier: ^2.0.5
+        version: 2.1.9(@types/node@20.19.32)(jsdom@28.1.0)(lightningcss@1.31.1)(terser@5.46.0)
+
   packages/chat-core:
     dependencies:
       eventemitter3:
