@@ -29,13 +29,16 @@ import type {
 import { JsonSettingsStore } from "./services/settingsStore.js";
 import {
   clearAuthTokens,
+  getOAuthClientSecret,
   hydrateTokenStateFromSecureStorage,
   migrateLegacySettingsTokens,
+  storeOAuthClientSecret,
   storeAuthTokens,
 } from "./services/secureStorage.js";
 import { openAuthInBrowser as openLoopbackAuthInBrowser } from "./services/loopbackOAuth.js";
 import { fetchJsonOrThrow } from "./utils/http.js";
 import { registerIpcHandlers } from "./ipc/handlers.js";
+import { cleanupLegacyInstallArtifacts } from "./services/legacyInstallCleanup.js";
 import {
   createAuthHealthHandlers,
   createAuthSignInHandlers,
@@ -66,6 +69,8 @@ const LEGACY_SIGNATURE_UPDATE_MESSAGE =
   "Updater could not apply this update due to a legacy app signature. Download and install the latest Chatrix release once from GitHub; future restart updates will then work.";
 const KICK_REAUTH_REQUIRED_MESSAGE =
   "Kick session expired. Sign in to Kick again.";
+const KICK_WRITE_AUTH_UNAVAILABLE_MESSAGE =
+  "Kick sign-in is temporarily unavailable. You can still open Kick chats in read-only mode.";
 const YOUTUBE_MISSING_OAUTH_MESSAGE =
   "YouTube sign-in is not configured in this build. Configure a YouTube OAuth Client ID (secret optional) and try again.";
 const YOUTUBE_READONLY_UNAVAILABLE_MESSAGE =
@@ -102,6 +107,10 @@ const YOUTUBE_DEFAULT_REDIRECT_URI = "http://localhost:51730/youtube/callback";
 const TWITCH_MANAGED_CLIENT_ID = "syeui9mom7i5f9060j03tydgpdywbh";
 const KICK_MANAGED_CLIENT_ID = "01KGRFF03VYRJMB3W4369Y07CS";
 const KICK_MANAGED_CLIENT_SECRET = "";
+const KICK_MANAGED_BROKER_EXCHANGE_URL =
+  "https://kick-broker.onrender.com/kick/exchange";
+const KICK_MANAGED_BROKER_REFRESH_URL =
+  "https://kick-broker.onrender.com/kick/refresh";
 const YOUTUBE_MANAGED_CLIENT_ID =
   "1008732662207-rufcsa7rafob02h29docduk7pboim0s8.apps.googleusercontent.com";
 const YOUTUBE_MANAGED_CLIENT_SECRET = "";
@@ -132,6 +141,62 @@ const randomToken = (bytes = 32) =>
   crypto.randomBytes(bytes).toString("base64url");
 
 const AUTH_CALLBACK_TIMEOUT_MS = AUTH.OAUTH_CALLBACK_TIMEOUT_MS;
+
+const resolveManagedClientSecret = async (
+  platform: "kick" | "youtube",
+  envValue: string | undefined,
+  managedValue: string,
+) => {
+  const configured = (envValue ?? managedValue).trim();
+  if (configured) return configured;
+  return (await getOAuthClientSecret(platform))?.trim() ?? "";
+};
+
+const getKickClientSecret = () =>
+  resolveManagedClientSecret(
+    "kick",
+    process.env.KICK_CLIENT_SECRET,
+    KICK_MANAGED_CLIENT_SECRET,
+  );
+
+const getYouTubeClientSecret = () =>
+  resolveManagedClientSecret(
+    "youtube",
+    process.env.YOUTUBE_CLIENT_SECRET,
+    YOUTUBE_MANAGED_CLIENT_SECRET,
+  );
+
+type KickTokenBrokerConfig = {
+  exchangeUrl: string;
+  refreshUrl: string;
+};
+
+const normalizeOptionalHttpUrl = (value: string | undefined): string => {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) return "";
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return "";
+    }
+    return parsed.toString();
+  } catch {
+    return "";
+  }
+};
+
+const getKickTokenBrokerConfig = (): KickTokenBrokerConfig | null => {
+  const exchangeUrl =
+    normalizeOptionalHttpUrl(process.env.KICK_TOKEN_BROKER_EXCHANGE_URL) ||
+    KICK_MANAGED_BROKER_EXCHANGE_URL;
+  const refreshUrl =
+    normalizeOptionalHttpUrl(process.env.KICK_TOKEN_BROKER_REFRESH_URL) ||
+    KICK_MANAGED_BROKER_REFRESH_URL;
+  if (!exchangeUrl || !refreshUrl) {
+    return null;
+  }
+  return { exchangeUrl, refreshUrl };
+};
 
 function bringAppToFrontAfterOAuth() {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -244,6 +309,44 @@ const hydrateAccountIdentityFromStoredTokens = async (
 
   if (Object.keys(updates).length > 0) {
     settingsStore.set(updates);
+  }
+};
+
+const migrateLegacyOAuthClientSecretsFromSettings = async (
+  settingsStore: JsonSettingsStore,
+) => {
+  const rawState = settingsStore.store as Record<string, unknown>;
+  const legacyKickClientSecret =
+    typeof rawState.kickClientSecret === "string"
+      ? rawState.kickClientSecret.trim()
+      : "";
+  const legacyYouTubeClientSecret =
+    typeof rawState.youtubeClientSecret === "string"
+      ? rawState.youtubeClientSecret.trim()
+      : "";
+
+  if (
+    legacyKickClientSecret &&
+    !(process.env.KICK_CLIENT_SECRET ?? KICK_MANAGED_CLIENT_SECRET).trim()
+  ) {
+    const existingKickClientSecret = await getOAuthClientSecret("kick");
+    if (!existingKickClientSecret?.trim()) {
+      await storeOAuthClientSecret("kick", legacyKickClientSecret);
+    }
+  }
+
+  if (
+    legacyYouTubeClientSecret &&
+    !(process.env.YOUTUBE_CLIENT_SECRET ?? YOUTUBE_MANAGED_CLIENT_SECRET).trim()
+  ) {
+    const existingYouTubeClientSecret = await getOAuthClientSecret("youtube");
+    if (!existingYouTubeClientSecret?.trim()) {
+      await storeOAuthClientSecret("youtube", legacyYouTubeClientSecret);
+    }
+  }
+
+  if (legacyKickClientSecret || legacyYouTubeClientSecret) {
+    settingsStore.removeKeys(["kickClientSecret", "youtubeClientSecret"]);
   }
 };
 
@@ -1294,9 +1397,9 @@ const fetchYouTubeWebLiveMessages = async (payload: {
   };
 };
 
-const youtubeConfig = () => ({
+const youtubeConfig = async () => ({
   clientId: store.get("youtubeClientId")?.trim() ?? "",
-  clientSecret: store.get("youtubeClientSecret")?.trim() ?? "",
+  clientSecret: await getYouTubeClientSecret(),
   redirectUri:
     store.get("youtubeRedirectUri")?.trim() || YOUTUBE_DEFAULT_REDIRECT_URI,
 });
@@ -1321,6 +1424,7 @@ const testTwitchPermissions = async (): Promise<AuthPermissionSnapshot> => {
   const now = Date.now();
   const token = store.get("twitchToken")?.trim() ?? "";
   const username = store.get("twitchUsername")?.trim() ?? "";
+  const authConfigured = Boolean(store.get("twitchClientId")?.trim());
   const signedIn = token.length > 0;
   if (!signedIn) {
     return {
@@ -1329,6 +1433,8 @@ const testTwitchPermissions = async (): Promise<AuthPermissionSnapshot> => {
       username,
       canSend: false,
       canModerate: false,
+      authConfigured,
+      readOnlyAvailable: true,
       tokenExpiry: null,
       lastCheckedAt: now,
     };
@@ -1362,6 +1468,8 @@ const testTwitchPermissions = async (): Promise<AuthPermissionSnapshot> => {
       canModerate:
         scopes.has("moderator:manage:banned_users") &&
         scopes.has("moderator:manage:chat_messages"),
+      authConfigured,
+      readOnlyAvailable: true,
       tokenExpiry: expiresIn > 0 ? now + expiresIn * 1000 : null,
       lastCheckedAt: now,
     };
@@ -1372,6 +1480,8 @@ const testTwitchPermissions = async (): Promise<AuthPermissionSnapshot> => {
       username,
       canSend: false,
       canModerate: false,
+      authConfigured,
+      readOnlyAvailable: true,
       tokenExpiry: null,
       lastCheckedAt: now,
       error: error instanceof Error ? error.message : String(error),
@@ -1383,6 +1493,10 @@ const testKickPermissions = async (): Promise<AuthPermissionSnapshot> => {
   const now = Date.now();
   const token = store.get("kickAccessToken")?.trim() ?? "";
   const username = store.get("kickUsername")?.trim() ?? "";
+  const authConfigured = Boolean(
+    store.get("kickClientId")?.trim() &&
+    ((await getKickClientSecret()) || getKickTokenBrokerConfig()),
+  );
   const signedIn = token.length > 0;
   if (!signedIn) {
     return {
@@ -1391,6 +1505,8 @@ const testKickPermissions = async (): Promise<AuthPermissionSnapshot> => {
       username,
       canSend: false,
       canModerate: false,
+      authConfigured,
+      readOnlyAvailable: true,
       tokenExpiry: null,
       lastCheckedAt: now,
     };
@@ -1410,6 +1526,8 @@ const testKickPermissions = async (): Promise<AuthPermissionSnapshot> => {
       username,
       canSend: true,
       canModerate: false,
+      authConfigured,
+      readOnlyAvailable: true,
       tokenExpiry: decodeJwtExp(token),
       lastCheckedAt: now,
     };
@@ -1420,6 +1538,8 @@ const testKickPermissions = async (): Promise<AuthPermissionSnapshot> => {
       username,
       canSend: false,
       canModerate: false,
+      authConfigured,
+      readOnlyAvailable: true,
       tokenExpiry: decodeJwtExp(token),
       lastCheckedAt: now,
       error: error instanceof Error ? error.message : String(error),
@@ -1445,11 +1565,9 @@ const getAuthHealthSnapshot = async (): Promise<AuthHealthSnapshot> => {
 };
 
 const refreshKickAccessToken = async (): Promise<string> => {
-  const clientId =
-    (process.env.KICK_CLIENT_ID ?? store.get("kickClientId"))?.trim() ?? "";
-  const clientSecret =
-    (process.env.KICK_CLIENT_SECRET ?? store.get("kickClientSecret"))?.trim() ??
-    "";
+  const clientId = store.get("kickClientId")?.trim() ?? "";
+  const clientSecret = await getKickClientSecret();
+  const kickTokenBrokerConfig = getKickTokenBrokerConfig();
   const refreshToken = store.get("kickRefreshToken")?.trim() ?? "";
   if (!clientId || !refreshToken) {
     throw new Error(KICK_REAUTH_REQUIRED_MESSAGE);
@@ -1457,26 +1575,45 @@ const refreshKickAccessToken = async (): Promise<string> => {
 
   let tokens: KickOAuthTokenResponse;
   try {
-    const tokenParams = new URLSearchParams({
-      client_id: clientId,
-      grant_type: "refresh_token",
-      refresh_token: refreshToken,
-    });
-    if (clientSecret) {
+    if (kickTokenBrokerConfig) {
+      const response = await fetch(kickTokenBrokerConfig.refreshUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          refreshToken,
+          clientId,
+        }),
+      });
+      tokens = await fetchJsonOrThrow<KickOAuthTokenResponse>(
+        response,
+        "Kick broker token refresh",
+      );
+    } else {
+      if (!clientSecret) {
+        throw new Error(KICK_REAUTH_REQUIRED_MESSAGE);
+      }
+      const tokenParams = new URLSearchParams({
+        client_id: clientId,
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+      });
       tokenParams.set("client_secret", clientSecret);
+      const response = await fetch("https://id.kick.com/oauth/token", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Accept: "application/json",
+        },
+        body: tokenParams,
+      });
+      tokens = await fetchJsonOrThrow<KickOAuthTokenResponse>(
+        response,
+        "Kick token refresh",
+      );
     }
-    const response = await fetch("https://id.kick.com/oauth/token", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        Accept: "application/json",
-      },
-      body: tokenParams,
-    });
-    tokens = await fetchJsonOrThrow<KickOAuthTokenResponse>(
-      response,
-      "Kick token refresh",
-    );
   } catch {
     throw new Error(KICK_REAUTH_REQUIRED_MESSAGE);
   }
@@ -1529,7 +1666,7 @@ const saveYouTubeTokens = async (tokens: {
 };
 
 const refreshYouTubeAccessToken = async (): Promise<string> => {
-  const { clientId, clientSecret } = youtubeConfig();
+  const { clientId, clientSecret } = await youtubeConfig();
   const refreshToken = store.get("youtubeRefreshToken")?.trim() ?? "";
   if (!clientId || !refreshToken) {
     throw new Error("YouTube sign-in required.");
@@ -3396,14 +3533,9 @@ app.whenReady().then(async () => {
     twitchRedirectUri:
       process.env.TWITCH_REDIRECT_URI ?? TWITCH_DEFAULT_REDIRECT_URI,
     kickClientId: process.env.KICK_CLIENT_ID ?? KICK_MANAGED_CLIENT_ID,
-    kickClientSecret:
-      process.env.KICK_CLIENT_SECRET ?? KICK_MANAGED_CLIENT_SECRET,
     kickRedirectUri: process.env.KICK_REDIRECT_URI ?? KICK_DEFAULT_REDIRECT_URI,
     youtubeClientId: YOUTUBE_ALPHA_ENABLED
       ? (process.env.YOUTUBE_CLIENT_ID ?? YOUTUBE_MANAGED_CLIENT_ID)
-      : "",
-    youtubeClientSecret: YOUTUBE_ALPHA_ENABLED
-      ? (process.env.YOUTUBE_CLIENT_SECRET ?? YOUTUBE_MANAGED_CLIENT_SECRET)
       : "",
     youtubeRedirectUri:
       process.env.YOUTUBE_REDIRECT_URI ?? YOUTUBE_DEFAULT_REDIRECT_URI,
@@ -3422,6 +3554,7 @@ app.whenReady().then(async () => {
 
   try {
     await migrateLegacySettingsTokens(store);
+    await migrateLegacyOAuthClientSecretsFromSettings(store);
     await hydrateTokenStateFromSecureStorage(store);
     await hydrateAccountIdentityFromStoredTokens(store);
   } catch (error) {
@@ -3467,12 +3600,6 @@ app.whenReady().then(async () => {
   if (!store.get("kickClientId")?.trim() && managedKickClientId) {
     store.set("kickClientId", managedKickClientId);
   }
-  const managedKickClientSecret = (
-    process.env.KICK_CLIENT_SECRET ?? KICK_MANAGED_CLIENT_SECRET
-  ).trim();
-  if (!store.get("kickClientSecret")?.trim() && managedKickClientSecret) {
-    store.set("kickClientSecret", managedKickClientSecret);
-  }
   const managedKickRedirectUri = (
     process.env.KICK_REDIRECT_URI ?? KICK_DEFAULT_REDIRECT_URI
   ).trim();
@@ -3485,15 +3612,6 @@ app.whenReady().then(async () => {
     ).trim();
     if (!store.get("youtubeClientId")?.trim() && managedYouTubeClientId) {
       store.set("youtubeClientId", managedYouTubeClientId);
-    }
-    const managedYouTubeClientSecret = (
-      process.env.YOUTUBE_CLIENT_SECRET ?? YOUTUBE_MANAGED_CLIENT_SECRET
-    ).trim();
-    if (
-      !store.get("youtubeClientSecret")?.trim() &&
-      managedYouTubeClientSecret
-    ) {
-      store.set("youtubeClientSecret", managedYouTubeClientSecret);
     }
     const managedYouTubeRedirectUri = (
       process.env.YOUTUBE_REDIRECT_URI ?? YOUTUBE_DEFAULT_REDIRECT_URI
@@ -3598,7 +3716,7 @@ app.whenReady().then(async () => {
   if (
     store.get("kickGuest") &&
     store.get("kickClientId")?.trim() &&
-    store.get("kickClientSecret")?.trim()
+    (await getKickClientSecret())
   ) {
     store.set({
       kickGuest: false,
@@ -3625,6 +3743,15 @@ app.whenReady().then(async () => {
       updateChannel: DEFAULT_UPDATE_CHANNEL,
     });
   }
+  if (app.isPackaged) {
+    void cleanupLegacyInstallArtifacts({
+      platform: process.platform,
+      currentExePath: app.getPath("exe"),
+      homeDir: app.getPath("home"),
+      localAppDataDir: process.env.LOCALAPPDATA,
+      logger: (message) => console.info(message),
+    });
+  }
   createMainWindow();
   setupAppMenu();
   setupAutoUpdater();
@@ -3649,6 +3776,7 @@ app.whenReady().then(async () => {
       openAuthInBrowser,
       fetchJsonOrThrow,
       clearAuthTokens,
+      storeOAuthClientSecret,
       storeAuthTokens,
       parseKickUserName,
       twitchDefaultRedirectUri: TWITCH_DEFAULT_REDIRECT_URI,
@@ -3657,6 +3785,10 @@ app.whenReady().then(async () => {
       kickDefaultRedirectUri: KICK_DEFAULT_REDIRECT_URI,
       kickScopes: KICK_SCOPES,
       kickScopeVersion: KICK_SCOPE_VERSION,
+      kickWriteAuthUnavailableMessage: KICK_WRITE_AUTH_UNAVAILABLE_MESSAGE,
+      getKickClientSecret,
+      getKickTokenExchangeUrl: () =>
+        getKickTokenBrokerConfig()?.exchangeUrl ?? null,
       youtubeScopes: YOUTUBE_SCOPES,
       youtubeMissingOauthMessage: YOUTUBE_MISSING_OAUTH_MESSAGE,
       assertYouTubeAlphaEnabled,

@@ -69,4 +69,50 @@ describe("KickAdapter", () => {
       color: "#00ff00",
     });
   });
+
+  it("emits a local echo immediately when sending a message", async () => {
+    const originalFetch = globalThis.fetch;
+    let resolveResponse: ((value: Response) => void) | null = null;
+    const responsePromise = new Promise<Response>((resolve) => {
+      resolveResponse = resolve;
+    });
+    const fetchMock = vi.fn<typeof fetch>().mockReturnValue(responsePromise);
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      const adapter = new KickAdapter({
+        channel: "creator",
+        auth: {
+          accessToken: "kick-access-token",
+          username: "kickuser",
+        },
+      });
+      (adapter as unknown as { broadcasterUserId: number }).broadcasterUserId =
+        42;
+
+      const messages: ChatMessage[] = [];
+      adapter.onMessage((message) => messages.push(message));
+
+      const sendPromise = adapter.sendMessage("hello kick");
+      await Promise.resolve();
+
+      expect(messages.at(-1)).toMatchObject({
+        platform: "kick",
+        channel: "creator",
+        username: "kickuser",
+        message: "hello kick",
+        raw: { localEcho: true },
+      });
+
+      resolveResponse?.(
+        new Response("{}", {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      await sendPromise;
+    } finally {
+      vi.stubGlobal("fetch", originalFetch as typeof fetch);
+    }
+  });
 });

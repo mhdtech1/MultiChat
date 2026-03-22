@@ -15,6 +15,11 @@ type ElectronAPI = {
   signInTwitch: () => Promise<AppSettings>;
   signOutTwitch: () => Promise<AppSettings>;
   signInKick: () => Promise<AppSettings>;
+  configureKickLocalAuth: (payload: {
+    clientId: string;
+    clientSecret: string;
+    redirectUri: string;
+  }) => Promise<AppSettings>;
   signOutKick: () => Promise<AppSettings>;
   refreshKickAuth: () => Promise<AppSettings>;
   signInYouTube: () => Promise<AppSettings>;

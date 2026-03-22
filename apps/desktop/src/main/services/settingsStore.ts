@@ -3,7 +3,7 @@ import path from "node:path";
 import { app } from "electron";
 import type { AppSettings } from "../../shared/types.js";
 
-const SENSITIVE_KEYS: Array<keyof AppSettings> = [
+const SENSITIVE_KEYS = [
   "twitchToken",
   "kickAccessToken",
   "kickRefreshToken",
@@ -73,6 +73,19 @@ export class JsonSettingsStore {
     this.writeToDisk();
   }
 
+  removeKeys(keys: string[]): void {
+    const nextState = { ...(this.state as Record<string, unknown>) };
+    let changed = false;
+    for (const key of keys) {
+      if (!(key in nextState)) continue;
+      delete nextState[key];
+      changed = true;
+    }
+    if (!changed) return;
+    this.state = nextState as AppSettings;
+    this.writeToDisk();
+  }
+
   private readFromDisk(): AppSettings {
     try {
       if (!fs.existsSync(this.filePath)) return {};
@@ -86,7 +99,7 @@ export class JsonSettingsStore {
 
   private writeToDisk(): void {
     fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
-    const safeState = { ...this.state };
+    const safeState = { ...(this.state as Record<string, unknown>) };
     for (const key of SENSITIVE_KEYS) {
       delete safeState[key];
     }

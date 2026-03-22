@@ -9,6 +9,7 @@ export const IPC_CHANNELS = {
   AUTH_KICK_SIGN_IN: "auth:kick:signIn",
   AUTH_KICK_SIGN_OUT: "auth:kick:signOut",
   AUTH_KICK_REFRESH: "auth:kick:refresh",
+  AUTH_KICK_CONFIGURE_LOCAL: "auth:kick:configureLocal",
   AUTH_YOUTUBE_SIGN_IN: "auth:youtube:signIn",
   AUTH_YOUTUBE_SIGN_OUT: "auth:youtube:signOut",
   AUTH_TIKTOK_SIGN_IN: "auth:tiktok:signIn",

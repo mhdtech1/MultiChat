@@ -39,8 +39,10 @@ describe("JsonSettingsStore", () => {
     store.set({
       twitchToken: "secret-token",
       tiktokSessionId: "session-token",
-      kickClientSecret: "kick-secret",
       theme: "light"
+    });
+    (store as unknown as { set: (updates: Record<string, unknown>) => void }).set({
+      kickClientSecret: "kick-secret"
     });
 
     const [tmpPath, serialized] = vi.mocked(fs.writeFileSync).mock.calls.at(-1) ?? [];
@@ -49,8 +51,23 @@ describe("JsonSettingsStore", () => {
     expect(String(serialized)).not.toContain("twitchToken");
     expect(String(serialized)).not.toContain("tiktokSessionId");
     expect(String(serialized)).not.toContain("kickClientSecret");
-    expect(vi.mocked(fs.renameSync)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(fs.renameSync)).toHaveBeenCalledTimes(3);
     const renameCall = vi.mocked(fs.renameSync).mock.calls.at(-1) ?? [];
     expect(String(renameCall[0])).toContain(".tmp");
+  });
+
+  it("can remove legacy sensitive keys from in-memory state", async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    const { JsonSettingsStore } = await import("../../src/main/services/settingsStore");
+    const store = new JsonSettingsStore({});
+    (store as unknown as { set: (updates: Record<string, unknown>) => void }).set({
+      kickClientSecret: "kick-secret",
+      youtubeClientSecret: "youtube-secret",
+      theme: "dark"
+    });
+
+    store.removeKeys(["kickClientSecret", "youtubeClientSecret"]);
+
+    expect(store.getAll()).toEqual({ theme: "dark" });
   });
 });

@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: chatrix-kick-broker
+    runtime: node
+    plan: free
+    healthCheckPath: /health
+    buildCommand: pnpm install --frozen-lockfile && pnpm --filter @chatrix/kick-broker build
+    startCommand: pnpm --filter @chatrix/kick-broker start
+    envVars:
+      - key: KICK_CLIENT_ID
+        sync: false
+      - key: KICK_CLIENT_SECRET
+        sync: false
+      - key: KICK_BROKER_ALLOWED_REDIRECT_PREFIXES
+        value: http://localhost:51730/,http://127.0.0.1:51730/

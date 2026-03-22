@@ -38,7 +38,13 @@ export function createSettingsHandlers(
   return {
     [IPC_CHANNELS.SETTINGS_GET]: () => store.store,
     [IPC_CHANNELS.SETTINGS_SET]: async (_event, updates: unknown) => {
-      const requestedUpdates = (updates ?? {}) as AppSettings;
+      const rawRequestedUpdates =
+        updates && typeof updates === "object"
+          ? ({ ...updates } as Record<string, unknown>)
+          : {};
+      delete rawRequestedUpdates.kickClientSecret;
+      delete rawRequestedUpdates.youtubeClientSecret;
+      const requestedUpdates = rawRequestedUpdates as AppSettings;
       const nextUpdates: Partial<AppSettings> = {
         ...requestedUpdates,
         updateChannel:

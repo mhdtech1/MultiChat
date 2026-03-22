@@ -19,6 +19,7 @@ const IPC_CHANNELS = {
   AUTH_KICK_SIGN_IN: "auth:kick:signIn",
   AUTH_KICK_SIGN_OUT: "auth:kick:signOut",
   AUTH_KICK_REFRESH: "auth:kick:refresh",
+  AUTH_KICK_CONFIGURE_LOCAL: "auth:kick:configureLocal",
   AUTH_YOUTUBE_SIGN_IN: "auth:youtube:signIn",
   AUTH_YOUTUBE_SIGN_OUT: "auth:youtube:signOut",
   AUTH_TIKTOK_SIGN_IN: "auth:tiktok:signIn",
@@ -51,6 +52,11 @@ const api = {
   signInTwitch: (): Promise<AppSettings> => ipcRenderer.invoke(IPC_CHANNELS.AUTH_TWITCH_SIGN_IN),
   signOutTwitch: (): Promise<AppSettings> => ipcRenderer.invoke(IPC_CHANNELS.AUTH_TWITCH_SIGN_OUT),
   signInKick: (): Promise<AppSettings> => ipcRenderer.invoke(IPC_CHANNELS.AUTH_KICK_SIGN_IN),
+  configureKickLocalAuth: (payload: {
+    clientId: string;
+    clientSecret: string;
+    redirectUri: string;
+  }): Promise<AppSettings> => ipcRenderer.invoke(IPC_CHANNELS.AUTH_KICK_CONFIGURE_LOCAL, payload),
   signOutKick: (): Promise<AppSettings> => ipcRenderer.invoke(IPC_CHANNELS.AUTH_KICK_SIGN_OUT),
   refreshKickAuth: (): Promise<AppSettings> => ipcRenderer.invoke(IPC_CHANNELS.AUTH_KICK_REFRESH),
   signInYouTube: (): Promise<AppSettings> => ipcRenderer.invoke(IPC_CHANNELS.AUTH_YOUTUBE_SIGN_IN),

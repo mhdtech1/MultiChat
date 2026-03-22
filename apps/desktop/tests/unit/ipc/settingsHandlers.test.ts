@@ -105,6 +105,39 @@ describe("createSettingsHandlers", () => {
     expect(applyAutoUpdaterChannel).toHaveBeenCalledWith("stable");
     expect(clearAuthTokens).not.toHaveBeenCalledWith("twitch");
   });
+
+  it("drops legacy client secret fields from renderer settings updates", async () => {
+    const store = createMockSettingsStore({
+      theme: "dark",
+      updateChannel: "stable",
+    });
+
+    const handlers = createSettingsHandlers({
+      store: store as never,
+      youtubeAlphaEnabled: true,
+      tiktokAlphaEnabled: true,
+      resolveConfiguredUpdateChannel: () => "stable",
+      applyAutoUpdaterChannel: vi.fn(),
+      storeAuthTokens: vi.fn().mockResolvedValue(undefined),
+      clearAuthTokens: vi.fn().mockResolvedValue(undefined),
+    });
+
+    const result = await handlers[IPC_CHANNELS.SETTINGS_SET](
+      {} as never,
+      {
+        theme: "light",
+        kickClientSecret: "renderer-secret",
+        youtubeClientSecret: "renderer-youtube-secret",
+      } as never,
+    );
+
+    expect(result).toEqual({
+      theme: "light",
+      updateChannel: "stable",
+      youtubeAlphaEnabled: true,
+      tiktokAlphaEnabled: true,
+    });
+  });
 });
 
 describe("createAuthHealthHandlers", () => {

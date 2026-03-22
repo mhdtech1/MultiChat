@@ -72,7 +72,6 @@ export type AppSettings = {
   twitchClientId?: string;
   twitchRedirectUri?: string;
   kickClientId?: string;
-  kickClientSecret?: string;
   kickRedirectUri?: string;
   kickAccessToken?: string;
   kickRefreshToken?: string;
@@ -80,7 +79,6 @@ export type AppSettings = {
   kickGuest?: boolean;
   kickScopeVersion?: number;
   youtubeClientId?: string;
-  youtubeClientSecret?: string;
   youtubeRedirectUri?: string;
   youtubeAccessToken?: string;
   youtubeRefreshToken?: string;
@@ -138,6 +136,8 @@ export type AuthPermissionSnapshot = {
   username: string;
   canSend: boolean;
   canModerate: boolean;
+  authConfigured?: boolean;
+  readOnlyAvailable?: boolean;
   tokenExpiry: number | null;
   lastCheckedAt: number;
   error?: string;

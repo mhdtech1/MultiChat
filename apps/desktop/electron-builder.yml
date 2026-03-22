@@ -1,4 +1,4 @@
-appId: com.chatrix.desktop
+appId: com.multichat.desktop
 productName: Chatrix
 afterPack: ../../scripts/after-pack-prune-locales.cjs
 files:

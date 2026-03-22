@@ -2,6 +2,22 @@
 
 All notable changes to Chatrix are documented here.
 
+## [1.0.5] – 2026-03-22
+
+### Added
+
+- **Kick broker** – Added a dedicated Kick token broker service for secure token exchange and refresh without shipping the shared Kick client secret in the desktop app.
+- **Render deployment** – Added Render Free deployment config and broker documentation so the Kick auth backend can be hosted cheaply and consistently.
+
+### Changed
+
+- **Kick sign-in** – Chatrix now treats the hosted Kick broker as the default sign-in path for public builds, so users can sign in to Kick without entering their own client credentials.
+- **Kick UI flow** – Removed the local Kick credential prompt from the normal app flow and restored a simple read-only fallback if Kick sign-in is unavailable.
+
+### Fixed
+
+- **Clean reinstall testing** – Rebuilt, wiped local app state, and reinstalled a clean packaged Chatrix build to verify the hosted-broker auth path from a fresh app state.
+
 ## [1.0.4] – 2026-03-17
 
 ### Added

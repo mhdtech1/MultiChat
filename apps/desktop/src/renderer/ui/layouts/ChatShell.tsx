@@ -310,14 +310,12 @@ const defaultSettings: Settings = {
   twitchClientId: "",
   twitchRedirectUri: "",
   kickClientId: "",
-  kickClientSecret: "",
   kickRedirectUri: "",
   kickAccessToken: "",
   kickRefreshToken: "",
   kickUsername: "",
   kickGuest: false,
   youtubeClientId: "",
-  youtubeClientSecret: "",
   youtubeRedirectUri: "",
   youtubeAccessToken: "",
   youtubeRefreshToken: "",
@@ -345,6 +343,8 @@ const defaultSettings: Settings = {
   setupWizardVersion: 0,
   setupWizardSendTestCompleted: false,
 };
+const KICK_READ_ONLY_SETUP_MESSAGE =
+  "Kick sign-in is temporarily unavailable. You can still open Kick chats in read-only mode.";
 
 const normalizeUserKey = (value: string) => value.trim().toLowerCase();
 const escapeRegExp = (value: string) =>
@@ -3665,6 +3665,12 @@ const MainApp: React.FC = () => {
   const tiktokAlphaEnabled = Boolean(settings.tiktokAlphaEnabled);
   const hasTwitchAuth = Boolean(settings.twitchToken || settings.twitchGuest);
   const hasKickAuth = Boolean(settings.kickAccessToken);
+  const kickWriteAuthConfigured = authHealth
+    ? authHealth.kick.authConfigured !== false
+    : true;
+  const kickReadOnlyAvailable = authHealth
+    ? authHealth.kick.readOnlyAvailable !== false
+    : true;
   const hasPrimaryAuth = hasTwitchAuth || hasKickAuth;
   const setupWizardVersion = Number(settings.setupWizardVersion ?? 0);
   const setupPrimaryConnected = Boolean(
@@ -5940,7 +5946,8 @@ const MainApp: React.FC = () => {
   };
 
   const sendActiveMessage = async () => {
-    const content = composerText.trim();
+    const draft = composerText;
+    const content = draft.trim();
     if (!content || !activeTab) return;
 
     const activeSourceIds = writableActiveTabSources.map((source) => source.id);
@@ -5985,6 +5992,10 @@ const MainApp: React.FC = () => {
 
     setSending(true);
     setAuthMessage("");
+    composerHistoryIndexRef.current = -1;
+    composerHistoryDraftRef.current = "";
+    setComposerText("");
+    setCommandPaletteOpen(false);
     try {
       const results = await Promise.all(
         targetSourceIds.map(async (sourceId) => {
@@ -6024,14 +6035,11 @@ const MainApp: React.FC = () => {
       }
 
       if (sentCount > 0) {
-        composerHistoryIndexRef.current = -1;
-        composerHistoryDraftRef.current = "";
         setComposerHistory((previous) =>
           [...previous.filter((entry) => entry !== content), content].slice(
             -COMPOSER_HISTORY_LIMIT,
           ),
         );
-        setComposerText("");
         if (!setupMessageReady) {
           setSetupTestMessageSent(true);
           void persistSettings({ setupWizardSendTestCompleted: true }).catch(
@@ -6060,9 +6068,15 @@ const MainApp: React.FC = () => {
           `Sent to ${sentCount}/${targetSourceIds.length}. Failed: ${failureSummary}${extraFailures}`,
         );
       } else {
+        composerHistoryDraftRef.current = draft;
+        setComposerText(draft);
+        setCommandPaletteOpen(draft.trim().startsWith("/"));
         setAuthMessage(`Send failed: ${failureSummary}${extraFailures}`);
       }
     } catch (error) {
+      composerHistoryDraftRef.current = draft;
+      setComposerText(draft);
+      setCommandPaletteOpen(draft.trim().startsWith("/"));
       setAuthMessage(error instanceof Error ? error.message : String(error));
     } finally {
       setSending(false);
@@ -6070,7 +6084,8 @@ const MainApp: React.FC = () => {
   };
 
   const sendDeckMessage = async (tab: ChatTab) => {
-    const content = (deckComposerByTabId[tab.id] ?? "").trim();
+    const draft = deckComposerByTabId[tab.id] ?? "";
+    const content = draft.trim();
     if (!content) return;
     const deckSources = tab.sourceIds
       .map((sourceId) => sourceById.get(sourceId))
@@ -6092,6 +6107,7 @@ const MainApp: React.FC = () => {
       setAuthMessage("This deck is read-only.");
       return;
     }
+    setDeckComposerByTabId((previous) => ({ ...previous, [tab.id]: "" }));
     const results = await Promise.all(
       writableSources.map(async (source) => {
         const adapter = adaptersRef.current.get(source.id);
@@ -6105,8 +6121,8 @@ const MainApp: React.FC = () => {
       }),
     );
     const success = results.filter(Boolean).length;
-    if (success > 0) {
-      setDeckComposerByTabId((previous) => ({ ...previous, [tab.id]: "" }));
+    if (success === 0) {
+      setDeckComposerByTabId((previous) => ({ ...previous, [tab.id]: draft }));
     }
     if (success !== writableSources.length) {
       setAuthMessage(
@@ -6406,7 +6422,7 @@ const MainApp: React.FC = () => {
     }
   };
 
-  const signInKick = async () => {
+  const performKickSignIn = async () => {
     setAuthBusy("kick");
     setAuthMessage("");
     try {
@@ -6432,6 +6448,14 @@ const MainApp: React.FC = () => {
     }
   };
 
+  const signInKick = async () => {
+    if (!kickWriteAuthConfigured) {
+      await enterReadOnlyGuide(KICK_READ_ONLY_SETUP_MESSAGE);
+      return;
+    }
+    await performKickSignIn();
+  };
+
   const signOutTwitch = async () => {
     const next = await window.electronAPI.signOutTwitch();
     setSettings({ ...defaultSettings, ...next });
@@ -6444,12 +6468,12 @@ const MainApp: React.FC = () => {
     void refreshAuthHealth(false);
   };
 
-  const enterReadOnlyGuide = async () => {
+  const enterReadOnlyGuide = async (
+    message = "Read-only mode enabled. You can open Twitch, Kick, YouTube, and TikTok without signing in.",
+  ) => {
     setReadOnlyGuideMode(true);
     setPlatformInput("twitch");
-    setAuthMessage(
-      "Read-only mode enabled. You can open Twitch, Kick, YouTube, and TikTok without signing in.",
-    );
+    setAuthMessage(message);
   };
 
   useEffect(() => {
@@ -7158,7 +7182,11 @@ const MainApp: React.FC = () => {
                 onClick={() => void signInKick()}
                 disabled={authBusy !== null}
               >
-                {authBusy === "kick" ? "Signing in Kick..." : "Sign in Kick"}
+                {kickWriteAuthConfigured
+                  ? authBusy === "kick"
+                    ? "Signing in Kick..."
+                    : "Sign in Kick"
+                  : "Use Kick Read-Only"}
               </button>
             </div>
             <div className="login-buttons">
@@ -7803,9 +7831,11 @@ const MainApp: React.FC = () => {
                             onClick={() => void signInKick()}
                             disabled={authBusy !== null}
                           >
-                            {authBusy === "kick"
-                              ? "Signing in..."
-                              : "Sign in Kick"}
+                            {kickWriteAuthConfigured
+                              ? authBusy === "kick"
+                                ? "Signing in..."
+                                : "Sign in Kick"
+                              : "Use Kick read-only"}
                           </button>
                         )}
                       </details>
@@ -7922,6 +7952,18 @@ const MainApp: React.FC = () => {
                             <span>
                               Can send:{" "}
                               {authHealth?.kick.canSend ? "yes" : "no"}
+                            </span>
+                            <span>
+                              Write auth configured:{" "}
+                              {authHealth?.kick.authConfigured === false
+                                ? "no"
+                                : "yes"}
+                            </span>
+                            <span>
+                              Read-only available:{" "}
+                              {authHealth?.kick.readOnlyAvailable === false
+                                ? "no"
+                                : "yes"}
                             </span>
                             <span>
                               Can mod (active tab):{" "}
@@ -10185,16 +10227,20 @@ const MainApp: React.FC = () => {
                     >
                       {settings.kickAccessToken
                         ? "Kick connected"
-                        : authBusy === "kick"
-                          ? "Signing in Kick..."
-                          : "Connect Kick"}
+                        : kickWriteAuthConfigured
+                          ? authBusy === "kick"
+                            ? "Signing in Kick..."
+                            : "Connect Kick"
+                          : "Kick read-only"}
                     </button>
                   </div>
                   <p className="guide-note">
                     Status:{" "}
                     {setupPrimaryConnected
                       ? "Connected"
-                      : "Waiting for Twitch or Kick sign-in"}
+                      : !kickWriteAuthConfigured && kickReadOnlyAvailable
+                        ? "Kick is available in read-only mode. Connect Twitch for full write access."
+                        : "Waiting for Twitch or Kick sign-in"}
                   </p>
                 </div>
               ) : null}

@@ -2,8 +2,11 @@
   ; Best-effort process cleanup so reinstall acts as an in-place update.
   nsExec::ExecToLog 'taskkill /IM "Chatrix.exe" /T /F'
   Pop $0
+  nsExec::ExecToLog 'taskkill /IM "MultiChat.exe" /T /F'
+  Pop $0
   nsExec::ExecToLog 'taskkill /IM "Update.exe" /T /F'
   Pop $0
+  RMDir /r "$LOCALAPPDATA\Programs\MultiChat"
 !macroend
 
 !macro customUnInstallCheck

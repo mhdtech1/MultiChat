@@ -30,6 +30,10 @@ type CreateAuthSignInHandlersOptions = {
   openAuthInBrowser: (authUrl: string, redirectUri: string) => Promise<string>;
   fetchJsonOrThrow: <T>(response: Response, source: string) => Promise<T>;
   clearAuthTokens: (platform: AuthTokenPlatform) => Promise<void>;
+  storeOAuthClientSecret: (
+    platform: "kick" | "youtube",
+    clientSecret: string,
+  ) => Promise<void>;
   storeAuthTokens: (
     platform: AuthTokenPlatform,
     tokens: { accessToken: string; refreshToken?: string },
@@ -41,14 +45,17 @@ type CreateAuthSignInHandlersOptions = {
   kickDefaultRedirectUri: string;
   kickScopes: string[];
   kickScopeVersion: number;
+  kickWriteAuthUnavailableMessage: string;
+  getKickClientSecret: () => Promise<string>;
+  getKickTokenExchangeUrl: () => string | null;
   youtubeScopes: string[];
   youtubeMissingOauthMessage: string;
   assertYouTubeAlphaEnabled: () => void;
-  youtubeConfig: () => {
+  youtubeConfig: () => Promise<{
     clientId: string;
     clientSecret: string;
     redirectUri: string;
-  };
+  }>;
   saveYouTubeTokens: (payload: {
     accessToken: string;
     refreshToken?: string;
@@ -83,6 +90,110 @@ type YouTubeChannelsResponse = {
   }>;
 };
 
+type KickLocalAuthConfigPayload = {
+  clientId?: unknown;
+  clientSecret?: unknown;
+  redirectUri?: unknown;
+};
+
+const describeHttpErrorPayload = (text: string): string => {
+  const rawText = text.trim();
+  if (!rawText) return "";
+
+  try {
+    const parsed = JSON.parse(rawText) as Record<string, unknown>;
+    const nested =
+      parsed.error && typeof parsed.error === "object"
+        ? (parsed.error as Record<string, unknown>)
+        : null;
+    const payloadError = parsed.error;
+    const explicitError =
+      typeof payloadError === "string"
+        ? payloadError
+        : Array.isArray(payloadError)
+          ? (payloadError.find(
+              (entry): entry is string =>
+                typeof entry === "string" && entry.trim().length > 0,
+            ) ?? "")
+          : "";
+    const errorsField = parsed.errors;
+    const topLevelError =
+      typeof errorsField === "string"
+        ? errorsField
+        : Array.isArray(errorsField)
+          ? (errorsField.find(
+              (entry): entry is string =>
+                typeof entry === "string" && entry.trim().length > 0,
+            ) ?? "")
+          : "";
+
+    return (
+      (typeof parsed.message === "string" && parsed.message.trim()) ||
+      (typeof nested?.message === "string" && nested.message.trim()) ||
+      (typeof parsed.error_description === "string" &&
+        parsed.error_description.trim()) ||
+      explicitError.trim() ||
+      topLevelError.trim() ||
+      rawText.slice(0, 400)
+    );
+  } catch {
+    return rawText.slice(0, 400);
+  }
+};
+
+const normalizeKickRedirectUri = (
+  value: unknown,
+  fallback: string,
+): string => {
+  const raw = typeof value === "string" ? value.trim() : "";
+  const resolved = raw || fallback;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(resolved);
+  } catch {
+    throw new Error(
+      "Kick redirect URI must be a valid http:// or https:// URL.",
+    );
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("Kick redirect URI must use http:// or https://.");
+  }
+
+  return parsed.toString();
+};
+
+const throwDetailedHttpError = async (
+  response: Response,
+  source: string,
+  context: Record<string, string | boolean>,
+): Promise<never> => {
+  const bodyText = await response.text();
+  const detail = describeHttpErrorPayload(bodyText);
+  const contextText = Object.entries(context)
+    .map(([key, value]) => `${key}=${String(value)}`)
+    .join(", ");
+  const bodyTextTrimmed = bodyText.trim();
+  const parts = [`${source} request failed (${response.status}).`];
+
+  if (detail) {
+    parts.push(detail);
+  } else {
+    parts.push("Response body was empty.");
+  }
+
+  if (bodyTextTrimmed && bodyTextTrimmed !== detail) {
+    parts.push(`Response: ${bodyTextTrimmed.slice(0, 400)}`);
+  }
+
+  if (contextText) {
+    parts.push(`Context: ${contextText}`);
+  }
+
+  throw new Error(parts.join(" "));
+};
+
 export function createAuthHealthHandlers(
   options: CreateAuthHealthHandlersOptions,
 ): IpcHandlerRegistry {
@@ -103,6 +214,7 @@ export function createAuthSignInHandlers(
     openAuthInBrowser,
     fetchJsonOrThrow,
     clearAuthTokens,
+    storeOAuthClientSecret,
     storeAuthTokens,
     parseKickUserName,
     twitchDefaultRedirectUri,
@@ -111,6 +223,9 @@ export function createAuthSignInHandlers(
     kickDefaultRedirectUri,
     kickScopes,
     kickScopeVersion,
+    kickWriteAuthUnavailableMessage,
+    getKickClientSecret,
+    getKickTokenExchangeUrl,
     youtubeScopes,
     youtubeMissingOauthMessage,
     assertYouTubeAlphaEnabled,
@@ -199,26 +314,14 @@ export function createAuthSignInHandlers(
       return store.store;
     },
     [IPC_CHANNELS.AUTH_KICK_SIGN_IN]: async () => {
-      const clientId = (
-        process.env.KICK_CLIENT_ID ?? store.get("kickClientId")
-      )?.trim();
-      const clientSecret = (
-        process.env.KICK_CLIENT_SECRET ?? store.get("kickClientSecret")
-      )?.trim();
+      const clientId = store.get("kickClientId")?.trim();
+      const clientSecret = await getKickClientSecret();
+      const kickTokenExchangeUrl = getKickTokenExchangeUrl();
       const redirectUri =
-        (
-          process.env.KICK_REDIRECT_URI ?? store.get("kickRedirectUri")
-        )?.trim() || kickDefaultRedirectUri;
+        store.get("kickRedirectUri")?.trim() || kickDefaultRedirectUri;
 
-      if (!clientId || !clientSecret) {
-        store.set({
-          kickAccessToken: "",
-          kickRefreshToken: "",
-          kickUsername: "guest",
-          kickGuest: true,
-        });
-        await clearAuthTokens("kick");
-        return store.store;
+      if (!clientId || (!clientSecret && !kickTokenExchangeUrl)) {
+        throw new Error(kickWriteAuthUnavailableMessage);
       }
       const state = randomToken(24);
       const codeVerifier = randomToken(48);
@@ -258,43 +361,65 @@ export function createAuthSignInHandlers(
         throw new Error("Kick did not return an authorization code.");
       }
 
-      const tokenParams = new URLSearchParams({
-        code,
-        client_id: clientId,
-        redirect_uri: redirectUri,
-        grant_type: "authorization_code",
-        code_verifier: codeVerifier,
-      });
-      if (clientSecret) {
-        tokenParams.set("client_secret", clientSecret);
-      }
-      const tokenResponse = await fetch("https://id.kick.com/oauth/token", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          Accept: "application/json",
-        },
-        body: tokenParams,
-      });
-      let tokens: KickTokenResponse;
-      try {
-        tokens = await fetchJsonOrThrow<KickTokenResponse>(
-          tokenResponse,
-          "Kick token exchange",
-        );
-      } catch (error) {
-        if (!clientSecret) {
-          store.set({
-            kickAccessToken: "",
-            kickRefreshToken: "",
-            kickUsername: "guest",
-            kickGuest: true,
-          });
-          await clearAuthTokens("kick");
-          return store.store;
+      let tokenResponse: Response;
+      if (kickTokenExchangeUrl) {
+        tokenResponse = await fetch(kickTokenExchangeUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({
+            code,
+            clientId,
+            redirectUri,
+            codeVerifier,
+          }),
+        });
+        if (!tokenResponse.ok) {
+          await throwDetailedHttpError(
+            tokenResponse,
+            "Kick broker token exchange",
+            {
+              clientId,
+              redirectUri,
+              brokerUrl: kickTokenExchangeUrl,
+            },
+          );
         }
-        throw error;
+      } else {
+        const tokenParams = new URLSearchParams({
+          code,
+          client_id: clientId,
+          redirect_uri: redirectUri,
+          grant_type: "authorization_code",
+          code_verifier: codeVerifier,
+        });
+        if (clientSecret) {
+          tokenParams.set("client_secret", clientSecret);
+        }
+        tokenResponse = await fetch("https://id.kick.com/oauth/token", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Accept: "application/json",
+          },
+          body: tokenParams,
+        });
+        if (!tokenResponse.ok) {
+          await throwDetailedHttpError(tokenResponse, "Kick token exchange", {
+            clientId,
+            redirectUri,
+            clientSecretPresent: Boolean(clientSecret),
+          });
+        }
       }
+      const tokens = await fetchJsonOrThrow<KickTokenResponse>(
+        tokenResponse,
+        kickTokenExchangeUrl
+          ? "Kick broker token exchange"
+          : "Kick token exchange",
+      );
 
       if (!tokens.access_token) {
         throw new Error("Kick token exchange did not return an access token.");
@@ -327,9 +452,48 @@ export function createAuthSignInHandlers(
 
       return store.store;
     },
+    [IPC_CHANNELS.AUTH_KICK_CONFIGURE_LOCAL]: async (
+      _event,
+      payload: unknown,
+    ) => {
+      const request =
+        payload && typeof payload === "object"
+          ? (payload as KickLocalAuthConfigPayload)
+          : {};
+      const clientId =
+        typeof request.clientId === "string" ? request.clientId.trim() : "";
+      const clientSecret =
+        typeof request.clientSecret === "string"
+          ? request.clientSecret.trim()
+          : "";
+      const redirectUri = normalizeKickRedirectUri(
+        request.redirectUri,
+        kickDefaultRedirectUri,
+      );
+
+      if (!clientId) {
+        throw new Error("Kick client ID is required.");
+      }
+      if (!clientSecret) {
+        throw new Error("Kick client secret is required.");
+      }
+
+      store.set({
+        kickClientId: clientId,
+        kickRedirectUri: redirectUri,
+        kickAccessToken: "",
+        kickRefreshToken: "",
+        kickUsername: "",
+        kickGuest: false,
+      });
+      await storeOAuthClientSecret("kick", clientSecret);
+      await clearAuthTokens("kick");
+
+      return store.store;
+    },
     [IPC_CHANNELS.AUTH_YOUTUBE_SIGN_IN]: async () => {
       assertYouTubeAlphaEnabled();
-      const { clientId, clientSecret, redirectUri } = youtubeConfig();
+      const { clientId, clientSecret, redirectUri } = await youtubeConfig();
       if (!clientId) {
         throw new Error(youtubeMissingOauthMessage);
       }

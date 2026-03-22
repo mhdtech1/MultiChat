@@ -66,6 +66,7 @@ const mockElectronAPI = {
   signInTwitch: vi.fn(() => Promise.resolve({})),
   signOutTwitch: vi.fn(() => Promise.resolve({})),
   signInKick: vi.fn(() => Promise.resolve({})),
+  configureKickLocalAuth: vi.fn(() => Promise.resolve({})),
   signOutKick: vi.fn(() => Promise.resolve({})),
   checkForUpdates: vi.fn(() => Promise.resolve({ state: "idle", message: "", channel: "stable", currentVersion: "0.0.0" }))
 };

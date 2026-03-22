@@ -5,6 +5,7 @@ const SERVICE_NAME = "Chatrix";
 const LEGACY_SERVICE_NAMES = ["MultiChat"];
 
 type TokenPlatform = "twitch" | "kick" | "youtube";
+type OAuthSecretPlatform = "kick" | "youtube";
 type TokenKeys = { access: keyof AppSettings; refresh?: keyof AppSettings };
 
 const PLATFORM_TOKEN_KEYS: Record<TokenPlatform, TokenKeys> = {
@@ -20,6 +21,11 @@ const PLATFORM_ACCOUNTS: Record<
   twitch: { access: "TWITCH_access_token" },
   kick: { access: "KICK_access_token", refresh: "KICK_refresh_token" },
   youtube: { access: "YOUTUBE_access_token", refresh: "YOUTUBE_refresh_token" },
+};
+
+const OAUTH_CLIENT_SECRET_ACCOUNTS: Record<OAuthSecretPlatform, string> = {
+  kick: "KICK_client_secret",
+  youtube: "YOUTUBE_client_secret",
 };
 
 export interface SecureStorageService {
@@ -194,6 +200,37 @@ export async function clearAuthTokens(platform: TokenPlatform): Promise<void> {
   if (accounts.refresh) {
     await storage.deleteToken(accounts.refresh);
   }
+}
+
+export async function storeOAuthClientSecret(
+  platform: OAuthSecretPlatform,
+  clientSecret: string,
+): Promise<void> {
+  const storage = getSecureStorage();
+  const account = OAUTH_CLIENT_SECRET_ACCOUNTS[platform];
+  const normalized = clientSecret.trim();
+  if (normalized) {
+    await storage.setToken(account, normalized);
+  } else {
+    await storage.deleteToken(account);
+  }
+}
+
+export async function getOAuthClientSecret(
+  platform: OAuthSecretPlatform,
+): Promise<string | null> {
+  const storage = getSecureStorage();
+  const account = OAUTH_CLIENT_SECRET_ACCOUNTS[platform];
+  const clientSecret = (await storage.getToken(account))?.trim() ?? null;
+  return clientSecret || null;
+}
+
+export async function clearOAuthClientSecret(
+  platform: OAuthSecretPlatform,
+): Promise<void> {
+  const storage = getSecureStorage();
+  const account = OAUTH_CLIENT_SECRET_ACCOUNTS[platform];
+  await storage.deleteToken(account);
 }
 
 type SettingsReaderWriter = {
