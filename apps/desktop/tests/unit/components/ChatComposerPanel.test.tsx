@@ -40,8 +40,14 @@ describe("ChatComposerPanel", () => {
 
     expect(screen.getByText("Quick Mod")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Timeout 1m" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Timeout 10m" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Ban" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "More" })).toBeInTheDocument();
+    expect(
+      screen.getByText("Auto Ban ON"),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "More" }));
+    expect(screen.getByRole("button", { name: "Timeout 10m" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Unban" })).toBeDisabled();
     expect(
       screen.getByRole("button", { name: "Auto Ban: ON" }),

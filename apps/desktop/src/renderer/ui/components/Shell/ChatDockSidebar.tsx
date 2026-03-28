@@ -61,37 +61,45 @@ export function ChatDockSidebar({
   identityTarget,
   identityStats,
 }: ChatDockSidebarProps) {
+  const showMentionsSection = showMentions && mentionInbox.length > 0;
+  const showGlobalTimelineSection =
+    showGlobalTimeline && globalSearchMode && search.trim().length > 0;
+  const showModHistorySection =
+    isAdvancedMode && showModHistory && moderationHistory.length > 0;
+  const showUserCardSection = isAdvancedMode && showUserCard && Boolean(identityTarget);
+
+  if (
+    !showMentionsSection &&
+    !showGlobalTimelineSection &&
+    !showModHistorySection &&
+    !showUserCardSection
+  ) {
+    return null;
+  }
+
   return (
     <>
-      {showMentions ? (
+      {showMentionsSection ? (
         <div>
           <strong>Mentions</strong>
-          {mentionInbox.length === 0 ? (
-            <span className="menu-muted">No mentions.</span>
-          ) : (
-            mentionInbox.slice(0, 8).map((entry) => (
-              <button
-                key={entry.id}
-                type="button"
-                onClick={() => onOpenMention(entry)}
-              >
-                [{platformIconGlyph(entry.platform)}] #{entry.channel}{" "}
-                {entry.reason === "reply" ? "Reply" : "Mention"} ·{" "}
-                {entry.displayName}
-              </button>
-            ))
-          )}
+          {mentionInbox.slice(0, 8).map((entry) => (
+            <button
+              key={entry.id}
+              type="button"
+              onClick={() => onOpenMention(entry)}
+            >
+              [{platformIconGlyph(entry.platform)}] #{entry.channel}{" "}
+              {entry.reason === "reply" ? "Reply" : "Mention"} ·{" "}
+              {entry.displayName}
+            </button>
+          ))}
         </div>
       ) : null}
 
-      {showGlobalTimeline ? (
+      {showGlobalTimelineSection ? (
         <div>
           <strong>Global Timeline</strong>
-          {!globalSearchMode || !search.trim() ? (
-            <span className="menu-muted">
-              Enable Global search and type a query.
-            </span>
-          ) : globalSearchResults.length === 0 ? (
+          {globalSearchResults.length === 0 ? (
             <span className="menu-muted">No results.</span>
           ) : (
             globalSearchResults.slice(0, 10).map((message) => (
@@ -108,38 +116,28 @@ export function ChatDockSidebar({
         </div>
       ) : null}
 
-      {isAdvancedMode && showModHistory ? (
+      {showModHistorySection ? (
         <div>
           <strong>Mod History</strong>
-          {moderationHistory.length === 0 ? (
-            <span className="menu-muted">No actions yet.</span>
-          ) : (
-            moderationHistory.slice(0, 10).map((entry) => (
-              <span key={entry.id} className="menu-muted">
-                {new Date(entry.at).toLocaleTimeString()} {entry.action}{" "}
-                {entry.target}
-              </span>
-            ))
-          )}
+          {moderationHistory.slice(0, 10).map((entry) => (
+            <span key={entry.id} className="menu-muted">
+              {new Date(entry.at).toLocaleTimeString()} {entry.action}{" "}
+              {entry.target}
+            </span>
+          ))}
         </div>
       ) : null}
 
-      {isAdvancedMode && showUserCard ? (
+      {showUserCardSection ? (
         <div>
           <strong>User Card</strong>
-          {identityTarget ? (
-            <>
-              <span className="menu-muted">
-                {identityTarget.displayName} @{identityTarget.username}
-              </span>
-              <span className="menu-muted">
-                Total {identityStats.total} · 1m {identityStats.inLastMinute} ·
-                5m {identityStats.inLastFiveMinutes}
-              </span>
-            </>
-          ) : (
-            <span className="menu-muted">Click a username to pin stats.</span>
-          )}
+          <span className="menu-muted">
+            {identityTarget?.displayName} @{identityTarget?.username}
+          </span>
+          <span className="menu-muted">
+            Total {identityStats.total} · 1m {identityStats.inLastMinute} · 5m{" "}
+            {identityStats.inLastFiveMinutes}
+          </span>
         </div>
       ) : null}
     </>

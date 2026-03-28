@@ -98,7 +98,20 @@ const authHashBridgePage = (_pathname: string) => `
 
 type OpenAuthInBrowserOptions = {
   timeoutMs: number;
+  expectedState?: string;
   onComplete?: () => void;
+};
+
+const resolveCallbackState = (callbackUrl: string): string => {
+  try {
+    const callback = new URL(callbackUrl);
+    if (callback.hash.length > 1) {
+      return new URLSearchParams(callback.hash.slice(1)).get("state") ?? "";
+    }
+    return callback.searchParams.get("state") ?? "";
+  } catch {
+    return "";
+  }
 };
 
 export const openAuthInBrowser = async (
@@ -142,14 +155,42 @@ export const openAuthInBrowser = async (
       }
 
       if (oauthFragment && oauthFragment.length > 0) {
+        const callbackUrl = `${redirect.origin}${incoming.pathname}#${oauthFragment}`;
+        if (
+          options.expectedState &&
+          resolveCallbackState(callbackUrl) !== options.expectedState
+        ) {
+          sendAuthHtml(response, 400, "<h1>Invalid OAuth state</h1>");
+          finish(
+            undefined,
+            new Error(
+              "Sign-in was rejected because the OAuth state mismatched.",
+            ),
+          );
+          return;
+        }
         sendAuthHtml(response, 200, authCompletePage);
-        finish(`${redirect.origin}${incoming.pathname}#${oauthFragment}`);
+        finish(callbackUrl);
         return;
       }
 
       if (hasDirectCallbackParams) {
+        const callbackUrl = `${redirect.origin}${incoming.pathname}${incoming.search}`;
+        if (
+          options.expectedState &&
+          resolveCallbackState(callbackUrl) !== options.expectedState
+        ) {
+          sendAuthHtml(response, 400, "<h1>Invalid OAuth state</h1>");
+          finish(
+            undefined,
+            new Error(
+              "Sign-in was rejected because the OAuth state mismatched.",
+            ),
+          );
+          return;
+        }
         sendAuthHtml(response, 200, authCompletePage);
-        finish(`${redirect.origin}${incoming.pathname}${incoming.search}`);
+        finish(callbackUrl);
         return;
       }
 

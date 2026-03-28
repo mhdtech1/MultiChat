@@ -1,4 +1,4 @@
-import type { KeyboardEvent } from "react";
+import { useState, type KeyboardEvent } from "react";
 import type { ModeratorAction, Platform } from "../../../../shared/types";
 
 type WritableSource = {
@@ -68,6 +68,8 @@ export function ChatComposerPanel({
   autoBanEnabled,
   onToggleAutoBan,
 }: ChatComposerPanelProps) {
+  const [advancedQuickModOpen, setAdvancedQuickModOpen] = useState(false);
+
   return (
     <section className="action-rail">
       <form
@@ -157,53 +159,88 @@ export function ChatComposerPanel({
 
       {showQuickMod ? (
         <div className="quick-mod-panel quick-mod-panel--action-rail">
-          <strong>Quick Mod</strong>
-          <input
-            value={quickModUser}
-            onChange={(event) => onQuickModUserChange(event.target.value)}
-            placeholder="@username"
-            autoCapitalize="off"
-            autoCorrect="off"
-          />
-          <button
-            type="button"
-            onClick={() => onRunQuickMod("timeout_60")}
-            disabled={!canModerateActiveTab}
-          >
-            Timeout 1m
-          </button>
-          <button
-            type="button"
-            onClick={() => onRunQuickMod("timeout_600")}
-            disabled={!canModerateActiveTab}
-          >
-            Timeout 10m
-          </button>
-          <button
-            type="button"
-            onClick={() => onRunQuickMod("ban")}
-            disabled={!canModerateActiveTab}
-          >
-            Ban
-          </button>
-          <button
-            type="button"
-            onClick={() => onRunQuickMod("unban")}
-            disabled={!canModerateActiveTab}
-          >
-            Unban
-          </button>
-          <button
-            type="button"
-            className={
-              autoBanEnabled
-                ? "quick-mod-panel__danger active"
-                : "quick-mod-panel__danger"
-            }
-            onClick={onToggleAutoBan}
-          >
-            {autoBanEnabled ? "Auto Ban: ON" : "Auto Ban: OFF"}
-          </button>
+          <div className="quick-mod-panel__compact-row">
+            <strong>Quick Mod</strong>
+
+            <div className="quick-mod-panel__identity">
+              <input
+                value={quickModUser}
+                onChange={(event) => onQuickModUserChange(event.target.value)}
+                placeholder="@username"
+                autoCapitalize="off"
+                autoCorrect="off"
+              />
+            </div>
+
+            <div className="quick-mod-panel__primary-actions">
+              <button
+                type="button"
+                onClick={() => onRunQuickMod("timeout_60")}
+                disabled={!canModerateActiveTab}
+              >
+                Timeout 1m
+              </button>
+              <button
+                type="button"
+                className="quick-mod-panel__danger"
+                onClick={() => onRunQuickMod("ban")}
+                disabled={!canModerateActiveTab}
+              >
+                Ban
+              </button>
+              <button
+                type="button"
+                onClick={() => setAdvancedQuickModOpen((previous) => !previous)}
+              >
+                {advancedQuickModOpen ? "Less" : "More"}
+              </button>
+            </div>
+
+            {autoBanEnabled ? (
+              <span className="quick-mod-panel__danger-indicator">
+                Auto Ban ON
+              </span>
+            ) : null}
+          </div>
+
+          {advancedQuickModOpen ? (
+            <div className="quick-mod-panel__expanded">
+              <div className="quick-mod-panel__secondary-actions">
+                <button
+                  type="button"
+                  onClick={() => onRunQuickMod("timeout_600")}
+                  disabled={!canModerateActiveTab}
+                >
+                  Timeout 10m
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onRunQuickMod("unban")}
+                  disabled={!canModerateActiveTab}
+                >
+                  Unban
+                </button>
+              </div>
+
+              <div className="quick-mod-panel__emergency">
+                <button
+                  type="button"
+                  className={
+                    autoBanEnabled
+                      ? "quick-mod-panel__danger active"
+                      : "quick-mod-panel__danger"
+                  }
+                  onClick={onToggleAutoBan}
+                >
+                  {autoBanEnabled ? "Auto Ban: ON" : "Auto Ban: OFF"}
+                </button>
+                <span className="menu-muted">
+                  Emergency mode. Every new chatter message triggers a ban
+                  attempt.
+                </span>
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </section>

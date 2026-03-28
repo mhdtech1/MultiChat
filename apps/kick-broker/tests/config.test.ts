@@ -19,6 +19,10 @@ describe("kick broker config", () => {
       "http://localhost:51730/",
       "http://127.0.0.1:51730/",
     ]);
+    expect(config.allowedOrigins).toEqual([]);
+    expect(config.maxBodyBytes).toBe(8 * 1024);
+    expect(config.rateLimitWindowMs).toBe(60_000);
+    expect(config.rateLimitMaxRequests).toBe(60);
   });
 
   it("uses hosted defaults when PORT is provided", () => {
@@ -43,6 +47,20 @@ describe("kick broker config", () => {
         "http://localhost:51730/",
       ]),
     ).toBe(false);
+  });
+
+  it("normalizes configured allowed origins", () => {
+    const config = loadBrokerConfig({
+      KICK_CLIENT_ID: "kick-client",
+      KICK_CLIENT_SECRET: "kick-secret",
+      KICK_BROKER_ALLOWED_ORIGINS:
+        "https://app.example.com, http://localhost:3000",
+    });
+
+    expect(config.allowedOrigins).toEqual([
+      "https://app.example.com",
+      "http://localhost:3000",
+    ]);
   });
 
   it("validates exchange requests", () => {

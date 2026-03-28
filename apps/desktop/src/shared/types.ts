@@ -56,6 +56,7 @@ export type ChatTab = {
 };
 
 export type AppSettings = {
+  autoWorkspacePreset?: boolean;
   workspacePreset?: WorkspacePreset;
   theme?: ThemeOption;
   chatTextScale?: number;

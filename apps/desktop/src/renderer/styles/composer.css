@@ -113,13 +113,53 @@ input {
 
 .quick-mod-panel--action-rail {
   display: grid;
-  grid-template-columns: minmax(150px, 1.3fr) repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.quick-mod-panel__compact-row,
+.quick-mod-panel__emergency {
+  display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
-.quick-mod-panel--action-rail strong {
-  grid-column: 1 / -1;
+.quick-mod-panel__compact-row strong {
+  flex: 0 0 auto;
+}
+
+.quick-mod-panel__identity input {
+  width: 100%;
+}
+
+.quick-mod-panel__identity {
+  flex: 1 1 220px;
+  min-width: 180px;
+}
+
+.quick-mod-panel__primary-actions,
+.quick-mod-panel__secondary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.quick-mod-panel__expanded {
+  display: grid;
+  gap: 10px;
+}
+
+.quick-mod-panel__danger-indicator {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 111, 97, 0.28);
+  background: rgba(255, 111, 97, 0.12);
+  color: #ff9d93;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 .quick-mod-panel__danger {

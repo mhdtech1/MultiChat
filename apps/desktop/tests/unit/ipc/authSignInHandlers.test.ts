@@ -28,6 +28,7 @@ const createMockSettingsStore = (initialState: AppSettings = {}) => {
 const buildHandlers = (store: ReturnType<typeof createMockSettingsStore>) => {
   const clearAuthTokens = vi.fn().mockResolvedValue(undefined);
   const storeOAuthClientSecret = vi.fn().mockResolvedValue(undefined);
+  const ensureKickTokenBrokerReady = vi.fn().mockResolvedValue(undefined);
   const handlers = createAuthSignInHandlers({
     store: store as never,
     randomToken: vi.fn().mockReturnValue("token"),
@@ -46,6 +47,7 @@ const buildHandlers = (store: ReturnType<typeof createMockSettingsStore>) => {
     kickWriteAuthUnavailableMessage: KICK_WRITE_AUTH_UNAVAILABLE_MESSAGE,
     getKickClientSecret: vi.fn().mockResolvedValue(""),
     getKickTokenExchangeUrl: vi.fn().mockReturnValue(null),
+    ensureKickTokenBrokerReady,
     youtubeScopes: ["scope"],
     youtubeMissingOauthMessage: "youtube oauth missing",
     assertYouTubeAlphaEnabled: vi.fn(),
@@ -57,7 +59,12 @@ const buildHandlers = (store: ReturnType<typeof createMockSettingsStore>) => {
     saveYouTubeTokens: vi.fn().mockResolvedValue(undefined),
     youtubeFetchWithAuth: vi.fn(),
   });
-  return { handlers, clearAuthTokens, storeOAuthClientSecret };
+  return {
+    handlers,
+    clearAuthTokens,
+    storeOAuthClientSecret,
+    ensureKickTokenBrokerReady,
+  };
 };
 
 describe("createAuthSignInHandlers", () => {
@@ -116,6 +123,7 @@ describe("createAuthSignInHandlers", () => {
       kickWriteAuthUnavailableMessage: KICK_WRITE_AUTH_UNAVAILABLE_MESSAGE,
       getKickClientSecret: vi.fn().mockResolvedValue(""),
       getKickTokenExchangeUrl: vi.fn().mockReturnValue(null),
+      ensureKickTokenBrokerReady: vi.fn().mockResolvedValue(undefined),
       youtubeScopes: ["scope"],
       youtubeMissingOauthMessage: "youtube oauth missing",
       assertYouTubeAlphaEnabled: vi.fn(),
@@ -172,6 +180,11 @@ describe("createAuthSignInHandlers", () => {
       const getKickClientSecret = vi.fn().mockResolvedValue(
         "stored-kick-secret",
       );
+      const openAuthInBrowser = vi
+        .fn()
+        .mockResolvedValue(
+          "http://localhost/stored-kick-callback?code=kick-code&state=kick-state",
+        );
 
       const handlers = createAuthSignInHandlers({
         store: store as never,
@@ -179,11 +192,7 @@ describe("createAuthSignInHandlers", () => {
           .fn()
           .mockReturnValueOnce("kick-state")
           .mockReturnValueOnce("kick-verifier"),
-        openAuthInBrowser: vi
-          .fn()
-          .mockResolvedValue(
-            "http://localhost/stored-kick-callback?code=kick-code&state=kick-state",
-          ),
+        openAuthInBrowser,
         fetchJsonOrThrow: async <T,>(response: Response, source: string) => {
           const text = await response.text();
           const parsed = text ? JSON.parse(text) : {};
@@ -205,6 +214,7 @@ describe("createAuthSignInHandlers", () => {
         kickWriteAuthUnavailableMessage: KICK_WRITE_AUTH_UNAVAILABLE_MESSAGE,
         getKickClientSecret,
         getKickTokenExchangeUrl: vi.fn().mockReturnValue(null),
+        ensureKickTokenBrokerReady: vi.fn().mockResolvedValue(undefined),
         youtubeScopes: ["scope"],
         youtubeMissingOauthMessage: "youtube oauth missing",
         assertYouTubeAlphaEnabled: vi.fn(),
@@ -225,6 +235,11 @@ describe("createAuthSignInHandlers", () => {
       const tokenRequestBody = fetchMock.mock.calls[0]?.[1]
         ?.body as URLSearchParams;
       expect(getKickClientSecret).toHaveBeenCalledTimes(1);
+      expect(openAuthInBrowser).toHaveBeenCalledWith(
+        expect.stringContaining("https://id.kick.com/oauth/authorize"),
+        "http://localhost/stored-kick-callback",
+        "kick-state",
+      );
       expect(tokenRequestBody.get("client_id")).toBe("stored-kick-client");
       expect(tokenRequestBody.get("client_secret")).toBe("stored-kick-secret");
       expect(tokenRequestBody.get("redirect_uri")).toBe(
@@ -276,6 +291,7 @@ describe("createAuthSignInHandlers", () => {
         kickWriteAuthUnavailableMessage: KICK_WRITE_AUTH_UNAVAILABLE_MESSAGE,
         getKickClientSecret: vi.fn().mockResolvedValue("configured-secret"),
         getKickTokenExchangeUrl: vi.fn().mockReturnValue(null),
+        ensureKickTokenBrokerReady: vi.fn().mockResolvedValue(undefined),
         youtubeScopes: ["scope"],
         youtubeMissingOauthMessage: "youtube oauth missing",
         assertYouTubeAlphaEnabled: vi.fn(),
@@ -362,6 +378,12 @@ describe("createAuthSignInHandlers", () => {
         kickClientId: "stored-kick-client",
         kickRedirectUri: "http://localhost/stored-kick-callback",
       });
+      const ensureKickTokenBrokerReady = vi.fn().mockResolvedValue(undefined);
+      const openAuthInBrowser = vi
+        .fn()
+        .mockResolvedValue(
+          "http://localhost/stored-kick-callback?code=kick-code&state=kick-state",
+        );
 
       const handlers = createAuthSignInHandlers({
         store: store as never,
@@ -369,11 +391,7 @@ describe("createAuthSignInHandlers", () => {
           .fn()
           .mockReturnValueOnce("kick-state")
           .mockReturnValueOnce("kick-verifier"),
-        openAuthInBrowser: vi
-          .fn()
-          .mockResolvedValue(
-            "http://localhost/stored-kick-callback?code=kick-code&state=kick-state",
-          ),
+        openAuthInBrowser,
         fetchJsonOrThrow: async <T,>(response: Response, source: string) => {
           const text = await response.text();
           const parsed = text ? JSON.parse(text) : {};
@@ -383,6 +401,7 @@ describe("createAuthSignInHandlers", () => {
           return parsed as T;
         },
         clearAuthTokens: vi.fn().mockResolvedValue(undefined),
+        storeOAuthClientSecret: vi.fn().mockResolvedValue(undefined),
         storeAuthTokens: vi.fn().mockResolvedValue(undefined),
         parseKickUserName: vi.fn().mockReturnValue("broker-user"),
         twitchDefaultRedirectUri: "http://localhost/twitch/callback",
@@ -396,6 +415,7 @@ describe("createAuthSignInHandlers", () => {
         getKickTokenExchangeUrl: vi
           .fn()
           .mockReturnValue("https://broker.example.com/kick/token"),
+        ensureKickTokenBrokerReady,
         youtubeScopes: ["scope"],
         youtubeMissingOauthMessage: "youtube oauth missing",
         assertYouTubeAlphaEnabled: vi.fn(),
@@ -417,10 +437,16 @@ describe("createAuthSignInHandlers", () => {
       expect(fetchMock.mock.calls[0]?.[0]).toBe(
         "https://broker.example.com/kick/token",
       );
+      expect(ensureKickTokenBrokerReady).toHaveBeenCalledTimes(1);
       expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
         "Content-Type": "application/json",
         Accept: "application/json",
       });
+      expect(openAuthInBrowser).toHaveBeenCalledWith(
+        expect.stringContaining("https://id.kick.com/oauth/authorize"),
+        "http://localhost/stored-kick-callback",
+        "kick-state",
+      );
       expect(fetchMock.mock.calls[0]?.[1]?.body).toBe(
         JSON.stringify({
           code: "kick-code",

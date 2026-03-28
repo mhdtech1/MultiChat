@@ -13,3 +13,9 @@ services:
         sync: false
       - key: KICK_BROKER_ALLOWED_REDIRECT_PREFIXES
         value: http://localhost:51730/,http://127.0.0.1:51730/
+      - key: KICK_BROKER_MAX_BODY_BYTES
+        value: "8192"
+      - key: KICK_BROKER_RATE_LIMIT_WINDOW_MS
+        value: "60000"
+      - key: KICK_BROKER_RATE_LIMIT_MAX_REQUESTS
+        value: "60"

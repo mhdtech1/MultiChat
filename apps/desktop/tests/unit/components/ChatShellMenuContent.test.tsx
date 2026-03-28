@@ -5,8 +5,13 @@ import { ChatShellMenuContent } from "../../../src/renderer/ui/components/Shell/
 
 const baseProps: React.ComponentProps<typeof ChatShellMenuContent> = {
   isAdvancedMode: true,
+  autoWorkspacePreset: true,
+  onAutoWorkspacePresetChange: vi.fn(),
   workspacePreset: "streamer",
   onWorkspacePresetChange: vi.fn(),
+  workspacePresetStatusTitle: "Moderator -> Mod Desk",
+  workspacePresetStatusReason:
+    "You can moderate this channel, so Mod Desk keeps those tools ready.",
   isSimpleMode: false,
   onModeChange: vi.fn(),
   theme: "dark",
@@ -183,8 +188,19 @@ describe("ChatShellMenuContent", () => {
     expect(
       screen.getByRole("button", { name: "Sign in Twitch" }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText((content) => content.includes("Moderator -> Mod Desk")),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Workspace")).toBeDisabled();
 
     fireEvent.click(screen.getByRole("button", { name: "Auto Ban: ON" }));
     expect(baseProps.onToggleAutoBan).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets the user disable auto desk switching", () => {
+    render(<ChatShellMenuContent {...baseProps} />);
+
+    fireEvent.click(screen.getByLabelText("Auto-switch desk by channel role"));
+    expect(baseProps.onAutoWorkspacePresetChange).toHaveBeenCalledWith(false);
   });
 });

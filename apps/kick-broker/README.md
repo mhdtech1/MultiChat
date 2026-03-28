@@ -40,9 +40,17 @@ Required secrets in Render:
 Optional:
 
 - `KICK_BROKER_ALLOWED_REDIRECT_PREFIXES`
+- `KICK_BROKER_ALLOWED_ORIGINS`
+- `KICK_BROKER_MAX_BODY_BYTES`
+- `KICK_BROKER_RATE_LIMIT_WINDOW_MS`
+- `KICK_BROKER_RATE_LIMIT_MAX_REQUESTS`
 
 The service automatically respects Render's `PORT` environment variable and binds
 to `0.0.0.0`.
+
+If `KICK_BROKER_ALLOWED_ORIGINS` is set, only those browser origins can call the
+broker. Desktop requests from the Electron main process continue to work without
+an `Origin` header.
 
 ## Important limitation
 

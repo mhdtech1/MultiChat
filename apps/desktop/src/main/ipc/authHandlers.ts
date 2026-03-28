@@ -27,7 +27,11 @@ type CreateAuthTikTokHandlersOptions = {
 type CreateAuthSignInHandlersOptions = {
   store: JsonSettingsStore;
   randomToken: (bytes?: number) => string;
-  openAuthInBrowser: (authUrl: string, redirectUri: string) => Promise<string>;
+  openAuthInBrowser: (
+    authUrl: string,
+    redirectUri: string,
+    expectedState?: string,
+  ) => Promise<string>;
   fetchJsonOrThrow: <T>(response: Response, source: string) => Promise<T>;
   clearAuthTokens: (platform: AuthTokenPlatform) => Promise<void>;
   storeOAuthClientSecret: (
@@ -48,6 +52,7 @@ type CreateAuthSignInHandlersOptions = {
   kickWriteAuthUnavailableMessage: string;
   getKickClientSecret: () => Promise<string>;
   getKickTokenExchangeUrl: () => string | null;
+  ensureKickTokenBrokerReady: () => Promise<void>;
   youtubeScopes: string[];
   youtubeMissingOauthMessage: string;
   assertYouTubeAlphaEnabled: () => void;
@@ -223,6 +228,7 @@ export function createAuthSignInHandlers(
     kickWriteAuthUnavailableMessage,
     getKickClientSecret,
     getKickTokenExchangeUrl,
+    ensureKickTokenBrokerReady,
     youtubeScopes,
     youtubeMissingOauthMessage,
     assertYouTubeAlphaEnabled,
@@ -260,6 +266,7 @@ export function createAuthSignInHandlers(
       const callbackUrl = await openAuthInBrowser(
         authUrl.toString(),
         redirectUri,
+        state,
       );
       const hash = callbackUrl.includes("#")
         ? callbackUrl.slice(callbackUrl.indexOf("#") + 1)
@@ -320,6 +327,9 @@ export function createAuthSignInHandlers(
       if (!clientId || (!clientSecret && !kickTokenExchangeUrl)) {
         throw new Error(kickWriteAuthUnavailableMessage);
       }
+      if (kickTokenExchangeUrl) {
+        await ensureKickTokenBrokerReady();
+      }
       const state = randomToken(24);
       const codeVerifier = randomToken(48);
       const codeChallenge = crypto
@@ -339,6 +349,7 @@ export function createAuthSignInHandlers(
       const callbackUrl = await openAuthInBrowser(
         authUrl.toString(),
         redirectUri,
+        state,
       );
       const callback = new URL(callbackUrl);
       const error = callback.searchParams.get("error");
@@ -516,6 +527,7 @@ export function createAuthSignInHandlers(
       const callbackUrl = await openAuthInBrowser(
         authUrl.toString(),
         redirectUri,
+        state,
       );
       const callback = new URL(callbackUrl);
 

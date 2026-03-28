@@ -58,8 +58,12 @@ type MenuSectionProps = {
 
 export type ChatShellMenuContentProps = {
   isAdvancedMode: boolean;
+  autoWorkspacePreset: boolean;
+  onAutoWorkspacePresetChange: (value: boolean) => void;
   workspacePreset: WorkspacePreset;
   onWorkspacePresetChange: (preset: WorkspacePreset) => void;
+  workspacePresetStatusTitle: string;
+  workspacePresetStatusReason: string;
   isSimpleMode: boolean;
   onModeChange: (mode: "simple" | "advanced") => void;
   theme: ThemeOption;
@@ -198,8 +202,12 @@ function MenuSection({ eyebrow, title, children }: MenuSectionProps) {
 
 export function ChatShellMenuContent({
   isAdvancedMode,
+  autoWorkspacePreset,
+  onAutoWorkspacePresetChange,
   workspacePreset,
   onWorkspacePresetChange,
+  workspacePresetStatusTitle,
+  workspacePresetStatusReason,
   isSimpleMode,
   onModeChange,
   theme,
@@ -331,10 +339,24 @@ export function ChatShellMenuContent({
       >
         <div className="menu-group">
           <strong>Experience</strong>
+          <label className="menu-check">
+            <input
+              type="checkbox"
+              checked={autoWorkspacePreset}
+              onChange={(event) =>
+                onAutoWorkspacePresetChange(event.target.checked)
+              }
+            />
+            Auto-switch desk by channel role
+          </label>
+          <span className="menu-muted">
+            {workspacePresetStatusTitle} · {workspacePresetStatusReason}
+          </span>
           <label className="menu-inline">
             Workspace
             <select
               value={workspacePreset}
+              disabled={autoWorkspacePreset}
               onChange={(event) =>
                 onWorkspacePresetChange(event.target.value as WorkspacePreset)
               }
@@ -348,6 +370,7 @@ export function ChatShellMenuContent({
             Mode
             <select
               value={isSimpleMode ? "simple" : "advanced"}
+              disabled={autoWorkspacePreset}
               onChange={(event) =>
                 onModeChange(event.target.value as "simple" | "advanced")
               }
@@ -385,9 +408,11 @@ export function ChatShellMenuContent({
             <span className="menu-muted">{chatTextScale}%</span>
           </label>
           <span className="menu-muted">
-            {isSimpleMode
-              ? "Simple mode keeps the shell focused on core stream actions."
-              : "Advanced mode keeps diagnostics and deeper routing controls in reach."}
+            {autoWorkspacePreset
+              ? "Auto mode chooses Streamer, Mod Desk, or Viewer based on whether you are the broadcaster, a moderator, or just watching."
+              : isSimpleMode
+                ? "Simple mode keeps the shell focused on core stream actions."
+                : "Advanced mode keeps diagnostics and deeper routing controls in reach."}
           </span>
           <label className="menu-check">
             <input
@@ -434,6 +459,7 @@ export function ChatShellMenuContent({
               <input
                 type="checkbox"
                 checked={dockedPanels.mentions === true}
+                disabled={autoWorkspacePreset}
                 onChange={(event) =>
                   onDockedPanelChange("mentions", event.target.checked)
                 }
@@ -444,6 +470,7 @@ export function ChatShellMenuContent({
               <input
                 type="checkbox"
                 checked={dockedPanels.globalTimeline === true}
+                disabled={autoWorkspacePreset}
                 onChange={(event) =>
                   onDockedPanelChange("globalTimeline", event.target.checked)
                 }
@@ -454,6 +481,7 @@ export function ChatShellMenuContent({
               <input
                 type="checkbox"
                 checked={dockedPanels.modHistory === true}
+                disabled={autoWorkspacePreset}
                 onChange={(event) =>
                   onDockedPanelChange("modHistory", event.target.checked)
                 }
@@ -464,6 +492,7 @@ export function ChatShellMenuContent({
               <input
                 type="checkbox"
                 checked={dockedPanels.userCard === true}
+                disabled={autoWorkspacePreset}
                 onChange={(event) =>
                   onDockedPanelChange("userCard", event.target.checked)
                 }
@@ -556,6 +585,7 @@ export function ChatShellMenuContent({
               <input
                 type="checkbox"
                 checked={collaborationModeEnabled}
+                disabled={autoWorkspacePreset}
                 onChange={(event) =>
                   onCollaborationModeChange(event.target.checked)
                 }
@@ -612,16 +642,16 @@ export function ChatShellMenuContent({
 
       <MenuSection
         eyebrow="Moderation"
-        title="Live response, alerts, and policy controls"
+        title="Quick controls, alerts, and emergency tools"
       >
         <div className="menu-group">
-          <strong>Quick Controls</strong>
+          <strong>Emergency Controls</strong>
           <button type="button" onClick={onToggleAutoBan}>
             {autoBanEnabled ? "Auto Ban: ON" : "Auto Ban: OFF"}
           </button>
           <span className="menu-muted">
-            When enabled, any non-system chatter message triggers an automatic
-            ban attempt.
+            Emergency only. Any non-system chatter message triggers a ban
+            attempt.
           </span>
         </div>
 
@@ -1104,6 +1134,7 @@ export function ChatShellMenuContent({
               <input
                 type="checkbox"
                 checked={globalSearchMode}
+                disabled={autoWorkspacePreset}
                 onChange={(event) =>
                   onGlobalSearchModeChange(event.target.checked)
                 }

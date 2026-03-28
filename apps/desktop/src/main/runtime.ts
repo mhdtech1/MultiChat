@@ -111,6 +111,10 @@ const KICK_MANAGED_BROKER_EXCHANGE_URL =
   "https://kick-broker.onrender.com/kick/exchange";
 const KICK_MANAGED_BROKER_REFRESH_URL =
   "https://kick-broker.onrender.com/kick/refresh";
+const KICK_BROKER_HEALTH_TIMEOUT_MS = 10_000;
+const KICK_BROKER_WAKE_TIMEOUT_MS = 75_000;
+const KICK_BROKER_WAKE_RETRY_MS = 2_500;
+const KICK_BROKER_KEEPALIVE_INTERVAL_MS = 10 * 60 * 1000;
 const YOUTUBE_MANAGED_CLIENT_ID =
   "1008732662207-rufcsa7rafob02h29docduk7pboim0s8.apps.googleusercontent.com";
 const YOUTUBE_MANAGED_CLIENT_SECRET = "";
@@ -198,6 +202,112 @@ const getKickTokenBrokerConfig = (): KickTokenBrokerConfig | null => {
   return { exchangeUrl, refreshUrl };
 };
 
+let kickBrokerWarmupPromise: Promise<void> | null = null;
+let kickBrokerKeepAliveTimer: NodeJS.Timeout | null = null;
+
+const sleep = (ms: number) =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+const getKickTokenBrokerHealthUrl = (): string | null => {
+  const config = getKickTokenBrokerConfig();
+  if (!config) {
+    return null;
+  }
+  try {
+    return new URL("/health", config.exchangeUrl).toString();
+  } catch {
+    return null;
+  }
+};
+
+const fetchKickTokenBrokerHealth = async (
+  timeoutMs = KICK_BROKER_HEALTH_TIMEOUT_MS,
+): Promise<boolean> => {
+  const healthUrl = getKickTokenBrokerHealthUrl();
+  if (!healthUrl) {
+    return false;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
+
+  try {
+    const response = await fetch(healthUrl, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        "Cache-Control": "no-cache",
+      },
+      signal: controller.signal,
+    });
+    return response.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
+const ensureKickTokenBrokerReady = async (): Promise<void> => {
+  if (!getKickTokenBrokerConfig()) {
+    return;
+  }
+  if (kickBrokerWarmupPromise) {
+    return kickBrokerWarmupPromise;
+  }
+
+  kickBrokerWarmupPromise = (async () => {
+    const deadline = Date.now() + KICK_BROKER_WAKE_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      if (await fetchKickTokenBrokerHealth()) {
+        return;
+      }
+      await sleep(KICK_BROKER_WAKE_RETRY_MS);
+    }
+    throw new Error(
+      "Kick auth service is waking up. Please wait a moment and try again.",
+    );
+  })().finally(() => {
+    kickBrokerWarmupPromise = null;
+  });
+
+  return kickBrokerWarmupPromise;
+};
+
+const warmKickTokenBrokerInBackground = (): void => {
+  if (!getKickTokenBrokerConfig()) {
+    return;
+  }
+  void ensureKickTokenBrokerReady().catch((error) => {
+    console.info(
+      "[kick-broker] warmup skipped:",
+      error instanceof Error ? error.message : String(error),
+    );
+  });
+};
+
+const startKickTokenBrokerKeepAlive = (): void => {
+  if (kickBrokerKeepAliveTimer || !getKickTokenBrokerConfig()) {
+    return;
+  }
+  warmKickTokenBrokerInBackground();
+  kickBrokerKeepAliveTimer = setInterval(() => {
+    warmKickTokenBrokerInBackground();
+  }, KICK_BROKER_KEEPALIVE_INTERVAL_MS);
+};
+
+const stopKickTokenBrokerKeepAlive = (): void => {
+  if (!kickBrokerKeepAliveTimer) {
+    return;
+  }
+  clearInterval(kickBrokerKeepAliveTimer);
+  kickBrokerKeepAliveTimer = null;
+};
+
 function bringAppToFrontAfterOAuth() {
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (mainWindow.isMinimized()) {
@@ -216,10 +326,12 @@ function bringAppToFrontAfterOAuth() {
 const openAuthInBrowser = (
   authUrl: string,
   redirectUri: string,
+  expectedState?: string,
   timeoutMs = AUTH_CALLBACK_TIMEOUT_MS,
 ) =>
   openLoopbackAuthInBrowser(authUrl, redirectUri, {
     timeoutMs,
+    expectedState,
     onComplete: bringAppToFrontAfterOAuth,
   });
 
@@ -466,6 +578,7 @@ const openTikTokSignInWindow = async (): Promise<{
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,
+        sandbox: true,
         partition: TIKTOK_AUTH_PARTITION,
       },
     });
@@ -1576,6 +1689,7 @@ const refreshKickAccessToken = async (): Promise<string> => {
   let tokens: KickOAuthTokenResponse;
   try {
     if (kickTokenBrokerConfig) {
+      await ensureKickTokenBrokerReady();
       const response = await fetch(kickTokenBrokerConfig.refreshUrl, {
         method: "POST",
         headers: {
@@ -3293,9 +3407,7 @@ const setupAppMenu = () => {
     {
       label: "Chatrix Releases",
       click: () => {
-        void shell.openExternal(
-          "https://github.com/mhdtech1/MultiChat/releases",
-        );
+        void shell.openExternal("https://github.com/mhdtech1/Chatrix/releases");
       },
     },
   ];
@@ -3341,7 +3453,7 @@ const setupAppMenu = () => {
       submenu: [
         { role: "reload" },
         { role: "forceReload" },
-        { role: "toggleDevTools" },
+        ...(!app.isPackaged ? [{ role: "toggleDevTools" as const }] : []),
         { type: "separator" },
         { role: "resetZoom" },
         { role: "zoomIn" },
@@ -3753,6 +3865,7 @@ app.whenReady().then(async () => {
       logger: (message) => console.info(message),
     });
   }
+  startKickTokenBrokerKeepAlive();
   createMainWindow();
   setupAppMenu();
   setupAutoUpdater();
@@ -3790,6 +3903,7 @@ app.whenReady().then(async () => {
       getKickClientSecret,
       getKickTokenExchangeUrl: () =>
         getKickTokenBrokerConfig()?.exchangeUrl ?? null,
+      ensureKickTokenBrokerReady,
       youtubeScopes: YOUTUBE_SCOPES,
       youtubeMissingOauthMessage: YOUTUBE_MISSING_OAUTH_MESSAGE,
       assertYouTubeAlphaEnabled,
@@ -3893,6 +4007,7 @@ app.on("window-all-closed", () => {
 app.on("before-quit", () => {
   appIsQuitting = true;
   clearPendingAutoInstallTimer();
+  stopKickTokenBrokerKeepAlive();
   void disconnectAllTikTokConnections();
 });
 

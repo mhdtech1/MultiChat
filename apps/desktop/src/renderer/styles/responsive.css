@@ -24,11 +24,25 @@
   }
 
   .quick-mod-panel--action-rail {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
   }
 
-  .quick-mod-panel--action-rail strong {
-    grid-column: 1 / -1;
+  .quick-mod-panel__compact-row {
+    align-items: stretch;
+  }
+
+  .quick-mod-panel__identity {
+    flex-basis: 100%;
+  }
+
+  .quick-mod-panel__primary-actions,
+  .quick-mod-panel__secondary-actions {
+    width: 100%;
+  }
+
+  .quick-mod-panel__primary-actions button,
+  .quick-mod-panel__secondary-actions button {
+    flex: 1 1 100%;
   }
 
   .main-layout {

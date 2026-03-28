@@ -16,12 +16,19 @@ export type BrokerConfig = {
   kickClientId: string;
   kickClientSecret: string;
   allowedRedirectPrefixes: string[];
+  allowedOrigins: string[];
+  maxBodyBytes: number;
+  rateLimitWindowMs: number;
+  rateLimitMaxRequests: number;
 };
 
 const MAX_PORT = 65535;
 const DEFAULT_PORT = 3001;
 const DEFAULT_HOST = "127.0.0.1";
 const HOSTED_DEFAULT_HOST = "0.0.0.0";
+const DEFAULT_MAX_BODY_BYTES = 8 * 1024;
+const DEFAULT_RATE_LIMIT_WINDOW_MS = 60_000;
+const DEFAULT_RATE_LIMIT_MAX_REQUESTS = 60;
 const DEFAULT_REDIRECT_PREFIXES = [
   "http://localhost:51730/",
   "http://127.0.0.1:51730/",
@@ -51,6 +58,20 @@ const resolveDefaultHost = (env: NodeJS.ProcessEnv): string => {
   return DEFAULT_HOST;
 };
 
+const parsePositiveInteger = (
+  value: string | undefined,
+  fallback: number,
+  envKey: string,
+): number => {
+  const raw = normalizeNonEmptyString(value);
+  if (!raw) return fallback;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`${envKey} must be a positive integer.`);
+  }
+  return parsed;
+};
+
 const parseAllowedRedirectPrefixes = (value: string | undefined): string[] => {
   const raw = normalizeNonEmptyString(value);
   const candidates = raw
@@ -78,6 +99,32 @@ const parseAllowedRedirectPrefixes = (value: string | undefined): string[] => {
   });
 };
 
+const parseAllowedOrigins = (value: string | undefined): string[] => {
+  const raw = normalizeNonEmptyString(value);
+  if (!raw) return [];
+
+  return raw
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      let parsed: URL;
+      try {
+        parsed = new URL(entry);
+      } catch {
+        throw new Error(
+          `KICK_BROKER_ALLOWED_ORIGINS contains an invalid URL: ${entry}`,
+        );
+      }
+      if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+        throw new Error(
+          `KICK_BROKER_ALLOWED_ORIGINS must use http or https: ${entry}`,
+        );
+      }
+      return parsed.origin;
+    });
+};
+
 export const loadBrokerConfig = (
   env: NodeJS.ProcessEnv = process.env,
 ): BrokerConfig => {
@@ -97,6 +144,22 @@ export const loadBrokerConfig = (
     kickClientSecret,
     allowedRedirectPrefixes: parseAllowedRedirectPrefixes(
       env.KICK_BROKER_ALLOWED_REDIRECT_PREFIXES,
+    ),
+    allowedOrigins: parseAllowedOrigins(env.KICK_BROKER_ALLOWED_ORIGINS),
+    maxBodyBytes: parsePositiveInteger(
+      env.KICK_BROKER_MAX_BODY_BYTES,
+      DEFAULT_MAX_BODY_BYTES,
+      "KICK_BROKER_MAX_BODY_BYTES",
+    ),
+    rateLimitWindowMs: parsePositiveInteger(
+      env.KICK_BROKER_RATE_LIMIT_WINDOW_MS,
+      DEFAULT_RATE_LIMIT_WINDOW_MS,
+      "KICK_BROKER_RATE_LIMIT_WINDOW_MS",
+    ),
+    rateLimitMaxRequests: parsePositiveInteger(
+      env.KICK_BROKER_RATE_LIMIT_MAX_REQUESTS,
+      DEFAULT_RATE_LIMIT_MAX_REQUESTS,
+      "KICK_BROKER_RATE_LIMIT_MAX_REQUESTS",
     ),
   };
 };

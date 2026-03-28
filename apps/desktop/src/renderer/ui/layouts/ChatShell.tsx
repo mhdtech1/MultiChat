@@ -54,6 +54,11 @@ import {
   isMentionForPlatformUser,
   isReplyForPlatformUser,
 } from "../../utils/mentions";
+import {
+  formatWorkspacePresetLabel,
+  getWorkspacePresetConfig,
+  resolveWorkspacePresetDecision,
+} from "../../utils/workspacePreset";
 import { PlatformIcon } from "../components/common/PlatformIcon";
 import { ChatShellAccountStrip } from "../components/Guides/ChatShellAccountStrip";
 import { GuideOverlays } from "../components/Guides/GuideOverlays";
@@ -173,6 +178,7 @@ type DisplayBadge =
     };
 
 const defaultSettings: Settings = {
+  autoWorkspacePreset: true,
   uiMode: "simple",
   workspacePreset: "streamer",
   theme: "dark",
@@ -2441,6 +2447,14 @@ const MainApp: React.FC = () => {
   const lastMentionAlertAtRef = useRef(0);
   const spamFilterRef = useRef<Map<string, number>>(new Map());
   const autoBanAttemptedAtRef = useRef<Map<string, number>>(new Map());
+  const executeModeratorActionForSourceRef = useRef<
+    ((
+      source: ChatSource,
+      action: ModeratorAction,
+      message: ChatMessage,
+      options?: { silent?: boolean },
+    ) => Promise<boolean>) | null
+  >(null);
   const tabsRef = useRef<ChatTab[]>([]);
   const tabIdsBySourceIdRef = useRef<Record<string, string[]>>({});
   const sourceByIdRef = useRef<Map<string, ChatSource>>(new Map());
@@ -2468,8 +2482,6 @@ const MainApp: React.FC = () => {
   >({});
   const lastRaidSampleAtByTabRef = useRef<Record<string, number>>({});
   const mentionInboxCount = mentionInbox.length;
-  const isSimpleMode = settings.uiMode === "simple";
-  const isAdvancedMode = !isSimpleMode;
   const theme =
     settings.theme === "light"
       ? "light"
@@ -2497,7 +2509,6 @@ const MainApp: React.FC = () => {
     Math.min(180, Number(settings.streamDelaySeconds ?? 0) || 0),
   );
   const spoilerBlurDelayed = settings.spoilerBlurDelayed === true;
-  const globalSearchMode = settings.globalSearchMode === true;
   const notificationScene = settings.notificationScene ?? "live";
   const sceneOverrides =
     notificationScene === "offline"
@@ -2505,19 +2516,6 @@ const MainApp: React.FC = () => {
       : notificationScene === "chatting"
         ? { sound: false, notify: true }
         : { sound: true, notify: true };
-  const hasDockedPanels = Boolean(
-    isAdvancedMode &&
-    (settings.dockedPanels?.mentions ||
-      settings.dockedPanels?.modHistory ||
-      settings.dockedPanels?.userCard ||
-      settings.dockedPanels?.globalTimeline),
-  );
-
-  const startDockPanelResize = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!hasDockedPanels) return;
-    event.preventDefault();
-    setDockPanelResizing(true);
-  };
 
   useEffect(() => {
     if (!dockPanelResizing) return;
@@ -3271,7 +3269,6 @@ const MainApp: React.FC = () => {
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      if (!isAdvancedMode) return;
       const key = `${event.ctrlKey ? "Control+" : ""}${event.shiftKey ? "Shift+" : ""}${event.key.toUpperCase()}`;
       if (key === hotkeys.focusSearch.toUpperCase()) {
         event.preventDefault();
@@ -3280,7 +3277,7 @@ const MainApp: React.FC = () => {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [isAdvancedMode]);
+  }, []);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -3653,6 +3650,114 @@ const MainApp: React.FC = () => {
     );
   }, [delayedReplayMessages, lockCutoffTimestamp, newestLocked]);
 
+  const activeSingleSourceIsBroadcaster = useMemo(() => {
+    if (!activeSingleSource) return false;
+    if (activeSingleSource.platform === "youtube") {
+      return writableActiveTabSources.some(
+        (source) => source.id === activeSingleSource.id,
+      );
+    }
+    if (
+      activeSingleSource.platform !== "twitch" &&
+      activeSingleSource.platform !== "kick"
+    ) {
+      return false;
+    }
+    const currentUsername = normalizeUserKey(
+      activeSingleSource.platform === "twitch"
+        ? (settings.twitchUsername ?? "")
+        : (settings.kickUsername ?? ""),
+    );
+    return (
+      currentUsername.length > 0 &&
+      normalizeUserKey(activeSingleSource.channel) === currentUsername
+    );
+  }, [
+    activeSingleSource,
+    settings.kickUsername,
+    settings.twitchUsername,
+    writableActiveTabSources,
+  ]);
+
+  const activeTabHasSharedChat = useMemo(() => {
+    if (!activeSingleSource || activeSingleSource.platform !== "twitch")
+      return false;
+    const activeChannel = normalizeUserKey(activeSingleSource.channel);
+    return delayedReplayMessages.some(
+      (message) =>
+        message.platform === "twitch" &&
+        normalizeUserKey(message.channel) === activeChannel &&
+        readCombinedChannels(message).length > 0,
+    );
+  }, [activeSingleSource, delayedReplayMessages]);
+
+  const persistedWorkspacePreset = (settings.workspacePreset ??
+    "streamer") as WorkspacePreset;
+  const autoWorkspacePreset = settings.autoWorkspacePreset !== false;
+  const manualWorkspacePresetConfig = useMemo(
+    () => getWorkspacePresetConfig(persistedWorkspacePreset),
+    [persistedWorkspacePreset],
+  );
+  const resolvedWorkspacePreset = useMemo(
+    () =>
+      resolveWorkspacePresetDecision({
+        hasActiveTab: Boolean(activeTab),
+        isMergedTab: activeTabIsMerged,
+        hasSharedChat: activeTabHasSharedChat,
+        isBroadcaster: activeSingleSourceIsBroadcaster,
+        canModerate: canModerateActiveTab,
+      }),
+    [
+      activeSingleSourceIsBroadcaster,
+      activeTab,
+      activeTabHasSharedChat,
+      activeTabIsMerged,
+      canModerateActiveTab,
+    ],
+  );
+  const effectiveWorkspacePreset = autoWorkspacePreset
+    ? resolvedWorkspacePreset.preset
+    : persistedWorkspacePreset;
+  const effectiveWorkspacePresetConfig = useMemo(
+    () => getWorkspacePresetConfig(effectiveWorkspacePreset),
+    [effectiveWorkspacePreset],
+  );
+  const effectiveUiMode = autoWorkspacePreset
+    ? effectiveWorkspacePresetConfig.uiMode
+    : (settings.uiMode ?? manualWorkspacePresetConfig.uiMode);
+  const isSimpleMode = effectiveUiMode === "simple";
+  const isAdvancedMode = !isSimpleMode;
+  const effectiveDockedPanels = autoWorkspacePreset
+    ? effectiveWorkspacePresetConfig.dockedPanels
+    : (settings.dockedPanels ?? manualWorkspacePresetConfig.dockedPanels);
+  const effectiveGlobalSearchMode = autoWorkspacePreset
+    ? effectiveWorkspacePresetConfig.globalSearchMode
+    : (settings.globalSearchMode ?? manualWorkspacePresetConfig.globalSearchMode);
+  const effectiveCollaborationMode = autoWorkspacePreset
+    ? effectiveWorkspacePresetConfig.collaborationMode
+    : (settings.collaborationMode ?? manualWorkspacePresetConfig.collaborationMode);
+  const workspacePresetStatusTitle = autoWorkspacePreset
+    ? `${resolvedWorkspacePreset.label} -> ${formatWorkspacePresetLabel(
+        resolvedWorkspacePreset.preset,
+      )}`
+    : `Manual -> ${formatWorkspacePresetLabel(persistedWorkspacePreset)}`;
+  const workspacePresetStatusReason = autoWorkspacePreset
+    ? resolvedWorkspacePreset.reason
+    : "Manual desk selection is active until you turn auto-switch back on.";
+  const hasConfiguredDockPanels = Boolean(
+    isAdvancedMode &&
+      (effectiveDockedPanels.mentions ||
+        effectiveDockedPanels.modHistory ||
+        effectiveDockedPanels.userCard ||
+        effectiveDockedPanels.globalTimeline),
+  );
+
+  const startDockPanelResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!hasConfiguredDockPanels) return;
+    event.preventDefault();
+    setDockPanelResizing(true);
+  };
+
   const pendingNewestCount = useMemo(() => {
     if (newestLocked) return 0;
     return Math.max(0, delayedReplayMessages.length - visibleMessages.length);
@@ -3834,7 +3939,7 @@ const MainApp: React.FC = () => {
   );
 
   const globalSearchResults = useMemo(() => {
-    if (!globalSearchMode || !normalizedSearch) return [];
+    if (!effectiveGlobalSearchMode || !normalizedSearch) return [];
     const all = sources.flatMap((source) => messagesBySource[source.id] ?? []);
     return all
       .filter((message) =>
@@ -3842,7 +3947,7 @@ const MainApp: React.FC = () => {
       )
       .sort((a, b) => messageTimestamp(b) - messageTimestamp(a))
       .slice(0, 250);
-  }, [globalSearchMode, messagesBySource, normalizedSearch, sources]);
+  }, [effectiveGlobalSearchMode, messagesBySource, normalizedSearch, sources]);
 
   const deckMessagesByTabId = useMemo(() => {
     const next: Record<string, ChatMessage[]> = {};
@@ -4543,6 +4648,7 @@ const MainApp: React.FC = () => {
 
     adapter.onMessage((message) => {
       const now = Date.now();
+      const liveSettings = settingsRef.current;
       const transliteratedMessage = transliterateArabicToEgyptianFranco(
         message.message,
       );
@@ -4587,9 +4693,9 @@ const MainApp: React.FC = () => {
       }
       const currentUsername =
         source.platform === "twitch"
-          ? normalizeUserKey(currentSettings.twitchUsername ?? "")
+          ? normalizeUserKey(liveSettings.twitchUsername ?? "")
           : source.platform === "kick"
-            ? normalizeUserKey(currentSettings.kickUsername ?? "")
+            ? normalizeUserKey(liveSettings.kickUsername ?? "")
             : "";
       const isSelf =
         currentUsername.length > 0 &&
@@ -4622,24 +4728,24 @@ const MainApp: React.FC = () => {
       const last = lastMessageByUser.current.get(dedupeKey) ?? 0;
       if (isLocalEcho(message) && now - last < 400) return;
       lastMessageByUser.current.set(dedupeKey, now);
-      const welcomeModeActive = currentSettings.welcomeMode === true;
+      const welcomeModeActive = liveSettings.welcomeMode === true;
 
       if (!isModerationEvent) {
-        if (currentSettings.hideCommands && message.message.startsWith("!"))
+        if (liveSettings.hideCommands && message.message.startsWith("!"))
           return;
         if (
-          currentSettings.smartFilterScam !== false &&
+          liveSettings.smartFilterScam !== false &&
           SCAM_PATTERN.test(message.message)
         )
           return;
-        if (currentSettings.smartFilterSpam !== false) {
+        if (liveSettings.smartFilterSpam !== false) {
           const fingerprint = `${normalizeUserKey(message.username)}|${message.channel}|${message.message.trim().toLowerCase()}`;
           const prevSeenAt = spamFilterRef.current.get(fingerprint) ?? 0;
           if (now - prevSeenAt < 8000) return;
           spamFilterRef.current.set(fingerprint, now);
         }
         if (
-          currentSettings.keywordFilters?.some((word) =>
+          liveSettings.keywordFilters?.some((word) =>
             message.message.toLowerCase().includes(word.toLowerCase()),
           )
         ) {
@@ -4647,7 +4753,7 @@ const MainApp: React.FC = () => {
         }
 
         if (
-          currentSettings.autoBanOnMessage === true &&
+          liveSettings.autoBanOnMessage === true &&
           (source.platform === "twitch" ||
             source.platform === "kick" ||
             source.platform === "youtube") &&
@@ -4659,9 +4765,13 @@ const MainApp: React.FC = () => {
             autoBanAttemptedAtRef.current.get(autoBanKey) ?? 0;
           if (now - lastAttemptAt > 30_000) {
             autoBanAttemptedAtRef.current.set(autoBanKey, now);
-            void executeModeratorActionForSource(source, "ban", message, {
-              silent: true,
-            });
+            const executeAutoModeration =
+              executeModeratorActionForSourceRef.current;
+            if (executeAutoModeration) {
+              void executeAutoModeration(source, "ban", message, {
+                silent: true,
+              });
+            }
           }
         }
       }
@@ -4687,7 +4797,7 @@ const MainApp: React.FC = () => {
           SOURCE_MESSAGE_BUFFER_CAP,
           backgroundMonitorActiveRef.current
             ? 180
-            : currentSettings.performanceMode
+            : liveSettings.performanceMode
               ? 300
               : 800,
         );
@@ -4745,9 +4855,9 @@ const MainApp: React.FC = () => {
       const sourceInActiveTab = sourceTabIds.includes(activeTabIdRef.current);
       const backgroundTabIds = sourceTabIds.filter((tabId) => {
         if (!tabId || tabId === activeTabIdRef.current) return false;
-        const group = (currentSettings.tabGroups ?? {})[tabId] ?? "";
+        const group = (liveSettings.tabGroups ?? {})[tabId] ?? "";
         if (!group) return true;
-        return !(currentSettings.mutedGroups ?? []).includes(group);
+        return !(liveSettings.mutedGroups ?? []).includes(group);
       });
       if (backgroundTabIds.length > 0) {
         setTabUnreadCounts((previous) => {
@@ -4762,9 +4872,9 @@ const MainApp: React.FC = () => {
 
       const mentionReason: "mention" | "reply" | null = isModerationEvent
         ? null
-        : isMentionForPlatformUser(message, currentSettings)
+        : isMentionForPlatformUser(message, liveSettings)
           ? "mention"
-          : isReplyForPlatformUser(message, currentSettings)
+          : isReplyForPlatformUser(message, liveSettings)
             ? "reply"
             : null;
       if (mentionReason) {
@@ -4773,15 +4883,15 @@ const MainApp: React.FC = () => {
           .toLowerCase()}`;
         const mentionTabId = sourceTabIds[0] ?? null;
         const mentionMuted = mentionTabId
-          ? (currentSettings.mentionMutedTabIds ?? []).includes(mentionTabId)
+          ? (liveSettings.mentionMutedTabIds ?? []).includes(mentionTabId)
           : false;
         const mentionSnoozeUntil = mentionTabId
-          ? Number(currentSettings.mentionSnoozeUntilByTab?.[mentionTabId] ?? 0)
+          ? Number(liveSettings.mentionSnoozeUntilByTab?.[mentionTabId] ?? 0)
           : 0;
         const mentionSnoozed = mentionTabId
           ? Number.isFinite(mentionSnoozeUntil) && mentionSnoozeUntil > now
           : false;
-        const activeTabRule = (currentSettings.tabAlertRules ?? {})[
+        const activeTabRule = (liveSettings.tabAlertRules ?? {})[
           activeTabIdRef.current
         ];
         if (
@@ -4842,7 +4952,7 @@ const MainApp: React.FC = () => {
         );
       }
 
-      const tabRules = currentSettings.tabAlertRules ?? {};
+      const tabRules = liveSettings.tabAlertRules ?? {};
       for (const tabId of sourceTabIds) {
         if (tabId !== activeTabIdRef.current) continue;
         const rule = tabRules[tabId];
@@ -5825,6 +5935,10 @@ const MainApp: React.FC = () => {
     setMessageMenu(null);
   };
 
+  useEffect(() => {
+    executeModeratorActionForSourceRef.current = executeModeratorActionForSource;
+  }, [executeModeratorActionForSource]);
+
   const sendActiveMessage = async () => {
     const draft = composerText;
     const content = draft.trim();
@@ -6471,51 +6585,17 @@ const MainApp: React.FC = () => {
   };
 
   const applyWorkspacePreset = async (preset: WorkspacePreset) => {
-    if (preset === "streamer") {
-      await persistSettings({
-        workspacePreset: preset,
-        uiMode: "simple",
-        dockedPanels: {
-          mentions: false,
-          modHistory: false,
-          userCard: false,
-          globalTimeline: false,
-        },
-        globalSearchMode: false,
-        collaborationMode: false,
-      });
-      setAuthMessage("Workspace preset applied: Streamer.");
-      return;
-    }
-    if (preset === "moddesk") {
-      await persistSettings({
-        workspacePreset: preset,
-        uiMode: "advanced",
-        dockedPanels: {
-          mentions: true,
-          modHistory: true,
-          userCard: true,
-          globalTimeline: true,
-        },
-        globalSearchMode: true,
-        collaborationMode: true,
-      });
-      setAuthMessage("Workspace preset applied: Mod Desk.");
-      return;
-    }
+    const config = getWorkspacePresetConfig(preset);
     await persistSettings({
       workspacePreset: preset,
-      uiMode: "simple",
-      dockedPanels: {
-        mentions: true,
-        modHistory: false,
-        userCard: false,
-        globalTimeline: false,
-      },
-      globalSearchMode: false,
-      collaborationMode: false,
+      uiMode: config.uiMode,
+      dockedPanels: config.dockedPanels,
+      globalSearchMode: config.globalSearchMode,
+      collaborationMode: config.collaborationMode,
     });
-    setAuthMessage("Workspace preset applied: Viewer.");
+    setAuthMessage(
+      `Workspace preset applied: ${formatWorkspacePresetLabel(preset)}.`,
+    );
   };
 
   const toggleActiveTabMentionMute = async () => {
@@ -7161,7 +7241,7 @@ const MainApp: React.FC = () => {
       messageMenu.message.platform === "youtube"),
   );
   const messageMenuCanOpenPlatformModMenu = Boolean(
-    settings.collaborationMode === true &&
+    effectiveCollaborationMode &&
     messageMenu &&
     (messageMenu.message.platform === "twitch" ||
       messageMenu.message.platform === "kick" ||
@@ -7234,8 +7314,65 @@ const MainApp: React.FC = () => {
       ? `${activeSingleSource.platform}/${activeSingleSource.channel}`
       : "";
   const showAccountStrip = isAdvancedMode || mentionInboxCount > 0;
-  const showToolbar = isAdvancedMode || !activeTab;
-  const showActiveTabMeta = isAdvancedMode || activeTabIsMerged;
+  const hasSourceStatusSignal = activeSourceStatusItems.some(
+    ({ status, staleSeconds }) =>
+      status !== "connected" ||
+      (staleSeconds !== null && staleSeconds > 30),
+  );
+  const showToolbar = Boolean(
+    !activeTab ||
+      firstUnreadTimestamp > 0 ||
+      adaptivePerformanceMode ||
+      !newestLocked ||
+      pendingNewestCount > 0,
+  );
+  const showActiveTabMeta = Boolean(
+    activeTab &&
+      (activeTabIsMerged ||
+        activeSourcePreviewItems.length > 1 ||
+        hiddenActiveSourceCount > 0 ||
+        hasSourceStatusSignal),
+  );
+  const showAnalyticsStrip = Boolean(
+    isAdvancedMode &&
+      activeTab &&
+      (analyticsSummary.messagesPerMinute > 0 ||
+        analyticsSummary.activeChatters > 0 ||
+        analyticsSummary.mentionRatePerMinute > 0 ||
+        analyticsSummary.modActionRatePerMinute > 0),
+  );
+  const showQuickActionRail = Boolean(
+    isAdvancedMode &&
+      activeTab &&
+      (welcomeModeEnabled || replayBufferSeconds > 0 || pollComposerOpen),
+  );
+  const showMentionsDock = Boolean(
+    isAdvancedMode &&
+      effectiveDockedPanels.mentions === true &&
+      mentionInbox.length > 0,
+  );
+  const showGlobalTimelineDock = Boolean(
+    isAdvancedMode &&
+      effectiveDockedPanels.globalTimeline === true &&
+      effectiveGlobalSearchMode &&
+      search.trim().length > 0,
+  );
+  const showModHistoryDock = Boolean(
+    isAdvancedMode &&
+      effectiveDockedPanels.modHistory === true &&
+      moderationHistory.length > 0,
+  );
+  const showUserCardDock = Boolean(
+    isAdvancedMode &&
+      effectiveDockedPanels.userCard === true &&
+      identityTarget,
+  );
+  const hasVisibleDockPanels = Boolean(
+    showMentionsDock ||
+      showGlobalTimelineDock ||
+      showModHistoryDock ||
+      showUserCardDock,
+  );
   const focusChannelComposer = () => {
     window.setTimeout(() => {
       channelInputRef.current?.focus();
@@ -7265,12 +7402,16 @@ const MainApp: React.FC = () => {
         >
           <ChatShellMenuContent
             isAdvancedMode={isAdvancedMode}
-            workspacePreset={
-              (settings.workspacePreset ?? "streamer") as WorkspacePreset
-            }
+            autoWorkspacePreset={autoWorkspacePreset}
+            onAutoWorkspacePresetChange={(enabled) => {
+              void persistSettings({ autoWorkspacePreset: enabled });
+            }}
+            workspacePreset={effectiveWorkspacePreset}
             onWorkspacePresetChange={(preset) => {
               void applyWorkspacePreset(preset);
             }}
+            workspacePresetStatusTitle={workspacePresetStatusTitle}
+            workspacePresetStatusReason={workspacePresetStatusReason}
             isSimpleMode={isSimpleMode}
             onModeChange={(mode) => {
               void persistSettings({ uiMode: mode });
@@ -7292,11 +7433,11 @@ const MainApp: React.FC = () => {
             }}
             replayWindow={replayWindow}
             onReplayWindowChange={setReplayWindow}
-            collaborationModeEnabled={settings.collaborationMode === true}
+            collaborationModeEnabled={effectiveCollaborationMode}
             onCollaborationModeChange={(enabled) => {
               void persistSettings({ collaborationMode: enabled });
             }}
-            dockedPanels={settings.dockedPanels ?? {}}
+            dockedPanels={effectiveDockedPanels}
             onDockedPanelChange={(panel, enabled) => {
               void setDockedPanel(panel, enabled);
             }}
@@ -7438,7 +7579,7 @@ const MainApp: React.FC = () => {
             search={search}
             searchInputRef={searchRef}
             onSearchChange={setSearch}
-            globalSearchMode={globalSearchMode}
+            globalSearchMode={effectiveGlobalSearchMode}
             onGlobalSearchModeChange={(enabled) => {
               void persistSettings({ globalSearchMode: enabled });
             }}
@@ -7740,7 +7881,9 @@ const MainApp: React.FC = () => {
       {!chatDeckMode ? (
         <div
           className={
-            hasDockedPanels ? "main-layout has-docked-panels" : "main-layout"
+            hasVisibleDockPanels
+              ? "main-layout has-docked-panels"
+              : "main-layout"
           }
           ref={mainLayoutRef}
         >
@@ -7758,25 +7901,8 @@ const MainApp: React.FC = () => {
               }
             />
 
-            {showToolbar ? (
-              <section className="toolbar">
-                <span>{toolbarSummaryText}</span>
-                {isAdvancedMode && firstUnreadTimestamp > 0 ? (
-                  <button
-                    type="button"
-                    className="ghost"
-                    onClick={jumpToFirstUnread}
-                  >
-                    First unread
-                  </button>
-                ) : null}
-                {isAdvancedMode && adaptivePerformanceMode ? (
-                  <span className="account-pill on">Adaptive perf on</span>
-                ) : null}
-              </section>
-            ) : null}
             <ChatAnalyticsStrip
-              show={isAdvancedMode && Boolean(activeTab)}
+              show={showAnalyticsStrip}
               messagesPerMinute={analyticsSummary.messagesPerMinute}
               activeChatters={analyticsSummary.activeChatters}
               mentionRatePerMinute={analyticsSummary.mentionRatePerMinute}
@@ -7807,7 +7933,7 @@ const MainApp: React.FC = () => {
               closeClosestDetailsMenu={closeClosestDetailsMenu}
               quickActions={
                 <ChatQuickActions
-                  show={isAdvancedMode}
+                  show={showQuickActionRail}
                   welcomeModeEnabled={welcomeModeEnabled}
                   replayBufferSeconds={replayBufferSeconds}
                   pollComposerOpen={pollComposerOpen}
@@ -7944,7 +8070,10 @@ const MainApp: React.FC = () => {
                     setComposerText(suggestion);
                     setCommandPaletteOpen(false);
                   }}
-                  showQuickMod={writableActiveTabSources.length > 0}
+                  showQuickMod={
+                    effectiveWorkspacePreset !== "viewer" &&
+                    writableActiveTabSources.length > 0
+                  }
                   quickModUser={quickModUser}
                   onQuickModUserChange={setQuickModUser}
                   onRunQuickMod={(action) => void runQuickMod(action)}
@@ -7958,7 +8087,7 @@ const MainApp: React.FC = () => {
               }
             />
           </div>
-          {hasDockedPanels ? (
+          {hasVisibleDockPanels ? (
             <>
               <div
                 className={
@@ -7977,21 +8106,19 @@ const MainApp: React.FC = () => {
                 style={{ width: `${dockPanelWidth}px` }}
               >
                 <ChatDockSidebar
-                  showMentions={settings.dockedPanels?.mentions === true}
+                  showMentions={showMentionsDock}
                   mentionInbox={mentionInbox}
                   onOpenMention={openMention}
                   platformIconGlyph={platformIconGlyph}
-                  showGlobalTimeline={
-                    settings.dockedPanels?.globalTimeline === true
-                  }
-                  globalSearchMode={globalSearchMode}
+                  showGlobalTimeline={showGlobalTimelineDock}
+                  globalSearchMode={effectiveGlobalSearchMode}
                   search={search}
                   globalSearchResults={globalSearchResults}
                   onOpenGlobalSearchResult={openGlobalSearchResult}
                   isAdvancedMode={isAdvancedMode}
-                  showModHistory={settings.dockedPanels?.modHistory === true}
+                  showModHistory={showModHistoryDock}
                   moderationHistory={moderationHistory}
-                  showUserCard={settings.dockedPanels?.userCard === true}
+                  showUserCard={showUserCardDock}
                   identityTarget={identityTarget}
                   identityStats={identityStats}
                 />
