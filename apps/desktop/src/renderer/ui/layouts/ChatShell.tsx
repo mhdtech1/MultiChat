@@ -7304,13 +7304,9 @@ const MainApp: React.FC = () => {
     return { top: y, left: x };
   })();
   const toolbarSummaryText = activeTab
-    ? isSimpleMode
-      ? newestLocked
-        ? `${visibleMessages.length} messages`
-        : `${visibleMessages.length} messages (${pendingNewestCount} new)`
-      : newestLocked
-        ? `${visibleMessages.length} msgs · ${analyticsSummary.messagesPerMinute}/min · ${analyticsSummary.activeChatters} chatters`
-        : `${visibleMessages.length} msgs (${pendingNewestCount} paused) · ${analyticsSummary.messagesPerMinute}/min · ${analyticsSummary.activeChatters} chatters`
+    ? newestLocked
+      ? `${visibleMessages.length} ${visibleMessages.length === 1 ? "message" : "messages"}`
+      : `${visibleMessages.length} ${visibleMessages.length === 1 ? "message" : "messages"} · ${pendingNewestCount} new`
     : "Open a channel tab to start";
   const simpleActiveTabMetaText = activeTabIsMerged
     ? `${activeTabSources.length} chats in merged tab`

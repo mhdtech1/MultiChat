@@ -5,6 +5,36 @@
   gap: 8px;
 }
 
+.workspace-statusbar {
+  display: grid;
+  gap: 10px;
+}
+
+.workspace-statusbar__sources,
+.workspace-statusbar__summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.workspace-statusbar__summary-row {
+  justify-content: space-between;
+}
+
+.workspace-statusbar__summary {
+  flex: 1 1 220px;
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+
+.workspace-statusbar__actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
 .quick-action-button,
 .ghost,
 .go-newest-button {
@@ -58,4 +88,30 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+.workspace-callout {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--panel-radius-md);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-elevated);
+  box-shadow: var(--panel-shadow-md);
+}
+
+.workspace-callout--form input {
+  min-height: 42px;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-interactive);
+  color: var(--ink-soft);
+}
+
+.workspace-callout__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }

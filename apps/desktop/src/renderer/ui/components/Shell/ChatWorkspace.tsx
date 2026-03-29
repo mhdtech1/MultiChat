@@ -118,96 +118,110 @@ export function ChatWorkspace({
   onJumpToNewest,
   composerPanel,
 }: ChatWorkspaceProps) {
+  const showSourceStatusBar = showActiveTabMeta;
+  const showWorkspaceStatusBar = showSourceStatusBar || showToolbar;
+
   return (
     <main className="chat-main">
       {!activeTab ? (
         welcomeScreen
       ) : (
         <>
-          {showActiveTabMeta ? (
-            <div className="active-tab-meta">
-              {isSimpleMode ? (
-                <span className="source-chip connected">
-                  <span>{simpleActiveTabMetaText || "Live chat"}</span>
-                </span>
-              ) : (
-                <>
-                  {activeSourcePreviewItems.map(
-                    ({ source, status, staleSeconds }) => (
-                      <span key={source.id} className={`source-chip ${status}`}>
-                        <PlatformIcon
-                          platform={source.platform}
-                          size="sm"
-                          showBackground
-                        />
-                        <span>
-                          {source.platform}/{source.channel} ({status}
-                          {staleSeconds !== null && staleSeconds > 30
-                            ? ` · lag ${staleSeconds}s`
-                            : ""}
-                          )
-                        </span>
-                      </span>
-                    ),
-                  )}
-                  {hiddenActiveSourceCount > 0 ? (
-                    <details className="source-more">
-                      <summary>+{hiddenActiveSourceCount} more</summary>
-                      <div className="source-more-menu">
-                        <div className="menu-popover-header">
-                          <span>Source status</span>
-                          <button
-                            type="button"
-                            className="menu-close-button"
-                            onClick={closeClosestDetailsMenu}
-                            aria-label="Close source status menu"
+          {showWorkspaceStatusBar ? (
+            <section className="toolbar workspace-statusbar">
+              {showSourceStatusBar ? (
+                <div className="workspace-statusbar__sources">
+                  {isSimpleMode ? (
+                    <span className="source-chip connected">
+                      <span>{simpleActiveTabMetaText || "Live chat"}</span>
+                    </span>
+                  ) : (
+                    <>
+                      {activeSourcePreviewItems.map(
+                        ({ source, status, staleSeconds }) => (
+                          <span
+                            key={source.id}
+                            className={`source-chip ${status}`}
                           >
-                            ×
-                          </button>
-                        </div>
-                        {activeSourceStatusItems
-                          .slice(activeSourcePreviewItems.length)
-                          .map(({ source, status, staleSeconds }) => (
-                            <span
-                              key={source.id}
-                              className={`source-chip ${status}`}
-                            >
-                              <PlatformIcon
-                                platform={source.platform}
-                                size="sm"
-                                showBackground
-                              />
-                              <span>
-                                {source.platform}/{source.channel} ({status}
-                                {staleSeconds !== null && staleSeconds > 30
-                                  ? ` · lag ${staleSeconds}s`
-                                  : ""}
-                                )
-                              </span>
+                            <PlatformIcon
+                              platform={source.platform}
+                              size="sm"
+                              showBackground
+                            />
+                            <span>
+                              {source.platform}/{source.channel} ({status}
+                              {staleSeconds !== null && staleSeconds > 30
+                                ? ` · lag ${staleSeconds}s`
+                                : ""}
+                              )
                             </span>
-                          ))}
-                      </div>
-                    </details>
-                  ) : null}
-                </>
-              )}
-            </div>
-          ) : null}
-
-          {showToolbar ? (
-            <section className="toolbar">
-              <span>{toolbarSummaryText}</span>
-              {isAdvancedMode && firstUnreadTimestamp > 0 ? (
-                <button
-                  type="button"
-                  className="ghost"
-                  onClick={onJumpToFirstUnread}
-                >
-                  First unread
-                </button>
+                          </span>
+                        ),
+                      )}
+                      {hiddenActiveSourceCount > 0 ? (
+                        <details className="source-more">
+                          <summary>+{hiddenActiveSourceCount} more</summary>
+                          <div className="source-more-menu">
+                            <div className="menu-popover-header">
+                              <span>Source status</span>
+                              <button
+                                type="button"
+                                className="menu-close-button"
+                                onClick={closeClosestDetailsMenu}
+                                aria-label="Close source status menu"
+                              >
+                                ×
+                              </button>
+                            </div>
+                            {activeSourceStatusItems
+                              .slice(activeSourcePreviewItems.length)
+                              .map(({ source, status, staleSeconds }) => (
+                                <span
+                                  key={source.id}
+                                  className={`source-chip ${status}`}
+                                >
+                                  <PlatformIcon
+                                    platform={source.platform}
+                                    size="sm"
+                                    showBackground
+                                  />
+                                  <span>
+                                    {source.platform}/{source.channel} ({status}
+                                    {staleSeconds !== null && staleSeconds > 30
+                                      ? ` · lag ${staleSeconds}s`
+                                      : ""}
+                                    )
+                                  </span>
+                                </span>
+                              ))}
+                          </div>
+                        </details>
+                      ) : null}
+                    </>
+                  )}
+                </div>
               ) : null}
-              {isAdvancedMode && adaptivePerformanceMode ? (
-                <span className="account-pill on">Adaptive perf on</span>
+
+              {showToolbar ? (
+                <div className="workspace-statusbar__summary-row">
+                  <span className="workspace-statusbar__summary">
+                    {toolbarSummaryText}
+                  </span>
+                  <div className="workspace-statusbar__actions">
+                    {isAdvancedMode && firstUnreadTimestamp > 0 ? (
+                      <button
+                        type="button"
+                        className="ghost"
+                        onClick={onJumpToFirstUnread}
+                      >
+                        First unread
+                      </button>
+                    ) : null}
+                    {isAdvancedMode && adaptivePerformanceMode ? (
+                      <span className="account-pill on">Adaptive perf on</span>
+                    ) : null}
+                  </div>
+                </div>
               ) : null}
             </section>
           ) : null}
@@ -233,23 +247,27 @@ export function ChatWorkspace({
           ) : null}
 
           {activePinnedMessage ? (
-            <div className="quick-mod-panel">
-              <strong>Pinned (Chatrix)</strong>
+            <section className="workspace-callout">
+              <div className="workspace-callout__header">
+                <strong>Pinned</strong>
+                <button type="button" onClick={onClearPinnedMessage}>
+                  Unpin
+                </button>
+              </div>
               <span className="menu-muted">
                 [{activePinnedMessage.platform}] #{activePinnedMessage.channel}{" "}
                 · {activePinnedMessage.displayName} ·{" "}
                 {new Date(activePinnedMessage.timestamp).toLocaleTimeString()}
               </span>
               <span>{activePinnedMessage.message}</span>
-              <button type="button" onClick={onClearPinnedMessage}>
-                Unpin
-              </button>
-            </div>
+            </section>
           ) : null}
 
           {pollComposerOpen ? (
-            <div className="quick-mod-panel">
-              <strong>Start Poll (Chatrix)</strong>
+            <section className="workspace-callout workspace-callout--form">
+              <div className="workspace-callout__header">
+                <strong>Start Poll</strong>
+              </div>
               <input
                 value={pollQuestionDraft}
                 onChange={(event) =>
@@ -277,12 +295,14 @@ export function ChatWorkspace({
                   Cancel
                 </button>
               </div>
-            </div>
+            </section>
           ) : null}
 
           {activeTabPoll ? (
-            <div className="quick-mod-panel">
-              <strong>{activeTabPoll.question}</strong>
+            <section className="workspace-callout">
+              <div className="workspace-callout__header">
+                <strong>{activeTabPoll.question}</strong>
+              </div>
               <span className="menu-muted">
                 {activeTabPoll.active ? "Live poll" : "Closed poll"} ·{" "}
                 {new Date(activeTabPoll.createdAt).toLocaleTimeString()}
@@ -307,7 +327,7 @@ export function ChatWorkspace({
                   Remove poll
                 </button>
               </div>
-            </div>
+            </section>
           ) : null}
 
           {messageFeed}

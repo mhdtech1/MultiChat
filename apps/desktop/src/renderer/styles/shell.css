@@ -7,12 +7,12 @@ body {
 }
 
 .chat-shell {
-  gap: 14px;
-  padding: 14px 16px 16px;
+  gap: 12px;
+  padding: 12px 14px 14px;
 }
 
 .main-layout {
-  gap: 14px;
+  gap: 12px;
 }
 
 .main-layout-primary {
@@ -60,11 +60,12 @@ body {
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
-  padding: 10px 12px;
+  padding: 9px 11px;
 }
 
 .active-tab-meta {
   color: var(--ink-soft);
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .source-chip,
@@ -112,10 +113,16 @@ body {
   padding: 8px 10px;
   border-radius: 12px;
   border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.015);
   transition:
     background 120ms ease,
     border-color 120ms ease,
     transform 120ms ease;
+}
+
+.message-list .chat-line:nth-child(even),
+.message-list .chat-line--legacy:nth-child(even) {
+  background: rgba(255, 255, 255, 0.028);
 }
 
 .message-list .chat-line:hover,
@@ -123,6 +130,11 @@ body {
   background: var(--surface-interactive);
   border-color: var(--border-strong);
   transform: translateY(-1px);
+}
+
+.message-list .chat-line--highlighted {
+  border-color: rgba(22, 199, 154, 0.24);
+  background: rgba(22, 199, 154, 0.08);
 }
 
 .line-meta,
@@ -145,21 +157,28 @@ body {
 .dock-sidebar {
   display: grid;
   align-content: start;
-  gap: 12px;
-  padding: 14px;
+  gap: 10px;
+  padding: 12px;
   border-radius: var(--panel-radius-lg);
   border: 1px solid var(--border-strong);
   background: var(--surface-elevated);
   box-shadow: var(--panel-shadow-lg);
 }
 
-.dock-sidebar > div {
+.dock-panel {
   display: grid;
   gap: 8px;
   padding: 12px;
   border-radius: var(--panel-radius-md);
-  background: var(--surface-interactive);
+  background: rgba(255, 255, 255, 0.025);
   border: 1px solid var(--border-strong);
+}
+
+.dock-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .dock-resize-handle {

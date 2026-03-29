@@ -4,8 +4,8 @@ Creator-facing and viewer-facing multi-chat desktop app built with Electron + Vi
 
 ## Download Installers
 
-- macOS (DMG): [Download Chatrix for macOS](https://github.com/mhdtech1/MultiChat/releases/latest/download/Chatrix-mac.dmg)
-- Windows (EXE): [Download Chatrix for Windows](https://github.com/mhdtech1/MultiChat/releases/latest/download/Chatrix-win.exe)
+- macOS (DMG): [Download Chatrix for macOS](https://github.com/mhdtech1/Chatrix/releases/latest/download/Chatrix-mac.dmg)
+- Windows (EXE): [Download Chatrix for Windows](https://github.com/mhdtech1/Chatrix/releases/latest/download/Chatrix-win.exe)
 
 ## macOS Gatekeeper Warning (Current)
 
@@ -123,7 +123,7 @@ To build for each OS, run the build command on that OS or use CI runners for mac
 
 ### Updates
 
-Auto-updates are configured through the current GitHub Releases repo (`mhdtech1/MultiChat`).
+Auto-updates are configured through the current GitHub Releases repo (`mhdtech1/Chatrix`).
 After publishing a newer release, the app downloads it in the background and applies it on app restart.
 
 ### Windows Code Signing (GitHub Actions)
@@ -180,9 +180,10 @@ Settings are stored locally in `settings.json` under Electron `userData` (not in
 
 ### Kick
 
-- Create a Kick app and set a valid OAuth redirect URI.
-- In app Settings, set `Kick Client ID`, `Kick Client Secret`, and redirect URI, then click **Sign in with Kick**.
-- Kick chat adapter is still a stub; sign-in is wired and tokens are stored for upcoming chat integration.
+- End users do not need to enter a Kick client ID or secret.
+- Chatrix uses the hosted Kick broker and a loopback redirect URI:
+  `http://localhost:51730/kick/callback`
+- Click **Sign in Kick** in the app and complete the browser flow.
 
 ## Project Structure
 

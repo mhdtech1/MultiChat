@@ -54,7 +54,7 @@ export function ChatShellTabBar({
             ) : null}
             <span>{item.label}</span>
             {item.group ? (
-              <span className="tab-badge unread">{item.group}</span>
+              <span className="tab-badge group">{item.group}</span>
             ) : null}
             {!item.active && (item.mentionCount > 0 || item.unreadCount > 0) ? (
               <span className="tab-badges">

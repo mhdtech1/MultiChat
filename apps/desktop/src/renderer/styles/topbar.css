@@ -2,8 +2,8 @@
   display: grid;
   grid-template-columns: auto minmax(320px, 1fr) auto;
   align-items: center;
-  gap: 14px;
-  padding: 14px 16px;
+  gap: 12px;
+  padding: 12px 14px;
   border: 1px solid var(--border-strong);
   border-radius: 22px;
   background:
@@ -47,8 +47,8 @@
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
-  padding: 10px;
+  gap: 8px;
+  padding: 8px;
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid var(--border-strong);

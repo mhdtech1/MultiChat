@@ -81,8 +81,11 @@ export function ChatDockSidebar({
   return (
     <>
       {showMentionsSection ? (
-        <div>
-          <strong>Mentions</strong>
+        <section className="dock-panel">
+          <div className="dock-panel__header">
+            <strong>Mentions</strong>
+            <span className="menu-muted">{mentionInbox.length} open</span>
+          </div>
           {mentionInbox.slice(0, 8).map((entry) => (
             <button
               key={entry.id}
@@ -94,12 +97,17 @@ export function ChatDockSidebar({
               {entry.displayName}
             </button>
           ))}
-        </div>
+        </section>
       ) : null}
 
       {showGlobalTimelineSection ? (
-        <div>
-          <strong>Global Timeline</strong>
+        <section className="dock-panel">
+          <div className="dock-panel__header">
+            <strong>Global Timeline</strong>
+            <span className="menu-muted">
+              {globalSearchResults.length} results
+            </span>
+          </div>
           {globalSearchResults.length === 0 ? (
             <span className="menu-muted">No results.</span>
           ) : (
@@ -114,24 +122,32 @@ export function ChatDockSidebar({
               </button>
             ))
           )}
-        </div>
+        </section>
       ) : null}
 
       {showModHistorySection ? (
-        <div>
-          <strong>Mod History</strong>
+        <section className="dock-panel">
+          <div className="dock-panel__header">
+            <strong>Mod History</strong>
+            <span className="menu-muted">
+              {moderationHistory.length} actions
+            </span>
+          </div>
           {moderationHistory.slice(0, 10).map((entry) => (
             <span key={entry.id} className="menu-muted">
               {new Date(entry.at).toLocaleTimeString()} {entry.action}{" "}
               {entry.target}
             </span>
           ))}
-        </div>
+        </section>
       ) : null}
 
       {showUserCardSection ? (
-        <div>
-          <strong>User Card</strong>
+        <section className="dock-panel">
+          <div className="dock-panel__header">
+            <strong>User Card</strong>
+            <span className="menu-muted">Session stats</span>
+          </div>
           <span className="menu-muted">
             {identityTarget?.displayName} @{identityTarget?.username}
           </span>
@@ -139,7 +155,7 @@ export function ChatDockSidebar({
             Total {identityStats.total} · 1m {identityStats.inLastMinute} · 5m{" "}
             {identityStats.inLastFiveMinutes}
           </span>
-        </div>
+        </section>
       ) : null}
     </>
   );

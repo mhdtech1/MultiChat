@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { IPC_CHANNELS } from "../../../src/shared/constants";
-import type { AppSettings, AuthHealthSnapshot } from "../../../src/shared/types";
+import type {
+  AppSettings,
+  AuthHealthSnapshot,
+} from "../../../src/shared/types";
 import { createSettingsHandlers } from "../../../src/main/ipc/settingsHandlers";
 import {
   createAuthHealthHandlers,
@@ -47,7 +50,10 @@ describe("createSettingsHandlers", () => {
       clearAuthTokens: vi.fn().mockResolvedValue(undefined),
     });
 
-    const result = await handlers[IPC_CHANNELS.SETTINGS_GET]({} as never, undefined as never);
+    const result = await handlers[IPC_CHANNELS.SETTINGS_GET](
+      {} as never,
+      undefined as never,
+    );
     expect(result).toMatchObject({
       theme: "dark",
       updateChannel: "stable",
@@ -59,7 +65,12 @@ describe("createSettingsHandlers", () => {
       updateChannel: "stable",
       twitchToken: "",
       sessionSources: [
-        { id: "twitch-1", platform: "twitch", channel: "alpha", key: "twitch:alpha" },
+        {
+          id: "twitch-1",
+          platform: "twitch",
+          channel: "alpha",
+          key: "twitch:alpha",
+        },
       ],
       sessionTabs: [{ id: "tab-twitch", sourceIds: ["twitch-1"] }],
       sessionActiveTabId: "tab-twitch",
@@ -84,8 +95,18 @@ describe("createSettingsHandlers", () => {
         updateChannel: "invalid" as never,
         twitchToken: "token-123",
         sessionSources: [
-          { id: "twitch-1", platform: "twitch", channel: "alpha", key: "twitch:alpha" },
-          { id: "youtube-1", platform: "youtube", channel: "beta", key: "youtube:beta" },
+          {
+            id: "twitch-1",
+            platform: "twitch",
+            channel: "alpha",
+            key: "twitch:alpha",
+          },
+          {
+            id: "youtube-1",
+            platform: "youtube",
+            channel: "beta",
+            key: "youtube:beta",
+          },
         ],
         sessionTabs: [
           { id: "tab-twitch", sourceIds: ["twitch-1"] },
@@ -97,11 +118,20 @@ describe("createSettingsHandlers", () => {
 
     expect(result.updateChannel).toBe("stable");
     expect(result.sessionSources).toEqual([
-      { id: "twitch-1", platform: "twitch", channel: "alpha", key: "twitch:alpha" },
+      {
+        id: "twitch-1",
+        platform: "twitch",
+        channel: "alpha",
+        key: "twitch:alpha",
+      },
     ]);
-    expect(result.sessionTabs).toEqual([{ id: "tab-twitch", sourceIds: ["twitch-1"] }]);
+    expect(result.sessionTabs).toEqual([
+      { id: "tab-twitch", sourceIds: ["twitch-1"] },
+    ]);
     expect(result.sessionActiveTabId).toBe("tab-twitch");
-    expect(storeAuthTokens).toHaveBeenCalledWith("twitch", { accessToken: "token-123" });
+    expect(storeAuthTokens).toHaveBeenCalledWith("twitch", {
+      accessToken: "token-123",
+    });
     expect(applyAutoUpdaterChannel).toHaveBeenCalledWith("stable");
     expect(clearAuthTokens).not.toHaveBeenCalledWith("twitch");
   });
@@ -167,8 +197,14 @@ describe("createAuthHealthHandlers", () => {
     const getAuthHealthSnapshot = vi.fn().mockResolvedValue(snapshot);
     const handlers = createAuthHealthHandlers({ getAuthHealthSnapshot });
 
-    const first = await handlers[IPC_CHANNELS.AUTH_GET_HEALTH]({} as never, undefined as never);
-    const second = await handlers[IPC_CHANNELS.AUTH_TEST_PERMISSIONS]({} as never, undefined as never);
+    const first = await handlers[IPC_CHANNELS.AUTH_GET_HEALTH](
+      {} as never,
+      undefined as never,
+    );
+    const second = await handlers[IPC_CHANNELS.AUTH_TEST_PERMISSIONS](
+      {} as never,
+      undefined as never,
+    );
 
     expect(first).toEqual(snapshot);
     expect(second).toEqual(snapshot);

@@ -1,6 +1,6 @@
 .action-rail {
   display: grid;
-  gap: 12px;
+  gap: 10px;
   padding: 2px 2px 0;
 }
 
@@ -113,7 +113,11 @@ input {
 
 .quick-mod-panel--action-rail {
   display: grid;
-  gap: 12px;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--panel-radius-md);
+  background: rgba(255, 255, 255, 0.025);
 }
 
 .quick-mod-panel__compact-row,
@@ -124,8 +128,26 @@ input {
   gap: 10px;
 }
 
-.quick-mod-panel__compact-row strong {
+.quick-mod-panel__summary {
+  display: grid;
+  gap: 4px;
+  flex: 1 1 220px;
+}
+
+.quick-mod-panel__compact-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.quick-mod-panel__label {
   flex: 0 0 auto;
+  color: var(--ink-muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .quick-mod-panel__identity input {
@@ -147,6 +169,7 @@ input {
 .quick-mod-panel__expanded {
   display: grid;
   gap: 10px;
+  padding-top: 2px;
 }
 
 .quick-mod-panel__danger-indicator {

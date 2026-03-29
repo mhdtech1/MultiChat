@@ -2,6 +2,18 @@
 
 All notable changes to Chatrix are documented here.
 
+## [1.0.9] – 2026-03-29
+
+### Changed
+
+- **Workspace readability** – Simplified the default workspace chrome by merging stacked status rows, reducing repeated live-summary text, and keeping more vertical space available for chat.
+- **Quick Mod defaults** – Quick Mod now stays collapsed until opened, so moderation tools are still close at hand without constantly crowding the composer area.
+- **Tab strip polish** – Cleaned up the navigation strip with quieter close controls and a calmer default tab presentation.
+
+### Fixed
+
+- **Renderer layout consistency** – Refined shell component spacing and styling so the simplified workspace layout, dock panels, and analytics surfaces render consistently across the desktop UI.
+
 ## [1.0.8] – 2026-03-28
 
 ### Added

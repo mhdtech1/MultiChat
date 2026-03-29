@@ -66,4 +66,28 @@ describe("ChatDockSidebar", () => {
     );
     expect(onOpenGlobalSearchResult).toHaveBeenCalledWith(resultMessage);
   });
+
+  it("stays hidden when every dock section is empty or disabled", () => {
+    const { container } = render(
+      <ChatDockSidebar
+        showMentions={false}
+        mentionInbox={[]}
+        onOpenMention={vi.fn()}
+        platformIconGlyph={(platform) => platform[0].toUpperCase()}
+        showGlobalTimeline={false}
+        globalSearchMode={false}
+        search=""
+        globalSearchResults={[]}
+        onOpenGlobalSearchResult={vi.fn()}
+        isAdvancedMode={false}
+        showModHistory={false}
+        moderationHistory={[]}
+        showUserCard={false}
+        identityTarget={null}
+        identityStats={{ total: 0, inLastMinute: 0, inLastFiveMinutes: 0 }}
+      />,
+    );
+
+    expect(container).toBeEmptyDOMElement();
+  });
 });

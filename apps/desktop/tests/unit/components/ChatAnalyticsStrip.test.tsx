@@ -17,11 +17,27 @@ describe("ChatAnalyticsStrip", () => {
       />,
     );
 
-    expect(screen.getByText("Msg/min: 12")).toBeInTheDocument();
+    expect(screen.getByText("Live: 12/min")).toBeInTheDocument();
     expect(screen.getByText("Chatters: 7")).toBeInTheDocument();
     expect(screen.getByText("More stats")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /close stats menu/i }));
     expect(onCloseDetailsMenu).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the strip compact when there are no overflow analytics", () => {
+    render(
+      <ChatAnalyticsStrip
+        show
+        messagesPerMinute={5}
+        activeChatters={2}
+        mentionRatePerMinute={0}
+        modActionRatePerMinute={0}
+        onCloseDetailsMenu={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Live: 5/min")).toBeInTheDocument();
+    expect(screen.queryByText("More stats")).not.toBeInTheDocument();
   });
 });

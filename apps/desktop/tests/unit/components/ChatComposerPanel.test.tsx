@@ -35,18 +35,22 @@ const baseProps = {
 };
 
 describe("ChatComposerPanel", () => {
-  it("keeps quick mod visible and disables mod actions when moderation is unavailable", () => {
+  it("keeps quick mod compact by default and expands moderation tools on demand", () => {
     render(<ChatComposerPanel {...baseProps} />);
 
     expect(screen.getByText("Quick Mod")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Timeout 1m" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Open tools" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Auto Ban ON")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open tools" }));
+    expect(screen.getByRole("button", { name: "Hide tools" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Timeout 1m" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Ban" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "More" })).toBeInTheDocument();
-    expect(
-      screen.getByText("Auto Ban ON"),
-    ).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "More" }));
     expect(screen.getByRole("button", { name: "Timeout 10m" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Unban" })).toBeDisabled();
     expect(
@@ -70,5 +74,14 @@ describe("ChatComposerPanel", () => {
     expect(screen.getByPlaceholderText("Type a message")).toBeDisabled();
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
     expect(screen.queryByText("Quick Mod")).not.toBeInTheDocument();
+  });
+
+  it("uses a clearer moderation prompt when quick mod tools are opened", () => {
+    render(<ChatComposerPanel {...baseProps} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open tools" }));
+    expect(
+      screen.getByPlaceholderText("Moderate @username"),
+    ).toBeInTheDocument();
   });
 });

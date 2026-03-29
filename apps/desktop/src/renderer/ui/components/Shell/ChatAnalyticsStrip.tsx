@@ -16,35 +16,43 @@ export function ChatAnalyticsStrip({
   onCloseDetailsMenu,
 }: ChatAnalyticsStripProps) {
   if (!show) return null;
+  const hasOverflowStats =
+    mentionRatePerMinute > 0 || modActionRatePerMinute > 0;
 
   return (
     <section className="analytics-strip" aria-label="Live analytics">
       <span className="analytics-chip strong">
-        Msg/min: {messagesPerMinute}
+        Live: {messagesPerMinute}/min
       </span>
       <span className="analytics-chip">Chatters: {activeChatters}</span>
-      <details className="analytics-more">
-        <summary>More stats</summary>
-        <div className="analytics-more-menu">
-          <div className="menu-popover-header">
-            <span>Live stats</span>
-            <button
-              type="button"
-              className="menu-close-button"
-              onClick={onCloseDetailsMenu}
-              aria-label="Close stats menu"
-            >
-              ×
-            </button>
+      {hasOverflowStats ? (
+        <details className="analytics-more">
+          <summary>More stats</summary>
+          <div className="analytics-more-menu">
+            <div className="menu-popover-header">
+              <span>Live stats</span>
+              <button
+                type="button"
+                className="menu-close-button"
+                onClick={onCloseDetailsMenu}
+                aria-label="Close stats menu"
+              >
+                ×
+              </button>
+            </div>
+            {mentionRatePerMinute > 0 ? (
+              <span className="analytics-chip">
+                Mentions/min: {mentionRatePerMinute}
+              </span>
+            ) : null}
+            {modActionRatePerMinute > 0 ? (
+              <span className="analytics-chip">
+                Mod actions/min: {modActionRatePerMinute}
+              </span>
+            ) : null}
           </div>
-          <span className="analytics-chip">
-            Mentions/min: {mentionRatePerMinute}
-          </span>
-          <span className="analytics-chip">
-            Mod actions/min: {modActionRatePerMinute}
-          </span>
-        </div>
-      </details>
+        </details>
+      ) : null}
     </section>
   );
 }
