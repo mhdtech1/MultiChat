@@ -38,6 +38,17 @@ const normalizeNonEmptyString = (value: unknown): string => {
   return typeof value === "string" ? value.trim() : "";
 };
 
+const parseRequiredString = (
+  value: string | undefined,
+  envKey: string,
+): string => {
+  const normalized = normalizeNonEmptyString(value);
+  if (!normalized) {
+    throw new Error(`${envKey} is required for the Kick broker.`);
+  }
+  return normalized;
+};
+
 const parsePort = (value: string | undefined): number => {
   const raw = normalizeNonEmptyString(value);
   if (!raw) return DEFAULT_PORT;
@@ -128,14 +139,14 @@ const parseAllowedOrigins = (value: string | undefined): string[] => {
 export const loadBrokerConfig = (
   env: NodeJS.ProcessEnv = process.env,
 ): BrokerConfig => {
-  const kickClientId = normalizeNonEmptyString(env.KICK_CLIENT_ID);
-  const kickClientSecret = normalizeNonEmptyString(env.KICK_CLIENT_SECRET);
-  if (!kickClientId) {
-    throw new Error("KICK_CLIENT_ID is required for the Kick broker.");
-  }
-  if (!kickClientSecret) {
-    throw new Error("KICK_CLIENT_SECRET is required for the Kick broker.");
-  }
+  const kickClientId = parseRequiredString(
+    env.KICK_CLIENT_ID,
+    "KICK_CLIENT_ID",
+  );
+  const kickClientSecret = parseRequiredString(
+    env.KICK_CLIENT_SECRET,
+    "KICK_CLIENT_SECRET",
+  );
 
   return {
     port: parsePort(env.PORT ?? env.KICK_BROKER_PORT),
