@@ -6,7 +6,7 @@ import type {
   ChatMessage,
 } from "../../types.js";
 import { parseIrcMessage } from "./ircParser.js";
-import { normalizeTwitchMessage } from "./normalize.js";
+import { normalizeTwitchMessage, parseTwitchBadges } from "./normalize.js";
 
 export type TwitchAuth = {
   token?: string;
@@ -90,6 +90,7 @@ export class TwitchAdapter implements ChatAdapter {
           const badges = parsed.tags.badges
             ? parsed.tags.badges.split(",").filter(Boolean)
             : [];
+          const parsedBadges = parseTwitchBadges(badges, parsed.tags.badges);
           this.selfBadges = badges;
           this.selfColor = parsed.tags.color || undefined;
           this.selfDisplayName = displayName;
@@ -105,6 +106,7 @@ export class TwitchAdapter implements ChatAdapter {
             color: this.selfColor,
             raw: {
               ...parsed.tags,
+              parsedBadges,
               selfRoleState: true,
               hidden: true,
             },
@@ -202,7 +204,10 @@ export class TwitchAdapter implements ChatAdapter {
       timestamp: new Date().toISOString(),
       badges: [...this.selfBadges],
       color: this.selfColor,
-      raw: { localEcho: true },
+      raw: {
+        localEcho: true,
+        parsedBadges: parseTwitchBadges(this.selfBadges),
+      },
     } satisfies ChatMessage);
   }
 }
