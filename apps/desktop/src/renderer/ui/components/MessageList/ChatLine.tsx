@@ -35,18 +35,27 @@ const formatTime = (timestamp: number | string) =>
     minute: "2-digit",
   });
 
-const roleFromBadge = (badge: string): RoleType | null => {
-  const key = badge.trim().toLowerCase().split(/[/:]/)[0] ?? "";
-  if (key === "broadcaster" || key === "streamer" || key === "owner")
-    return "broadcaster";
-  if (key === "moderator" || key === "mod") return "moderator";
-  if (key === "vip") return "vip";
-  if (key === "subscriber" || key === "sub") return "subscriber";
-  if (key === "founder") return "founder";
-  if (key === "prime") return "prime";
-  if (key === "staff" || key === "admin") return "staff";
-  if (key === "verified" || key === "partner") return "verified";
-  return null;
+const badgeCache = new Map<string, { setId: string; role: RoleType | null }>();
+
+const parseBadge = (badge: string): { setId: string; role: RoleType | null } => {
+  let cached = badgeCache.get(badge);
+  if (cached) return cached;
+
+  const setId = badge.trim().toLowerCase().split(/[/:]/)[0] ?? "";
+  let role: RoleType | null = null;
+  if (setId === "broadcaster" || setId === "streamer" || setId === "owner")
+    role = "broadcaster";
+  else if (setId === "moderator" || setId === "mod") role = "moderator";
+  else if (setId === "vip") role = "vip";
+  else if (setId === "subscriber" || setId === "sub") role = "subscriber";
+  else if (setId === "founder") role = "founder";
+  else if (setId === "prime") role = "prime";
+  else if (setId === "staff" || setId === "admin") role = "staff";
+  else if (setId === "verified" || setId === "partner") role = "verified";
+
+  cached = { setId, role };
+  badgeCache.set(badge, cached);
+  return cached;
 };
 
 const asRecord = (value: unknown): Record<string, unknown> | null => {
@@ -236,9 +245,8 @@ export function ChatLine({
                 );
               })}
               {fallbackBadgeValues.map((badge) => {
-                const setId = badge.trim().toLowerCase().split(/[/:]/)[0] ?? "";
+                const { setId, role } = parseBadge(badge);
                 if (renderedTwitchSetIds.has(setId)) return null;
-                const role = roleFromBadge(badge);
                 return role ? (
                   <RoleBadge
                     key={`${message.id}-${badge}`}
