@@ -312,7 +312,7 @@ export class KickAdapter implements ChatAdapter {
   private emitLocalEcho(content: string) {
     const username = this.auth.username?.trim() || "you";
     this.emitter.emit("message", {
-      id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      id: `local-${Date.now()}-${globalThis.crypto.randomUUID().slice(0, 8)}`,
       platform: "kick",
       channel: this.channel,
       username,
@@ -475,7 +475,7 @@ export class KickAdapter implements ChatAdapter {
     }
 
     return {
-      id: `event-${eventKind}-${targetMessageId || Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      id: `event-${eventKind}-${targetMessageId || Date.now()}-${globalThis.crypto.randomUUID().slice(0, 8)}`,
       platform: "kick",
       channel: this.channel,
       username: "system",
