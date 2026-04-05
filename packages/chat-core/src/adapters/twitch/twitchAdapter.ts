@@ -66,7 +66,8 @@ export class TwitchAdapter implements ChatAdapter {
         ? `oauth:${this.auth.token.replace(/^oauth:/, "")}`
         : "SCHMOOPIIE";
       const nick =
-        this.auth.username || `justinfan${globalThis.crypto.getRandomValues(new Uint32Array(1))[0] % 100000}`;
+        this.auth.username ||
+        `justinfan${globalThis.crypto.getRandomValues(new Uint32Array(1))[0] % 100000}`;
       socket.send(`PASS ${token}`);
       socket.send(`NICK ${nick}`);
       this.queueJoin(this.channel);
