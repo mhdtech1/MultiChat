@@ -66,7 +66,7 @@ export class TwitchAdapter implements ChatAdapter {
         ? `oauth:${this.auth.token.replace(/^oauth:/, "")}`
         : "SCHMOOPIIE";
       const nick =
-        this.auth.username || `justinfan${Math.floor(Math.random() * 100000)}`;
+        this.auth.username || `justinfan${globalThis.crypto.getRandomValues(new Uint32Array(1))[0] % 100000}`;
       socket.send(`PASS ${token}`);
       socket.send(`NICK ${nick}`);
       this.queueJoin(this.channel);
@@ -94,7 +94,7 @@ export class TwitchAdapter implements ChatAdapter {
           this.selfColor = parsed.tags.color || undefined;
           this.selfDisplayName = displayName;
           this.emitter.emit("message", {
-            id: `selfstate-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            id: `selfstate-${Date.now()}-${globalThis.crypto.randomUUID().slice(0, 8)}`,
             platform: "twitch",
             channel,
             username,
@@ -193,7 +193,7 @@ export class TwitchAdapter implements ChatAdapter {
 
     // Local echo so sent messages show immediately even if Twitch does not echo PRIVMSG back.
     this.emitter.emit("message", {
-      id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      id: `local-${Date.now()}-${globalThis.crypto.randomUUID().slice(0, 8)}`,
       platform: "twitch",
       channel: this.channel,
       username: this.auth.username,

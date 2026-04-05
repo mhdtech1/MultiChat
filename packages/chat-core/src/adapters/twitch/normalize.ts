@@ -16,7 +16,7 @@ const buildSystemMessage = (
   extraRaw: Record<string, unknown>,
 ): ChatMessage => {
   const channel = message.params[0]?.replace("#", "") ?? "";
-  const suffix = Math.random().toString(36).slice(2, 8);
+  const suffix = globalThis.crypto.randomUUID().slice(0, 6);
   const baseId =
     message.tags.id || message.tags["target-msg-id"] || `${timestampMs}`;
   return {
