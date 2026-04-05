@@ -61,10 +61,16 @@ const extractTwitchRoomId = (message: ChatMessage): string | null => {
   return roomId.trim() || null;
 };
 
-const getTwitchBadgeEntries = (message: ChatMessage): { setId: string; versionId: string; key: string }[] => {
+const getTwitchBadgeEntries = (
+  message: ChatMessage,
+): { setId: string; versionId: string; key: string }[] => {
   const raw = asRecord(message.raw);
   if (Array.isArray(raw?.parsedBadges)) {
-    return raw.parsedBadges as { setId: string; versionId: string; key: string }[];
+    return raw.parsedBadges as {
+      setId: string;
+      versionId: string;
+      key: string;
+    }[];
   }
   return [];
 };
