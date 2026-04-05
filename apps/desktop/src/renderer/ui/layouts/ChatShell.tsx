@@ -323,8 +323,7 @@ const formatOptionalExpiry = (value: number | null | undefined) => {
   return `${asDate.toLocaleString()} (${minutes}m left)`;
 };
 
-const createId = () =>
-  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+const createId = () => globalThis.crypto.randomUUID();
 
 const normalizeChannel = (input: string, platform: Platform = "twitch") => {
   const trimmed = input.trim().replace(/^#/, "");
