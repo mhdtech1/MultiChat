@@ -37,7 +37,9 @@ const formatTime = (timestamp: number | string) =>
 
 const badgeCache = new Map<string, { setId: string; role: RoleType | null }>();
 
-const parseBadge = (badge: string): { setId: string; role: RoleType | null } => {
+const parseBadge = (
+  badge: string,
+): { setId: string; role: RoleType | null } => {
   let cached = badgeCache.get(badge);
   if (cached) return cached;
 
