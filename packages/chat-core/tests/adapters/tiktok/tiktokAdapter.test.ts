@@ -6,7 +6,10 @@ describe("TikTokAdapter", () => {
   const mockTransport = () => {
     let eventHandler: any = null;
     return {
-      connect: vi.fn().mockResolvedValue({ connectionId: "test-conn-1", roomId: "test-room-1" }),
+      connect: vi.fn().mockResolvedValue({
+        connectionId: "test-conn-1",
+        roomId: "test-room-1",
+      }),
       disconnect: vi.fn().mockResolvedValue(undefined),
       sendMessage: vi.fn().mockResolvedValue(undefined),
       onEvent: vi.fn((handler) => {
@@ -61,7 +64,11 @@ describe("TikTokAdapter", () => {
 
     await adapter.connect();
 
-    transport.emitEvent({ connectionId: "test-conn-1", type: "error", error: "test error" });
+    transport.emitEvent({
+      connectionId: "test-conn-1",
+      type: "error",
+      error: "test error",
+    });
     expect(statuses[statuses.length - 1]).toBe("error");
   });
 
@@ -101,7 +108,9 @@ describe("TikTokAdapter", () => {
     await adapter.connect();
     await adapter.disconnect();
 
-    expect(transport.disconnect).toHaveBeenCalledWith({ connectionId: "test-conn-1" });
+    expect(transport.disconnect).toHaveBeenCalledWith({
+      connectionId: "test-conn-1",
+    });
     expect(statuses[statuses.length - 1]).toBe("disconnected");
 
     // further events should not affect anything
@@ -136,16 +145,23 @@ describe("TikTokAdapter", () => {
     const transport = mockTransport();
     const adapter = new TikTokAdapter({ channel: "testchannel", transport });
 
-    await expect(adapter.sendMessage("hello")).rejects.toThrow("TikTok connection is not ready.");
+    await expect(adapter.sendMessage("hello")).rejects.toThrow(
+      "TikTok connection is not ready.",
+    );
   });
 
   it("throws error when transport does not support sending messages", async () => {
     const transport = mockTransport();
     delete (transport as any).sendMessage; // Remove sendMessage capability
-    const adapter = new TikTokAdapter({ channel: "testchannel", transport: transport as any });
+    const adapter = new TikTokAdapter({
+      channel: "testchannel",
+      transport: transport as any,
+    });
 
     await adapter.connect();
-    await expect(adapter.sendMessage("hello")).rejects.toThrow("TikTok sending is not enabled for this alpha build.");
+    await expect(adapter.sendMessage("hello")).rejects.toThrow(
+      "TikTok sending is not enabled for this alpha build.",
+    );
   });
 
   it("ignores events from other connections", async () => {
