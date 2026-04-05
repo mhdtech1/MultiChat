@@ -7,6 +7,10 @@ import type {
 } from "../../types.js";
 import { parseIrcMessage } from "./ircParser.js";
 import { normalizeTwitchMessage } from "./normalize.js";
+import {
+  generateSecureRandomString,
+  generateSecureRandomInt,
+} from "../../utils/crypto.js";
 
 export type TwitchAuth = {
   token?: string;
@@ -66,7 +70,7 @@ export class TwitchAdapter implements ChatAdapter {
         ? `oauth:${this.auth.token.replace(/^oauth:/, "")}`
         : "SCHMOOPIIE";
       const nick =
-        this.auth.username || `justinfan${Math.floor(Math.random() * 100000)}`;
+        this.auth.username || `justinfan${generateSecureRandomInt(100000)}`;
       socket.send(`PASS ${token}`);
       socket.send(`NICK ${nick}`);
       this.queueJoin(this.channel);
@@ -94,7 +98,7 @@ export class TwitchAdapter implements ChatAdapter {
           this.selfColor = parsed.tags.color || undefined;
           this.selfDisplayName = displayName;
           this.emitter.emit("message", {
-            id: `selfstate-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            id: `selfstate-${Date.now()}-${generateSecureRandomString(6)}`,
             platform: "twitch",
             channel,
             username,
@@ -193,7 +197,7 @@ export class TwitchAdapter implements ChatAdapter {
 
     // Local echo so sent messages show immediately even if Twitch does not echo PRIVMSG back.
     this.emitter.emit("message", {
-      id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      id: `local-${Date.now()}-${generateSecureRandomString(6)}`,
       platform: "twitch",
       channel: this.channel,
       username: this.auth.username,

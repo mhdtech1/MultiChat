@@ -1,5 +1,6 @@
 import type { ChatMessage } from "../../types.js";
 import type { IrcMessage } from "./ircParser.js";
+import { generateSecureRandomString } from "../../utils/crypto.js";
 
 const unescapeIrcTagValue = (value: string) =>
   value
@@ -16,7 +17,7 @@ const buildSystemMessage = (
   extraRaw: Record<string, unknown>,
 ): ChatMessage => {
   const channel = message.params[0]?.replace("#", "") ?? "";
-  const suffix = Math.random().toString(36).slice(2, 8);
+  const suffix = generateSecureRandomString(6);
   const baseId =
     message.tags.id || message.tags["target-msg-id"] || `${timestampMs}`;
   return {
