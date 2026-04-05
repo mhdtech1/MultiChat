@@ -1186,6 +1186,7 @@ const KICK_EMOTE_URL = (id: string) =>
   `https://files.kick.com/emotes/${id}/fullsize`;
 const KICK_GLOBAL_EMOTE_URL = "https://kick.com/emotes/eddie";
 const MESSAGE_LINK_REGEX = /(?:https?:\/\/|www\.)[^\s<]+/gi;
+const KICK_NATIVE_EMOTE_REGEX = /\[emote:(\d+):([^\[\]]+)\]/g;
 const AUTO_SCROLL_BOTTOM_THRESHOLD_PX = 220;
 const COMPOSER_MESSAGE_LIMIT = 500;
 const COMPOSER_HISTORY_LIMIT = 20;
@@ -2039,13 +2040,14 @@ const parseKickNativeChunks = (
   resolveEmote: EmoteResolver,
 ): MessageChunk[] => {
   if (!rawContent) return [];
-  const regex = /\[emote:(\d+):([^[\]]+)\]/g;
   const chunks: MessageChunk[] = [];
   let lastIndex = 0;
   let matched = false;
 
+  KICK_NATIVE_EMOTE_REGEX.lastIndex = 0;
+
   while (true) {
-    const match = regex.exec(rawContent);
+    const match = KICK_NATIVE_EMOTE_REGEX.exec(rawContent);
     if (!match) break;
     matched = true;
 
