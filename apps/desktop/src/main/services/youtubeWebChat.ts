@@ -62,7 +62,7 @@ const normalizeYouTubeInput = (input: string) => {
     if (host.includes("youtube.com")) {
       const watchId = parsed.searchParams.get("v")?.trim() ?? "";
       if (watchId) return watchId;
-      const parts = parsed.pathname.split("/").filter(Boolean);
+      const parts = parsed.pathname.slice(1).split("/");
       if (parts[0] === "channel" && parts[1]) return parts[1].replace(/^@/, "");
       if (parts[0] === "c" && parts[1]) return parts[1].replace(/^@/, "");
       if (parts[0] === "user" && parts[1]) return parts[1].replace(/^@/, "");
@@ -108,7 +108,7 @@ const extractYouTubeVideoId = (input: string): string => {
       if (YOUTUBE_VIDEO_ID_REGEX.test(watchId)) {
         return watchId;
       }
-      const pathParts = url.pathname.split("/").filter(Boolean);
+      const pathParts = url.pathname.slice(1).split("/");
       if (
         pathParts[0] === "shorts" &&
         pathParts[1] &&
