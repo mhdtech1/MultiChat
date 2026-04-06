@@ -9,6 +9,38 @@ const unescapeIrcTagValue = (value: string) =>
     .replace(/\\n/g, "\n")
     .replace(/\\\\/g, "\\");
 
+export const parseTwitchBadges = (
+  badgesArray: string[],
+  rawBadgesString?: string,
+): { setId: string; versionId: string; key: string }[] => {
+  const map = new Map<
+    string,
+    { setId: string; versionId: string; key: string }
+  >();
+
+  const add = (badge: string) => {
+    if (typeof badge !== "string") return;
+    const [rawSetId, rawVersionId] = badge.split("/", 2);
+    const setId = (rawSetId ?? "").trim().toLowerCase();
+    const versionId = (rawVersionId ?? "").trim();
+    if (!setId || !versionId) return;
+    const key = `${setId}/${versionId}`;
+    if (!map.has(key)) {
+      map.set(key, { setId, versionId, key });
+    }
+  };
+
+  if (Array.isArray(badgesArray)) {
+    for (const b of badgesArray) add(b);
+  }
+
+  if (typeof rawBadgesString === "string") {
+    for (const b of rawBadgesString.split(",")) add(b);
+  }
+
+  return Array.from(map.values());
+};
+
 const buildSystemMessage = (
   message: IrcMessage,
   timestampMs: number,
@@ -45,6 +77,8 @@ export const normalizeTwitchMessage = (
   const badges = message.tags.badges
     ? message.tags.badges.split(",").filter(Boolean)
     : [];
+
+  const parsedBadges = parseTwitchBadges(badges, message.tags.badges);
   const timestampMs = message.tags["tmi-sent-ts"]
     ? Number(message.tags["tmi-sent-ts"])
     : Date.now();
@@ -60,7 +94,10 @@ export const normalizeTwitchMessage = (
       timestamp: new Date(timestampMs).toISOString(),
       badges,
       color: message.tags.color || undefined,
-      raw: message.tags,
+      raw: {
+        ...message.tags,
+        parsedBadges,
+      },
     };
   }
 
@@ -82,6 +119,7 @@ export const normalizeTwitchMessage = (
       color: message.tags.color || undefined,
       raw: {
         ...message.tags,
+        parsedBadges,
         eventType: "usernotice",
         msgId: message.tags["msg-id"] || undefined,
       },

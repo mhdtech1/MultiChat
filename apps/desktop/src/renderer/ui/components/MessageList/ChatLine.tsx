@@ -65,19 +65,6 @@ const asRecord = (value: unknown): Record<string, unknown> | null => {
   return value as Record<string, unknown>;
 };
 
-const addTwitchBadgeEntry = (
-  target: Map<string, { setId: string; versionId: string; key: string }>,
-  badge: string,
-) => {
-  const [rawSetId, rawVersionId] = badge.split("/", 2);
-  const setId = (rawSetId ?? "").trim().toLowerCase();
-  const versionId = (rawVersionId ?? "").trim();
-  if (!setId || !versionId) return;
-  const key = `${setId}/${versionId}`;
-  if (target.has(key)) return;
-  target.set(key, { setId, versionId, key });
-};
-
 const extractTwitchRoomId = (message: ChatMessage): string | null => {
   if (message.platform !== "twitch") return null;
   const raw = asRecord(message.raw);
@@ -85,25 +72,18 @@ const extractTwitchRoomId = (message: ChatMessage): string | null => {
   return roomId.trim() || null;
 };
 
-const getTwitchBadgeEntries = (message: ChatMessage) => {
-  const badges = new Map<
-    string,
-    { setId: string; versionId: string; key: string }
-  >();
-  if (Array.isArray(message.badges)) {
-    for (const badge of message.badges) {
-      if (typeof badge === "string") {
-        addTwitchBadgeEntry(badges, badge);
-      }
-    }
-  }
+const getTwitchBadgeEntries = (
+  message: ChatMessage,
+): { setId: string; versionId: string; key: string }[] => {
   const raw = asRecord(message.raw);
-  if (typeof raw?.badges === "string") {
-    for (const badge of raw.badges.split(",")) {
-      addTwitchBadgeEntry(badges, badge);
-    }
+  if (Array.isArray(raw?.parsedBadges)) {
+    return raw.parsedBadges as {
+      setId: string;
+      versionId: string;
+      key: string;
+    }[];
   }
-  return Array.from(badges.values());
+  return [];
 };
 
 const splitTrailingLinkText = (value: string) => {
