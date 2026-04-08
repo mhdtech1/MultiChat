@@ -90,16 +90,28 @@ dmg:
       path: /Applications
 win:
   target:
-    - target: nsis
+    - target: nsis-web
       arch:
         - x64
+        - arm64
   artifactName: ${productName}-win.${ext}
-nsis:
+nsisWeb:
   oneClick: true
   perMachine: false
   allowToChangeInstallationDirectory: false
   allowElevation: false
   include: public/installer.nsh
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+    - target: deb
+      arch:
+        - x64
+  artifactName: ${productName}-linux-${arch}.${ext}
+  category: Network
+  executableName: chatrix
 publish:
   provider: github
   owner: mhdtech1

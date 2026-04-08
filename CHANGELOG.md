@@ -2,6 +2,22 @@
 
 All notable changes to Chatrix are documented here.
 
+## [1.0.10] – 2026-04-08
+
+### Added
+
+- **Linux builds** – Chatrix releases now include native Linux downloads in both `AppImage` and `deb` formats for `x64` systems.
+
+### Changed
+
+- **macOS installer architecture** – The default macOS release is now a single universal build, so one installer automatically runs natively on both Apple Silicon and Intel Macs.
+- **Windows installer architecture** – Windows releases now use an auto-detecting NSIS web installer that selects the correct `x64` or `ARM64` package for the device during install.
+- **Release automation** – GitHub Actions now publishes Windows `x64` + `ARM64`, universal macOS, and Linux artifacts from the same tagged release flow.
+
+### Fixed
+
+- **Windows updater compatibility** – The desktop updater no longer disables the web-installer path, which is required for architecture-aware Windows installs and updates.
+
 ## [1.0.9] – 2026-03-29
 
 ### Changed

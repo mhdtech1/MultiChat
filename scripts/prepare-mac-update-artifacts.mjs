@@ -28,8 +28,12 @@ const desktopPkgPath = path.join(desktopDir, "package.json");
 const builderConfigPath = path.join(desktopDir, "electron-builder.yml");
 const distDir = path.join(desktopDir, "dist");
 const appPathCandidates = [
+  buildArch === "universal"
+    ? path.join(distDir, "mac-universal", `${APP_NAME}.app`)
+    : "",
   buildArch ? path.join(distDir, `mac-${buildArch}`, `${APP_NAME}.app`) : "",
   buildArch === "x64" ? path.join(distDir, "mac", `${APP_NAME}.app`) : "",
+  buildArch === "universal" ? path.join(distDir, "mac", `${APP_NAME}.app`) : "",
   path.join(distDir, "mac-arm64", `${APP_NAME}.app`),
   path.join(distDir, "mac-x64", `${APP_NAME}.app`),
   path.join(distDir, "mac", `${APP_NAME}.app`),

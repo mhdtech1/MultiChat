@@ -3508,7 +3508,7 @@ const setupAutoUpdater = () => {
       disableWebInstaller?: boolean;
     };
     windowsUpdater.autoRunAppAfterInstall = true;
-    windowsUpdater.disableWebInstaller = true;
+    windowsUpdater.disableWebInstaller = false;
   }
 
   autoUpdater.on("checking-for-update", () => {
