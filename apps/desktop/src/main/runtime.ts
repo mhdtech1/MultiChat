@@ -782,7 +782,7 @@ const normalizeTikTokChatMessage = (
   const messageId =
     asString(record.msgId).trim() ||
     asString(record.messageId).trim() ||
-    `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    `${Date.now()}-${crypto.randomUUID().split("-")[0]}`;
 
   const createdEpochRaw = Number(asString(record.createTime));
   const createdEpochMillis =
@@ -833,7 +833,7 @@ const normalizeTikTokFollowMessage = (
   const messageId =
     asString(record.msgId).trim() ||
     asString(record.messageId).trim() ||
-    `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    `${Date.now()}-${crypto.randomUUID().split("-")[0]}`;
   const createdEpochRaw = Number(asString(record.createTime));
   const createdEpochMillis =
     Number.isFinite(createdEpochRaw) && createdEpochRaw > 0
