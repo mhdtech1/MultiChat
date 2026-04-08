@@ -324,7 +324,7 @@ const formatOptionalExpiry = (value: number | null | undefined) => {
 };
 
 const createId = () =>
-  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  `${Date.now().toString(36)}-${globalThis.crypto.randomUUID().split("-")[0]}`;
 
 const normalizeChannel = (input: string, platform: Platform = "twitch") => {
   const trimmed = input.trim().replace(/^#/, "");
@@ -5813,7 +5813,7 @@ const MainApp: React.FC = () => {
 
     const appendModeratorAuditMessage = (ok: boolean, detail: string) => {
       const systemMessage: ChatMessage = {
-        id: `system-${source.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        id: `system-${source.id}-${Date.now()}-${globalThis.crypto.randomUUID().split("-")[0]}`,
         platform: source.platform,
         channel: source.channel,
         username: "system",
@@ -6278,7 +6278,7 @@ const MainApp: React.FC = () => {
       const source = sourceById.get(result.sourceId);
       if (!source) continue;
       const auditMessage: ChatMessage = {
-        id: `system-${source.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        id: `system-${source.id}-${Date.now()}-${globalThis.crypto.randomUUID().split("-")[0]}`,
         platform: source.platform,
         channel: source.channel,
         username: "system",
